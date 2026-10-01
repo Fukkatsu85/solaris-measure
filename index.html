@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Solaris Measure</title>
+  <meta name="description" content="Solaris Measure exterior measurement lab" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">SOLARIS</div>
+      <h1>Measure</h1>
+    </div>
+    <div class="badge">LAB</div>
+  </header>
+
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">EXTERIOR MEASUREMENT PLATFORM</div>
+        <h2>Turn property photos into verified roofing and siding takeoffs.</h2>
+        <p>Phase 1 focuses on guided photo capture, elevation understanding, benchmark comparison, and human correction.</p>
+      </div>
+      <button id="new-project" class="primary">New Measurement</button>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <div class="eyebrow">BENCHMARK</div>
+            <h3>Test House #001</h3>
+          </div>
+          <span class="status">Ready</span>
+        </div>
+        <p class="muted">Johnson · 2745 Sunset Lane · Burnsville, MN</p>
+
+        <div class="metrics">
+          <div class="metric">
+            <span>Benchmark siding</span>
+            <strong>1,666 ft²</strong>
+          </div>
+          <div class="metric">
+            <span>Benchmark roof</span>
+            <strong>2,543 ft²</strong>
+          </div>
+          <div class="metric">
+            <span>Siding openings</span>
+            <strong>23</strong>
+          </div>
+          <div class="metric">
+            <span>Roof facets</span>
+            <strong>6</strong>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="secondary">Open Project</button>
+          <button class="ghost">View Benchmark</button>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="eyebrow">PIPELINE</div>
+        <h3>Prototype workflow</h3>
+        <ol class="steps">
+          <li><span>1</span> Upload exterior photos</li>
+          <li><span>2</span> Classify elevations and viewpoints</li>
+          <li><span>3</span> Detect windows, doors, corners and rooflines</li>
+          <li><span>4</span> Add measurement scale</li>
+          <li><span>5</span> Review corrections</li>
+          <li><span>6</span> Generate takeoff and report</li>
+        </ol>
+      </article>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">ANALYSIS</div>
+          <h3>Feature detection benchmark</h3>
+        </div>
+        <button id="analyze" class="primary">Analyze Property</button>
+      </div>
+      <div id="analysis-state" class="analysis-state">
+        No analysis has been run yet. The first model will score object and boundary detection before absolute measurements.
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Feature</th><th>Benchmark</th><th>Solaris</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td>Siding facade sections</td><td>13</td><td>—</td><td>Pending</td></tr>
+            <tr><td>Siding openings</td><td>23</td><td>—</td><td>Pending</td></tr>
+            <tr><td>Outside corner occurrences</td><td>16</td><td>—</td><td>Pending</td></tr>
+            <tr><td>Inside corner occurrences</td><td>8</td><td>—</td><td>Pending</td></tr>
+            <tr><td>Shutters</td><td>12</td><td>—</td><td>Pending</td></tr>
+            <tr><td>Vents</td><td>2</td><td>—</td><td>Pending</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
