@@ -10,6 +10,11 @@ const TARGETS = [
   { id: "door", label: "Door", targets: ["exterior door on the house", "door"] },
   { id: "shutter", label: "Shutter", targets: ["window shutter on the house", "shutter"] },
   { id: "vent", label: "Vent", targets: ["exterior wall vent on the house", "vent"] },
+  { id: "outside_corner", label: "Outside corner", targets: ["outside vertical corner of the house exterior", "outside building corner"] },
+  { id: "inside_corner", label: "Inside corner", targets: ["inside vertical corner of the house exterior", "inside building corner"] },
+  { id: "eave", label: "Eave", targets: ["roof eave edge", "eave"] },
+  { id: "rake", label: "Rake", targets: ["sloped roof rake edge on a gable", "roof rake"] },
+  { id: "gable", label: "Gable", targets: ["gable wall area", "gable"] },
 ];
 
 const safeProjectId = (value) =>
