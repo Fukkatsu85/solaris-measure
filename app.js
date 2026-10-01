@@ -208,29 +208,43 @@ function beginDraw(wrap,type,photoKey){
 }
 
 function openZoomEditor(photoKey){
-  const photo=lastAnalysis?.photos?.find(p=>p.key===photoKey);
-  if(!photo)return;
-  const modal=document.createElement('div');
-  modal.className='zoom-modal';
-  modal.innerHTML='<div class="zoom-panel"><div class="zoom-head"><strong>'+photo.view+' · Verification Editor</strong><div class="zoom-controls"><button data-z="out">−</button><button data-z="reset">100%</button><button data-z="in">+</button><button data-close>Close</button></div></div><div class="zoom-viewport"><div class="zoom-stage"><img src="'+photo.url+'" draggable="false"></div></div><div class="zoom-help">Mouse wheel or +/− to zoom. Drag to pan. Click a colored box to reclassify or delete it.</div></div>';
+  const photo=lastAnalysis?.photos?.find(p=>p.key===photoKey); if(!photo)return;
+  const modal=document.createElement('div'); modal.className='zoom-modal';
+  modal.innerHTML='<div class="zoom-panel"><div class="zoom-head"><strong>'+photo.view+' · Verification Editor</strong><div class="zoom-controls"><button data-add>+ Add</button><button data-z="out">−</button><button data-z="reset">100%</button><button data-z="in">+</button><button data-close>Close</button></div></div><div class="zoom-viewport"><div class="zoom-stage"><img src="'+photo.url+'" draggable="false"></div></div><div class="zoom-help">Zoom and pan normally. Click a colored box to change or delete it. Click + Add, choose a type, then drag a box directly on the zoomed image.</div></div>';
   document.body.appendChild(modal);
   const viewport=modal.querySelector('.zoom-viewport'),stage=modal.querySelector('.zoom-stage');
-  let scale=1,tx=0,ty=0,drag=false,lastX=0,lastY=0;
-  const allowed=['window','door','shutter','vent','outside_corner','inside_corner','eave','rake','gable','delete'];
+  let scale=1,tx=0,ty=0,drag=false,lastX=0,lastY=0,addType=null,startPoint=null,draft=null;
+  const allowed=['window','door','shutter','vent','outside_corner','inside_corner','eave','rake','gable'];
+  const apply=()=>{stage.style.transform='translate('+tx+'px,'+ty+'px) scale('+scale+')';modal.querySelector('[data-z="reset"]').textContent=Math.round(scale*100)+'%';};
+  const stagePoint=e=>{const r=stage.getBoundingClientRect();return{x:Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),y:Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))};};
   Object.entries(photo.detections||{}).forEach(([type,list])=>(list||[]).forEach((b,index)=>{
     const el=document.createElement('button');el.className='zoom-detect detect-'+type;
-    el.style.left=pct(b.x1)+'%';el.style.top=pct(b.y1)+'%';el.style.width=(pct(b.x2)-pct(b.x1))+'%';el.style.height=(pct(b.y2)-pct(b.y1))+'%';el.textContent=type.replace('_',' ');
-    el.onclick=async e=>{e.stopPropagation();const choice=prompt('Edit '+type+'. Enter a feature type or delete:',type);if(!choice)return;const v=choice.trim().toLowerCase();if(!allowed.includes(v)){alert('Invalid feature type.');return;}const payload={projectId:PROJECT_ID,photoKey,type,index,action:v==='delete'?'delete':'retype'};if(v!=='delete')payload.newType=v;await saveCorrection(payload);modal.remove();openZoomEditor(photoKey);};stage.appendChild(el);
+    el.style.left=pct(b.x1)+'%';el.style.top=pct(b.y1)+'%';el.style.width=(pct(b.x2)-pct(b.x1))+'%';el.style.height=(pct(b.y2)-pct(b.y1))+'%';el.textContent=type.replaceAll('_',' ');
+    el.onclick=async e=>{e.stopPropagation();const choice=prompt('Edit '+type+'. Enter a feature type or delete:',type);if(!choice)return;const v=choice.trim().toLowerCase();if(![...allowed,'delete'].includes(v)){alert('Invalid feature type.');return;}const payload={projectId:PROJECT_ID,photoKey,type,index,action:v==='delete'?'delete':'retype'};if(v!=='delete')payload.newType=v;await saveCorrection(payload);modal.remove();openZoomEditor(photoKey);};stage.appendChild(el);
   }));
-  const apply=()=>{stage.style.transform='translate('+tx+'px,'+ty+'px) scale('+scale+')';modal.querySelector('[data-z="reset"]').textContent=Math.round(scale*100)+'%';};
-  apply();modal.querySelector('[data-close]').onclick=()=>modal.remove();
+  modal.querySelector('[data-add]').onclick=()=>{
+    const choice=prompt('Add: window, door, shutter, vent, outside_corner, inside_corner, eave, rake, or gable:','window');if(!choice)return;
+    const v=choice.trim().toLowerCase();if(!allowed.includes(v)){alert('Invalid feature type.');return;}
+    addType=v;viewport.classList.add('adding');modal.querySelector('.zoom-help').textContent='Draw a box around the '+v.replaceAll('_',' ')+'. Click and drag on the image.';
+  };
+  modal.querySelector('[data-close]').onclick=()=>modal.remove();
   modal.querySelector('[data-z="in"]').onclick=()=>{scale=Math.min(5,scale+.35);apply();};
   modal.querySelector('[data-z="out"]').onclick=()=>{scale=Math.max(1,scale-.35);if(scale===1){tx=0;ty=0;}apply();};
   modal.querySelector('[data-z="reset"]').onclick=()=>{scale=1;tx=0;ty=0;apply();};
-  viewport.addEventListener('wheel',e=>{e.preventDefault();scale=Math.max(1,Math.min(5,scale+(e.deltaY<0?.25:-.25)));if(scale===1){tx=0;ty=0;}apply();},{passive:false});
-  viewport.addEventListener('pointerdown',e=>{if(e.target.closest('.zoom-detect'))return;drag=true;lastX=e.clientX;lastY=e.clientY;viewport.setPointerCapture(e.pointerId);});
-  viewport.addEventListener('pointermove',e=>{if(!drag||scale===1)return;tx+=e.clientX-lastX;ty+=e.clientY-lastY;lastX=e.clientX;lastY=e.clientY;apply();});
-  viewport.addEventListener('pointerup',()=>drag=false);
+  viewport.addEventListener('wheel',e=>{e.preventDefault();if(addType)return;scale=Math.max(1,Math.min(5,scale+(e.deltaY<0?.25:-.25)));if(scale===1){tx=0;ty=0;}apply();},{passive:false});
+  viewport.addEventListener('pointerdown',e=>{
+    if(e.target.closest('.zoom-detect'))return;
+    if(addType){startPoint=stagePoint(e);draft=document.createElement('div');draft.className='draw-box detect-'+addType;stage.appendChild(draft);viewport.setPointerCapture(e.pointerId);e.preventDefault();return;}
+    drag=true;lastX=e.clientX;lastY=e.clientY;viewport.setPointerCapture(e.pointerId);
+  });
+  viewport.addEventListener('pointermove',e=>{
+    if(addType&&startPoint&&draft){const p=stagePoint(e),x1=Math.min(startPoint.x,p.x),y1=Math.min(startPoint.y,p.y),x2=Math.max(startPoint.x,p.x),y2=Math.max(startPoint.y,p.y);Object.assign(draft.style,{left:(x1*100)+'%',top:(y1*100)+'%',width:((x2-x1)*100)+'%',height:((y2-y1)*100)+'%'});return;}
+    if(!drag||scale===1)return;tx+=e.clientX-lastX;ty+=e.clientY-lastY;lastX=e.clientX;lastY=e.clientY;apply();
+  });
+  viewport.addEventListener('pointerup',async e=>{
+    if(addType&&startPoint){const p=stagePoint(e),box={x1:Math.min(startPoint.x,p.x),y1:Math.min(startPoint.y,p.y),x2:Math.max(startPoint.x,p.x),y2:Math.max(startPoint.y,p.y)},type=addType;draft?.remove();draft=null;startPoint=null;addType=null;viewport.classList.remove('adding');if(box.x2-box.x1>.003&&box.y2-box.y1>.003){await saveCorrection({projectId:PROJECT_ID,photoKey,type,action:'add',box});modal.remove();openZoomEditor(photoKey);}return;}drag=false;
+  });
+  apply();
 }
 
 async function loadAnalysis() {
