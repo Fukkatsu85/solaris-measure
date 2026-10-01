@@ -408,7 +408,7 @@ function openCalibration(){
 }
 document.querySelector('#add-calibration')?.addEventListener('click',openCalibration);
 
-async function measureCalibratedView(){const out=document.querySelector('#measurement-result');out.textContent='Calculating calibrated baseline…';const r=await fetch('/api/measure',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID})});const d=await r.json().catch(()=>({}));if(!r.ok){out.textContent=d.error||'Measurement failed.';return;}const m=d.measurement,delta=m.grossWallArea-445;out.innerHTML='<strong>'+m.view+' baseline: '+m.grossWallArea.toFixed(1)+' ft²</strong><br>Hover benchmark front: 445 ft² · Difference: '+(delta>=0?'+':'')+delta.toFixed(1)+' ft² ('+(m.errorPct>=0?'+':'')+m.errorPct.toFixed(1)+'%)<br><span class="muted">Diagnostic baseline only — perspective correction is not yet applied, so this is not an ordering measurement.</span>';}
+async function measureCalibratedView(){const out=document.querySelector('#measurement-result');out.textContent='Calculating perspective-corrected measurement…';const r=await fetch('/api/measure',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID})});const d=await r.json().catch(()=>({}));if(!r.ok){out.textContent=d.error||'Measurement failed.';return;}const m=d.measurement,delta=m.grossWallArea-445;out.innerHTML='<strong>'+m.view+' perspective-corrected: '+m.grossWallArea.toFixed(1)+' ft²</strong><br>Hover benchmark front: 445 ft² · Difference: '+(delta>=0?'+':'')+delta.toFixed(1)+' ft² ('+(m.errorPct>=0?'+':'')+m.errorPct.toFixed(1)+'%)<br><span class="muted">Planar perspective correction applied. Only wall planes coplanar with the reference rectangle are metrically valid.</span>';}
 function bindMeasureButton(){
  const btn=document.querySelector('#measure-front');
  if(!btn)return;
@@ -423,3 +423,16 @@ function bindMeasureButton(){
  };
 }
 bindMeasureButton();
+
+function openPerspectiveCalibration(){
+ if(!lastAnalysis?.photos?.length){alert('Load the project photos first.');return;}
+ const p=lastAnalysis.photos[0],modal=document.createElement('div');modal.className='zoom-modal';
+ modal.innerHTML='<div class="zoom-panel"><div class="zoom-head"><strong>Perspective calibration · '+p.view+'</strong><div class="zoom-controls"><button data-save>Save rectangle</button><button data-undo>Undo</button><button data-close>Cancel</button></div></div><div class="geo-editor cal-editor"><img src="'+p.url+'" draggable="false"><svg viewBox="0 0 100 100" preserveAspectRatio="none"></svg></div><div class="zoom-help">Click the 4 corners of a known rectangle on ONE wall plane in this order: top-left, top-right, bottom-right, bottom-left. A garage door is ideal. Then enter its exact width and height.</div></div>';
+ document.body.appendChild(modal);const ed=modal.querySelector('.cal-editor'),img=ed.querySelector('img'),svg=ed.querySelector('svg');let pts=[];
+ const sync=()=>{const r=img.getBoundingClientRect(),er=ed.getBoundingClientRect();Object.assign(svg.style,{left:(r.left-er.left)+'px',top:(r.top-er.top)+'px',width:r.width+'px',height:r.height+'px'});};
+ const draw=()=>{sync();svg.innerHTML=pts.map((q,i)=>'<circle cx="'+q.x*100+'" cy="'+q.y*100+'" r=".9"></circle><text x="'+(q.x*100+1)+'" y="'+(q.y*100-1)+'">'+(i+1)+'</text>').join('')+(pts.length>1?'<polyline points="'+pts.map(q=>q.x*100+','+q.y*100).join(' ')+'"></polyline>':'');};
+ img.addEventListener('load',sync);setTimeout(sync,0);ed.onclick=e=>{const r=img.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom||pts.length>=4)return;pts.push({x:(e.clientX-r.left)/r.width,y:(e.clientY-r.top)/r.height});draw();};
+ modal.querySelector('[data-undo]').onclick=()=>{pts.pop();draw();};modal.querySelector('[data-close]').onclick=()=>modal.remove();
+ modal.querySelector('[data-save]').onclick=async()=>{if(pts.length!==4){alert('Click all four rectangle corners first.');return;}const wf=Number(prompt('Rectangle width — feet:','16')),wi=Number(prompt('Additional width inches:','0')),hf=Number(prompt('Rectangle height — feet:','7')),hi=Number(prompt('Additional height inches:','0'));if(![wf,wi,hf,hi].every(Number.isFinite)||wf<0||hf<0||wi<0||wi>=12||hi<0||hi>=12){alert('Enter valid feet and inches.');return;}const widthFt=wf+wi/12,heightFt=hf+hi/12;if(widthFt<=0||heightFt<=0)return;const res=await fetch('/api/calibration',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID,photoKey:p.key,p1:pts[0],p2:pts[1],feet:widthFt,rectPoints:pts,widthFt,heightFt})});const d=await res.json().catch(()=>({}));if(!res.ok){alert(d.error||'Could not save perspective calibration.');return;}document.querySelector('#calibration-panel').textContent='Perspective rectangle saved: '+wf+' ft '+wi+' in × '+hf+' ft '+hi+' in on '+p.view+'.';modal.remove();};
+}
+document.querySelector('#add-perspective')?.addEventListener('click',openPerspectiveCalibration);
