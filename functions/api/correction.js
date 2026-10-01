@@ -3,10 +3,10 @@ const json = (data, status = 200) =>
 
 const safeProjectId = (value) => String(value || "").trim().toLowerCase()
   .replace(/[^a-z0-9-_]/g, "-").replace(/-+/g, "-").slice(0, 80);
-const TYPES = new Set(["window", "door", "shutter", "vent"]);
+const TYPES = new Set(["window", "door", "shutter", "vent", "outside_corner", "inside_corner", "eave", "rake", "gable"]);
 
 function recalc(analysis) {
-  analysis.totals = { window: 0, door: 0, shutter: 0, vent: 0 };
+  analysis.totals = { window: 0, door: 0, shutter: 0, vent: 0, outside_corner: 0, inside_corner: 0, eave: 0, rake: 0, gable: 0 };
   for (const p of analysis.photos || []) for (const type of TYPES)
     analysis.totals[type] += p.detections?.[type]?.length || 0;
 }
