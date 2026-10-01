@@ -382,3 +382,15 @@ document.querySelector('#preserve-verified')?.addEventListener('click',preserveV
 loadPhotos();
 loadAnalysis().then?.(()=>{});
 setTimeout(loadGeometry,800);
+
+async function buildMatching(){
+  const state=document.querySelector('#matching-state'),summary=document.querySelector('#matching-summary'),cal=document.querySelector('#calibration-panel');
+  state.textContent='Building cross-photo matching workspace…';
+  const res=await fetch('/api/matching',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID})});
+  const d=await res.json().catch(()=>({}));if(!res.ok){state.textContent=d.error||'Could not build matching map.';return;}
+  const m=d.matching,wallCount=m.photos.reduce((n,p)=>n+p.walls.length,0),gableCount=m.photos.reduce((n,p)=>n+p.gables.length,0),edgeCount=m.photos.reduce((n,p)=>n+p.edges.length,0);
+  state.textContent='Matching workspace built from '+m.photos.length+' traced photos. Candidate overlap pairs are ready for review.';
+  summary.innerHTML='<div class="metric"><span>Traced views</span><strong>'+m.photos.length+'</strong></div><div class="metric"><span>Wall planes</span><strong>'+wallCount+'</strong></div><div class="metric"><span>Gables</span><strong>'+gableCount+'</strong></div><div class="metric"><span>Edges</span><strong>'+edgeCount+'</strong></div><div class="metric"><span>Overlap pairs</span><strong>'+m.candidatePairs.length+'</strong></div>';
+  cal.textContent='Next: calibration required. We need one known real-world length on a traced wall plane before converting image geometry into feet and square feet.';
+}
+document.querySelector('#build-matching')?.addEventListener('click',buildMatching);
