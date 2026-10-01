@@ -344,9 +344,26 @@ openTestHouse?.addEventListener('click', () => {
 
 async function preserveVerified(){
   const state=document.querySelector('#geometry-state');
-  const res=await fetch('/api/verified',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID})});
-  const d=await res.json().catch(()=>({})); if(!res.ok){state.textContent=d.error||'Could not preserve verified objects.';return false;}
-  state.textContent='Verified object layer preserved. Geometry edits are stored separately.'; return true;
+  const btn=document.querySelector('#preserve-verified');
+  if(state) state.textContent='Preserving verified objects…';
+  if(btn) btn.disabled=true;
+  try{
+    const res=await fetch('/api/verified',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID})});
+    const raw=await res.text();
+    let d={};
+    try{d=raw?JSON.parse(raw):{};}catch{throw new Error('Server returned an unreadable response (HTTP '+res.status+').');}
+    if(!res.ok)throw new Error(d.error||'Could not preserve verified objects.');
+    if(state) state.textContent='✓ Verified object layer preserved. You can now run Auto Reconstruction.';
+    if(btn) btn.textContent='✓ Verified Objects Preserved';
+    return true;
+  }catch(err){
+    console.error('Preserve verified objects',err);
+    if(state) state.textContent='Preserve error: '+(err?.message||String(err));
+    alert('Preserve verified objects failed: '+(err?.message||String(err)));
+    return false;
+  }finally{
+    if(btn) btn.disabled=false;
+  }
 }
 async function loadGeometry(){
   const res=await fetch('/api/geometry?projectId='+encodeURIComponent(PROJECT_ID));const d=await res.json().catch(()=>({}));
