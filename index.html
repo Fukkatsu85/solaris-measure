@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Solaris Measure</title>
   <meta name="description" content="Solaris Measure exterior measurement lab" />
-  <link rel="stylesheet" href="/styles.css?v=20261001-zoomadd1" />
+  <link rel="stylesheet" href="/styles.css?v=20261001-geometry2" />
 </head>
 <body>
   <header class="topbar">
@@ -107,8 +107,14 @@
         </table>
       </div>
     </section>
+    <section class="card" id="geometry-card">
+      <div class="card-head"><div><div class="eyebrow">PHASE 2</div><h3>Exterior geometry</h3><p class="muted">Trace measurement geometry with lines and polygons. This is stored separately from object detections.</p></div><button id="preserve-verified" class="secondary">Preserve Verified Objects</button></div>
+      <div id="geometry-state" class="analysis-state">Loading geometry workspace…</div>
+      <div id="geometry-gallery" class="analysis-gallery"></div>
+    </section>
+
   </main>
 
-  <script src="/app.js?v=20261001-zoomadd1"></script>
+  <script src="/app.js?v=20261001-geometry2"></script>
 </body>
 </html>
