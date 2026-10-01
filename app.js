@@ -228,7 +228,7 @@ function openZoomEditor(photoKey){
     const v=choice.trim().toLowerCase();if(!allowed.includes(v)){alert('Invalid feature type.');return;}
     addType=v;viewport.classList.add('adding');modal.querySelector('.zoom-help').textContent='Draw a box around the '+v.replaceAll('_',' ')+'. Click and drag on the image.';
   };
-  modal.querySelector('[data-close]').onclick=()=>modal.remove();
+  modal.querySelector('[data-close]').onclick=()=>{window.removeEventListener('resize',syncSvg);modal.remove();};
   modal.querySelector('[data-z="in"]').onclick=()=>{scale=Math.min(5,scale+.35);apply();};
   modal.querySelector('[data-z="out"]').onclick=()=>{scale=Math.max(1,scale-.35);if(scale===1){tx=0;ty=0;}apply();};
   modal.querySelector('[data-z="reset"]').onclick=()=>{scale=1;tx=0;ty=0;apply();};
@@ -372,10 +372,10 @@ function openGeometryEditor(photoKey){
   const polygon=clean==='wall'||clean==='gable',modal=document.createElement('div');modal.className='zoom-modal';
   modal.innerHTML='<div class="zoom-panel"><div class="zoom-head"><strong>'+p.view+' · Draw '+clean.replace('_',' ')+'</strong><div class="zoom-controls"><button data-save>Save</button><button data-undo>Undo</button><button data-close>Cancel</button></div></div><div class="geo-editor"><img src="'+p.url+'" draggable="false"><svg viewBox="0 0 100 100" preserveAspectRatio="none"></svg></div><div class="zoom-help">'+(polygon?'Click each corner of the area. Use at least 3 points, then Save.':'Click the start and end points. Add more points if the edge bends, then Save.')+'</div></div>';
   document.body.appendChild(modal);const ed=modal.querySelector('.geo-editor'),svg=ed.querySelector('svg'),editorImg=ed.querySelector('img');let pts=[];
-  const redraw=()=>{svg.innerHTML=pts.map(q=>'<circle cx="'+q.x*100+'" cy="'+q.y*100+'" r=".8"></circle>').join('')+(pts.length>1?'<'+(polygon?'polygon':'polyline')+' points="'+pts.map(q=>q.x*100+','+q.y*100).join(' ')+'"></'+(polygon?'polygon':'polyline')+'>':'');};
+  const syncSvg=()=>{const r=editorImg.getBoundingClientRect(),er=ed.getBoundingClientRect();Object.assign(svg.style,{left:(r.left-er.left)+'px',top:(r.top-er.top)+'px',width:r.width+'px',height:r.height+'px'});}; const redraw=()=>{syncSvg();svg.innerHTML=pts.map(q=>'<circle cx="'+q.x*100+'" cy="'+q.y*100+'" r=".8"></circle>').join('')+(pts.length>1?'<'+(polygon?'polygon':'polyline')+' points="'+pts.map(q=>q.x*100+','+q.y*100).join(' ')+'"></'+(polygon?'polygon':'polyline')+'>':'');}; editorImg.addEventListener('load',syncSvg);window.addEventListener('resize',syncSvg);setTimeout(syncSvg,0);
   ed.onclick=e=>{const r=editorImg.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)return;pts.push({x:(e.clientX-r.left)/r.width,y:(e.clientY-r.top)/r.height});redraw();};
   modal.querySelector('[data-undo]').onclick=()=>{pts.pop();redraw();};modal.querySelector('[data-close]').onclick=()=>modal.remove();
-  modal.querySelector('[data-save]').onclick=async()=>{if(pts.length<(polygon?3:2)){alert('Add more points first.');return;}const res=await fetch('/api/geometry',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID,photoKey,type:clean,points:pts})});const d=await res.json().catch(()=>({}));if(!res.ok){alert(d.error||'Could not save geometry.');return;}geometryData=d.geometry;modal.remove();renderGeometry();document.querySelector('#geometry-state').textContent='Geometry saved separately from verified object detections.';};
+  modal.querySelector('[data-save]').onclick=async()=>{if(pts.length<(polygon?3:2)){alert('Add more points first.');return;}const res=await fetch('/api/geometry',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID,photoKey,type:clean,points:pts})});const d=await res.json().catch(()=>({}));if(!res.ok){alert(d.error||'Could not save geometry.');return;}geometryData=d.geometry;window.removeEventListener('resize',syncSvg);modal.remove();renderGeometry();document.querySelector('#geometry-state').textContent='Geometry saved separately from verified object detections.';};
 }
 document.querySelector('#preserve-verified')?.addEventListener('click',preserveVerified);
 
