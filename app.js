@@ -496,3 +496,13 @@ async function checkReconstructionReadiness(){
   finally{if(btn)btn.disabled=false;}
 }
 document.querySelector('#check-readiness')?.addEventListener('click',checkReconstructionReadiness);
+
+async function runFeatureMatching(){
+ const btn=document.querySelector('#run-feature-matching'),state=document.querySelector('#feature-match-state'),root=document.querySelector('#feature-match-results');if(!btn||!state||!root)return;
+ btn.disabled=true;state.textContent='Matching repeated exterior features across candidate photo pairs…';root.innerHTML='<p class="muted">Working…</p>';
+ try{const r=await fetch('/api/feature-matching',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID})});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Feature matching failed.');
+ const x=d.featureMatching,s=x.summary;root.innerHTML='<table><thead><tr><th>Photo pair</th><th>Object matches</th><th>Strong</th><th>Score</th><th>Status</th></tr></thead><tbody>'+x.results.map(p=>'<tr><td>'+p.viewA+' ↔ '+p.viewB+'</td><td>'+p.matches.length+'</td><td>'+p.strongMatches+'</td><td>'+p.score+'/100</td><td><strong>'+p.status+'</strong></td></tr>').join('')+'</tbody></table>';
+ state.textContent=s.usable+' usable · '+s.weak+' weak · '+s.insufficient+' insufficient out of '+s.total+' candidate pairs. '+(s.usable>=2?'Enough cross-view correspondences exist to begin camera/geometry reconstruction.':'More overlap may be needed before reliable camera reconstruction.');
+ }catch(e){state.textContent='Feature matching error: '+(e?.message||String(e));root.innerHTML='';}finally{btn.disabled=false;}
+}
+document.querySelector('#run-feature-matching')?.addEventListener('click',runFeatureMatching);
