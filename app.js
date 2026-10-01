@@ -482,26 +482,17 @@ function canonicalElevation(view){
   if(view==='right')return 'right';
   return null;
 }
-function checkReconstructionReadiness(){
-  const state=document.querySelector('#readiness-state'),root=document.querySelector('#readiness-results');
+async function checkReconstructionReadiness(){
+  const state=document.querySelector('#readiness-state'),root=document.querySelector('#readiness-results'),btn=document.querySelector('#check-readiness');
   if(!state||!root)return;
-  const photos=(lastAnalysis?.photos||[]).map(p=>({key:p.key,view:projectManifest.photoViews?.[p.key]||p.view||'unassigned'}));
-  const shapes=geometryData.photos||{};
-  const names=['front','right','rear','left'];
-  const result=names.map(name=>{
-    const direct=photos.filter(p=>p.view===name);
-    const adjacent=photos.filter(p=>canonicalElevation(p.view)===name&&p.view!==name);
-    const usable=[...direct,...adjacent].filter(p=>(shapes[p.key]||[]).some(s=>s.type==='wall'));
-    const wallPlanes=usable.reduce((n,p)=>n+(shapes[p.key]||[]).filter(s=>s.type==='wall').length,0);
-    let status='Missing',note='Take a '+name+' elevation photo.';
-    if(usable.length>=2){status='Good';note='Multiple usable views with traced wall geometry.';}
-    else if(usable.length===1){status='Limited';note='Only one usable view. Add an overlapping '+name+'-side photo for stronger reconstruction.';}
-    if(!direct.length&&usable.length){status='Limited';note='No straight '+name+' view. Add one for complete coverage.';}
-    return {name,status,views:usable.length,wallPlanes,note};
-  });
-  const good=result.filter(x=>x.status==='Good').length,limited=result.filter(x=>x.status==='Limited').length,missing=result.filter(x=>x.status==='Missing').length;
-  const badge=s=>s==='Good'?'✓ Good':s==='Limited'?'△ Limited':'✕ Missing';
-  root.innerHTML='<table><thead><tr><th>Elevation</th><th>Coverage</th><th>Usable views</th><th>Wall planes</th><th>Next capture</th></tr></thead><tbody>'+result.map(x=>'<tr><td>'+x.name[0].toUpperCase()+x.name.slice(1)+'</td><td><strong>'+badge(x.status)+'</strong></td><td>'+x.views+'</td><td>'+x.wallPlanes+'</td><td>'+x.note+'</td></tr>').join('')+'</tbody></table>';
-  state.textContent=missing?missing+' elevation'+(missing===1?' is':'s are')+' missing. Capture the requested view before treating the house as complete.':limited?good+' elevations have good coverage; '+limited+' remain limited. Extra overlapping photos are recommended.':'All four elevations have multi-view coverage and are ready for reconstruction matching.';
+  if(btn)btn.disabled=true;state.textContent='Analyzing coverage and candidate overlaps…';
+  try{
+    const r=await fetch('/api/readiness',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID})});
+    const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Coverage analysis failed.');
+    const x=d.readiness,names=['front','right','rear','left'],badge=s=>s==='good'?'✓ Good':s==='limited'?'△ Limited':'✕ Missing';
+    root.innerHTML='<table><thead><tr><th>Elevation</th><th>Coverage</th><th>Score</th><th>Usable views</th><th>Wall planes</th><th>Next capture</th></tr></thead><tbody>'+names.map(name=>{const o=x.elevations[name];return '<tr><td>'+name[0].toUpperCase()+name.slice(1)+'</td><td><strong>'+badge(o.status)+'</strong></td><td>'+o.score+'/100</td><td>'+o.usableViews+'</td><td>'+o.wallPlanes+'</td><td>'+o.recommendation+'</td></tr>';}).join('')+'</tbody></table><div class="analysis-state">'+x.summary.candidatePairs+' overlapping photo pair'+(x.summary.candidatePairs===1?'':'s')+' identified for the next reconstruction stage.</div>';
+    state.textContent=x.summary.missing?x.summary.missing+' elevation'+(x.summary.missing===1?' is':'s are')+' missing. The system will not treat the house as complete.':x.summary.limited?x.summary.good+' good · '+x.summary.limited+' limited. Additional capture is recommended before ordering-grade measurements.':'All four elevations have sufficient capture coverage.';
+  }catch(e){state.textContent='Coverage analysis error: '+(e?.message||String(e));}
+  finally{if(btn)btn.disabled=false;}
 }
 document.querySelector('#check-readiness')?.addEventListener('click',checkReconstructionReadiness);
