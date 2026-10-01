@@ -13,7 +13,8 @@ export async function onRequestPost({request,env}){try{const b=await request.jso
  const refs=(c.references||[]).filter(r=>r.p1&&r.p2&&Number(r.feet)>0),lastLine=[...refs].reverse().find(r=>r.type!=="rectangle")||refs[refs.length-1];
  if(!lastLine)return json({error:"One known-length reference is still required for absolute scale."},400);
  const scale=Number(lastLine.feet)/dist(lastLine.p1,lastLine.p2),photos=[];
- const verifiedPhotos=Array.isArray(v.photos)?v.photos:Object.entries(v.photos||{}).map(([key,value])=>({key,...(value||{})}));\n for(const vp of verifiedPhotos){const photoKey=vp.key||vp.photoKey; if(!photoKey)continue; const shapes=g.photos?.[photoKey]||[],walls=shapes.filter(s=>s.type==="wall"),view=p.photoViews?.[photoKey]||vp.view||"unassigned",elev=canonical(view);if(!walls.length)continue;
+ const verifiedPhotos=Array.isArray(v.photos)?v.photos:Object.entries(v.photos||{}).map(([key,value])=>({key,...(value||{})}));
+ for(const vp of verifiedPhotos){const photoKey=vp.key||vp.photoKey; if(!photoKey)continue; const shapes=g.photos?.[photoKey]||[],walls=shapes.filter(s=>s.type==="wall"),view=p.photoViews?.[photoKey]||vp.view||"unassigned",elev=canonical(view);if(!walls.length)continue;
   const wallImageArea=walls.reduce((n,w)=>n+area(w.points),0),gross=wallImageArea*scale*scale,objects=[];
   for(const type of ["window","door","shutter","vent"])for(const box of vp.detections?.[type]||[]){const center=boxCenter(box),wall=walls.find(w=>pointIn(center,w.points));objects.push({type,center,onWall:!!wall,wallId:wall?.id||null});}
   photos.push({photoKey,view,elevation:elev,wallCount:walls.length,grossAreaFt2:gross,objects,confidence:elev&&walls.length?"medium":"low"});
