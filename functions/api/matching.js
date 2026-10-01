@@ -1,0 +1,14 @@
+const json=(d,s=200)=>new Response(JSON.stringify(d),{status:s,headers:{"content-type":"application/json; charset=utf-8"}});
+const safe=v=>String(v||"").trim().toLowerCase().replace(/[^a-z0-9-_]/g,"-").replace(/-+/g,"-").slice(0,80);
+async function read(env,key,fallback){const o=await env.MEASURE_PHOTOS.get(key);if(!o)return fallback;try{return JSON.parse(await o.text())}catch{return fallback}}
+const centroid=s=>{const n=s.points?.length||1;return {x:(s.points||[]).reduce((a,p)=>a+p.x,0)/n,y:(s.points||[]).reduce((a,p)=>a+p.y,0)/n}};
+const area=s=>{if(!s.points||s.points.length<3)return 0;let a=0;for(let i=0;i<s.points.length;i++){const p=s.points[i],q=s.points[(i+1)%s.points.length];a+=p.x*q.y-q.x*p.y}return Math.abs(a/2)};
+export async function onRequestGet({request,env}){const id=safe(new URL(request.url).searchParams.get("projectId"));if(!id)return json({error:"projectId required"},400);return json({matching:await read(env,id+"/_matching.json",null)});}
+export async function onRequestPost({request,env}){const b=await request.json().catch(()=>({})),id=safe(b.projectId);if(!id)return json({error:"projectId required"},400);
+ const geometry=await read(env,id+"/_geometry.json",{photos:{}}),verified=await read(env,id+"/_verified.json",null),project=await read(env,id+"/_project.json",{photoViews:{}});
+ const photos=Object.entries(geometry.photos||{}).map(([photoKey,shapes])=>({photoKey,view:project.photoViews?.[photoKey]||"unassigned",walls:shapes.filter(s=>s.type==="wall").map(s=>({id:s.id,centroid:centroid(s),imageArea:area(s)})),gables:shapes.filter(s=>s.type==="gable").map(s=>({id:s.id,centroid:centroid(s),imageArea:area(s)})),edges:shapes.filter(s=>!["wall","gable"].includes(s.type)).map(s=>({id:s.id,type:s.type,points:s.points}))}));
+ const order=["front","front-right","right","rear-right","rear","rear-left","left","front-left"],rank=v=>{const i=order.indexOf(v);return i<0?99:i};
+ photos.sort((a,b)=>rank(a.view)-rank(b.view));
+ const candidatePairs=[];for(let i=0;i<photos.length;i++)for(let j=i+1;j<photos.length;j++){const d=Math.abs(rank(photos[i].view)-rank(photos[j].view));if(d<=2||d>=6)candidatePairs.push({a:photos[i].photoKey,b:photos[j].photoKey,viewA:photos[i].view,viewB:photos[j].view,status:"needs_review"});}
+ const out={version:1,createdAt:new Date().toISOString(),projectId:id,photos,candidatePairs,verifiedObjectsAvailable:!!verified,calibration:{status:"required",method:"known-length-on-wall-plane",message:"Add one known real-world length on a traced wall plane to unlock feet and square feet."}};
+ await env.MEASURE_PHOTOS.put(id+"/_matching.json",JSON.stringify(out),{httpMetadata:{contentType:"application/json"}});return json({ok:true,matching:out});}
