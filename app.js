@@ -21,6 +21,7 @@ const gallery = document.querySelector('#photo-gallery');
 const photosCard = document.querySelector('#photos-card');
 
 let projectManifest = { photoViews: {} };
+let currentPhotos = [];
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
@@ -53,11 +54,16 @@ async function saveView(photoKey, view, select) {
 }
 
 function updateClassificationStatus() {
-  const views = Object.values(projectManifest.photoViews || {});
-  const assigned = views.filter((v) => v && v !== 'unassigned').length;
-  const unique = new Set(views.filter((v) => v && v !== 'unassigned')).size;
-  if (!views.length) return;
-  uploadStatus.textContent = `${assigned} of 8 photos classified · ${unique} unique viewpoints assigned.`;
+  const keys = new Set(currentPhotos.map((p) => p.key));
+  const assignedViews = Object.entries(projectManifest.photoViews || {})
+    .filter(([key, view]) => keys.has(key) && view && view !== 'unassigned')
+    .map(([, view]) => view);
+  const assigned = assignedViews.length;
+  const unique = new Set(assignedViews).size;
+  const total = currentPhotos.length;
+  uploadStatus.textContent = total
+    ? `${assigned} of ${total} photos classified · ${unique} unique viewpoints assigned.`
+    : 'No photos uploaded yet.';
 }
 
 async function loadPhotos() {
@@ -67,7 +73,8 @@ async function loadPhotos() {
     const res = await fetch(`/api/photos?projectId=${encodeURIComponent(PROJECT_ID)}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Could not load photos.');
-    renderPhotos((data.photos || []).filter((p) => !p.key.endsWith('/_project.json')));
+    currentPhotos = (data.photos || []).filter((p) => !p.key.endsWith('/_project.json'));
+    renderPhotos(currentPhotos);
   } catch (err) {
     gallery.innerHTML = '';
     uploadStatus.textContent = err.message;
@@ -155,13 +162,28 @@ input?.addEventListener('change', async () => {
 });
 
 analyze?.addEventListener('click', () => {
-  const views = Object.values(projectManifest.photoViews || {}).filter((v) => v && v !== 'unassigned');
-  if (views.length < 8) {
-    analysisState.textContent = 'Assign all 8 photos to viewpoints before feature detection. This gives the geometry engine a reliable clockwise order around the house.';
+  const keys = new Set(currentPhotos.map((p) => p.key));
+  const views = Object.entries(projectManifest.photoViews || {})
+    .filter(([key, view]) => keys.has(key) && view && view !== 'unassigned')
+    .map(([, view]) => view);
+
+  if (!currentPhotos.length) {
+    analysisState.textContent = 'Upload at least one exterior photo before analysis.';
+    return;
+  }
+
+  if (views.length < currentPhotos.length) {
+    analysisState.textContent = `Assign viewpoints to all ${currentPhotos.length} uploaded photos before feature detection.`;
     photosCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
     return;
   }
-  analysisState.textContent = 'All viewpoints are assigned. The capture set is ready for first-pass window, door, wall-boundary, corner and roofline detection.';
+
+  if (new Set(views).size < 4) {
+    analysisState.textContent = 'The photos are classified, but we need at least 4 distinct viewpoints around the house for a useful first-pass analysis.';
+    return;
+  }
+
+  analysisState.textContent = `Capture set ready: ${currentPhotos.length} classified photos across ${new Set(views).size} viewpoints. Next step is first-pass window, door, wall-boundary, corner and roofline detection.`;
 });
 
 newProject?.addEventListener('click', () => {
