@@ -19,9 +19,11 @@ const input = document.querySelector('#photo-input');
 const uploadStatus = document.querySelector('#upload-status');
 const gallery = document.querySelector('#photo-gallery');
 const photosCard = document.querySelector('#photos-card');
+const analysisGallery = document.querySelector('#analysis-gallery');
 
 let projectManifest = { photoViews: {} };
 let currentPhotos = [];
+let lastAnalysis = null;
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
@@ -73,7 +75,7 @@ async function loadPhotos() {
     const res = await fetch(`/api/photos?projectId=${encodeURIComponent(PROJECT_ID)}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Could not load photos.');
-    currentPhotos = (data.photos || []).filter((p) => !p.key.endsWith('/_project.json'));
+    currentPhotos = (data.photos || []).filter((p) => !p.key.endsWith('/_project.json') && !p.key.endsWith('/_analysis.json'));
     renderPhotos(currentPhotos);
   } catch (err) {
     gallery.innerHTML = '';
@@ -84,7 +86,7 @@ async function loadPhotos() {
 function renderPhotos(photos) {
   if (!photos.length) {
     gallery.innerHTML = '';
-    uploadStatus.textContent = 'No photos uploaded yet. Add the 8 benchmark photos to begin.';
+    uploadStatus.textContent = 'No photos uploaded yet.';
     return;
   }
 
@@ -103,19 +105,15 @@ function renderPhotos(photos) {
         </div>
         <label class="view-label">
           Viewpoint
-          <select class="view-select" data-key="${encodeURIComponent(photo.key)}">
-            ${options}
-          </select>
+          <select class="view-select" data-key="${encodeURIComponent(photo.key)}">${options}</select>
         </label>
         <button class="delete-photo" data-key="${encodeURIComponent(photo.key)}">Remove</button>
-      </article>
-    `;
+      </article>`;
   }).join('');
 
   gallery.querySelectorAll('.view-select').forEach((select) => {
     select.addEventListener('change', () => {
-      const key = decodeURIComponent(select.dataset.key);
-      saveView(key, select.value, select);
+      saveView(decodeURIComponent(select.dataset.key), select.value, select);
     });
   });
 
@@ -134,6 +132,61 @@ function renderPhotos(photos) {
   });
 
   updateClassificationStatus();
+}
+
+function pct(v) {
+  return Math.max(0, Math.min(100, Number(v) * 100));
+}
+
+function renderAnalysis(analysis) {
+  if (!analysisGallery) return;
+  if (!analysis?.photos?.length) {
+    analysisGallery.innerHTML = '';
+    return;
+  }
+
+  const labels = { window: 'Window', door: 'Door', shutter: 'Shutter', vent: 'Vent' };
+
+  analysisGallery.innerHTML = analysis.photos.map((photo) => {
+    const boxes = Object.entries(photo.detections || {}).flatMap(([type, list]) =>
+      (list || []).map((b) => {
+        const left = pct(b.x1);
+        const top = pct(b.y1);
+        const width = Math.max(0, pct(b.x2) - left);
+        const height = Math.max(0, pct(b.y2) - top);
+        return `<div class="detect-box detect-${type}" style="left:${left}%;top:${top}%;width:${width}%;height:${height}%"><span>${labels[type] || type}</span></div>`;
+      })
+    ).join('');
+
+    const counts = Object.entries(photo.detections || {})
+      .map(([type, list]) => `${labels[type] || type}: ${(list || []).length}`)
+      .join(' · ');
+
+    return `
+      <article class="analysis-photo">
+        <div class="overlay-wrap">
+          <img src="${photo.url}" alt="${photo.view} analysis" loading="lazy" />
+          ${boxes}
+        </div>
+        <div class="analysis-caption">
+          <strong>${photo.view}</strong>
+          <span>${counts}</span>
+        </div>
+      </article>`;
+  }).join('');
+}
+
+async function loadAnalysis() {
+  try {
+    const res = await fetch(`/api/analyze?projectId=${encodeURIComponent(PROJECT_ID)}`);
+    const data = await res.json();
+    if (res.ok && data.analysis) {
+      lastAnalysis = data.analysis;
+      renderAnalysis(lastAnalysis);
+      const t = lastAnalysis.totals || {};
+      analysisState.textContent = `Last detection: ${t.window || 0} windows · ${t.door || 0} doors · ${t.shutter || 0} shutters · ${t.vent || 0} vents.`;
+    }
+  } catch {}
 }
 
 input?.addEventListener('change', async () => {
@@ -161,7 +214,7 @@ input?.addEventListener('change', async () => {
   await loadPhotos();
 });
 
-analyze?.addEventListener('click', () => {
+analyze?.addEventListener('click', async () => {
   const keys = new Set(currentPhotos.map((p) => p.key));
   const views = Object.entries(projectManifest.photoViews || {})
     .filter(([key, view]) => keys.has(key) && view && view !== 'unassigned')
@@ -179,11 +232,34 @@ analyze?.addEventListener('click', () => {
   }
 
   if (new Set(views).size < 4) {
-    analysisState.textContent = 'The photos are classified, but we need at least 4 distinct viewpoints around the house for a useful first-pass analysis.';
+    analysisState.textContent = 'We need at least 4 distinct viewpoints around the house for a useful first-pass analysis.';
     return;
   }
 
-  analysisState.textContent = `Capture set ready: ${currentPhotos.length} classified photos across ${new Set(views).size} viewpoints. Next step is first-pass window, door, wall-boundary, corner and roofline detection.`;
+  analyze.disabled = true;
+  const oldText = analyze.textContent;
+  analyze.textContent = 'Analyzing…';
+  analysisState.textContent = `Running real vision detection on ${currentPhotos.length} photos…`;
+
+  try {
+    const res = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ projectId: PROJECT_ID }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Analysis failed.');
+
+    lastAnalysis = data.analysis;
+    renderAnalysis(lastAnalysis);
+    const t = lastAnalysis.totals || {};
+    analysisState.textContent = `Detection complete: ${t.window || 0} windows · ${t.door || 0} doors · ${t.shutter || 0} shutters · ${t.vent || 0} vents. Review the boxes below for misses and false detections.`;
+  } catch (err) {
+    analysisState.textContent = `Analysis error: ${err.message}`;
+  } finally {
+    analyze.disabled = false;
+    analyze.textContent = oldText;
+  }
 });
 
 newProject?.addEventListener('click', () => {
@@ -195,3 +271,4 @@ openTestHouse?.addEventListener('click', () => {
 });
 
 loadPhotos();
+loadAnalysis();
