@@ -409,4 +409,17 @@ function openCalibration(){
 document.querySelector('#add-calibration')?.addEventListener('click',openCalibration);
 
 async function measureCalibratedView(){const out=document.querySelector('#measurement-result');out.textContent='Calculating calibrated baseline…';const r=await fetch('/api/measure',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID})});const d=await r.json().catch(()=>({}));if(!r.ok){out.textContent=d.error||'Measurement failed.';return;}const m=d.measurement,delta=m.grossWallArea-445;out.innerHTML='<strong>'+m.view+' baseline: '+m.grossWallArea.toFixed(1)+' ft²</strong><br>Hover benchmark front: 445 ft² · Difference: '+(delta>=0?'+':'')+delta.toFixed(1)+' ft² ('+(m.errorPct>=0?'+':'')+m.errorPct.toFixed(1)+'%)<br><span class="muted">Diagnostic baseline only — perspective correction is not yet applied, so this is not an ordering measurement.</span>';}
-document.querySelector('#measure-front')?.addEventListener('click',measureCalibratedView);
+function bindMeasureButton(){
+ const btn=document.querySelector('#measure-front');
+ if(!btn)return;
+ btn.onclick=async(e)=>{
+   e.preventDefault();
+   const out=document.querySelector('#measurement-result');
+   if(out) out.textContent='Calculating calibrated baseline…';
+   btn.disabled=true;
+   try{await measureCalibratedView();}
+   catch(err){console.error(err);if(out)out.textContent='Measurement error: '+(err?.message||String(err));}
+   finally{btn.disabled=false;}
+ };
+}
+bindMeasureButton();
