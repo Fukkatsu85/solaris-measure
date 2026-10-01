@@ -11,3 +11,9 @@
 button:disabled{opacity:.55;cursor:wait}
 @media(max-width:800px){.analysis-gallery{grid-template-columns:1fr}.analysis-caption{flex-direction:column}}
 .detect-box:hover{background:rgba(255,255,255,.08);box-shadow:0 0 0 2px rgba(255,255,255,.18) inset}.detect-box:disabled{opacity:.4;cursor:wait}
+.verify-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px}
+.verify-toolbar strong{text-transform:capitalize}
+.verify-toolbar .secondary{padding:7px 10px;font-size:12px}
+.verify-canvas.drawing{cursor:crosshair;touch-action:none}
+.draw-box{position:absolute;border:2px dashed currentColor;background:rgba(255,255,255,.08);pointer-events:none}
+.detect-box span{pointer-events:none}
