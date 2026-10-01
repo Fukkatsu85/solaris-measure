@@ -20,7 +20,7 @@ export async function onRequestGet({ request, env }) {
   if (!projectId) return json({ error: "projectId is required." }, 400);
 
   const listed = await env.MEASURE_PHOTOS.list({ prefix: `${projectId}/`, limit: 250 });
-  const imageObjects = listed.objects.filter((o) => !o.key.endsWith('/_project.json') && !o.key.endsWith('/_analysis.json'));
+  const imageObjects = listed.objects.filter((o) => !o.key.split('/').pop().startsWith('_'));
   return json({
     photos: imageObjects.map((o) => ({
       key: o.key,
