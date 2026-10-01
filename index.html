@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Solaris Measure</title>
   <meta name="description" content="Solaris Measure exterior measurement lab" />
-  <link rel="stylesheet" href="/styles.css?v=20261002-reconstruct1" />
+  <link rel="stylesheet" href="/styles.css?v=20261002-readiness1" />
 </head>
 <body>
   <header class="topbar">
@@ -117,8 +117,17 @@
       <div id="matching-state" class="analysis-state">Ready to build from the five traced views.</div>
       <div id="matching-summary" class="metrics"></div>
       <div id="calibration-panel" class="analysis-state">Legacy single-photo calibration is retained for diagnostics only. It is not used as a production measurement workflow.</div><details><summary>Advanced diagnostics</summary><div class="actions" style="margin-top:12px"><button id="add-calibration" class="secondary">Diagnostic Known Length</button> <button id="add-perspective" class="secondary">Diagnostic Perspective Rectangle</button> <button id="measure-front" class="secondary">Run Single-Photo Diagnostic</button></div><div id="measurement-result" class="analysis-state"></div></details>
-    </section><section class="card" id="auto-measure-card"><div class="card-head"><div><div class="eyebrow">PHASE 4</div><h3>Auto Reconstruction</h3><p class="muted">Build a house-level reconstruction workspace from the overlapping views, verified objects and traced wall geometry. Manual scale tools are no longer the primary workflow.</p></div><button id="auto-measure" class="primary">Build Auto Reconstruction</button></div><div id="auto-measure-state" class="analysis-state">Ready to reconstruct from the saved five-view dataset. No additional tracing required.</div><div id="auto-measure-results" class="table-wrap"></div></section>\n\n  </main>
+    </section>
+    <section class="card" id="readiness-card">
+      <div class="card-head">
+        <div><div class="eyebrow">CAPTURE QUALITY</div><h3>Reconstruction readiness</h3><p class="muted">Automatically checks elevation coverage before measurements are trusted.</p></div>
+        <button id="check-readiness" class="primary">Check Photo Coverage</button>
+      </div>
+      <div id="readiness-state" class="analysis-state">Ready to check the current photo set. No additional input required.</div>
+      <div id="readiness-results" class="table-wrap"></div>
+    </section>
+    <section class="card" id="auto-measure-card"><div class="card-head"><div><div class="eyebrow">PHASE 4</div><h3>Auto Reconstruction</h3><p class="muted">Build a house-level reconstruction workspace from the overlapping views, verified objects and traced wall geometry. Manual scale tools are no longer the primary workflow.</p></div><button id="auto-measure" class="primary">Build Auto Reconstruction</button></div><div id="auto-measure-state" class="analysis-state">Ready to reconstruct from the saved five-view dataset. No additional tracing required.</div><div id="auto-measure-results" class="table-wrap"></div></section>\n\n  </main>
 
-  <script src="/app.js?v=20261002-reconstruct1"></script>
+  <script src="/app.js?v=20261002-readiness1"></script>
 </body>
 </html>
