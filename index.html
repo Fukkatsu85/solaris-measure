@@ -38,26 +38,14 @@
         <p class="muted">Johnson · 2745 Sunset Lane · Burnsville, MN</p>
 
         <div class="metrics">
-          <div class="metric">
-            <span>Benchmark siding</span>
-            <strong>1,666 ft²</strong>
-          </div>
-          <div class="metric">
-            <span>Benchmark roof</span>
-            <strong>2,543 ft²</strong>
-          </div>
-          <div class="metric">
-            <span>Siding openings</span>
-            <strong>23</strong>
-          </div>
-          <div class="metric">
-            <span>Roof facets</span>
-            <strong>6</strong>
-          </div>
+          <div class="metric"><span>Benchmark siding</span><strong>1,666 ft²</strong></div>
+          <div class="metric"><span>Benchmark roof</span><strong>2,543 ft²</strong></div>
+          <div class="metric"><span>Siding openings</span><strong>23</strong></div>
+          <div class="metric"><span>Roof facets</span><strong>6</strong></div>
         </div>
 
         <div class="actions">
-          <button class="secondary">Open Project</button>
+          <button id="open-test-house" class="secondary">Open Project</button>
           <button class="ghost">View Benchmark</button>
         </div>
       </article>
@@ -74,6 +62,23 @@
           <li><span>6</span> Generate takeoff and report</li>
         </ol>
       </article>
+    </section>
+
+    <section id="photos-card" class="card">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">TEST HOUSE #001</div>
+          <h3>Property photos</h3>
+          <p class="muted">Upload the original exterior photos used for the benchmark report.</p>
+        </div>
+        <label class="primary upload-button">
+          Add Photos
+          <input id="photo-input" type="file" accept="image/*" multiple hidden />
+        </label>
+      </div>
+
+      <div id="upload-status" class="analysis-state">No photos loaded yet.</div>
+      <div id="photo-gallery" class="photo-gallery"></div>
     </section>
 
     <section class="card">
