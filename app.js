@@ -140,74 +140,69 @@ function pct(v) {
 
 function renderAnalysis(analysis) {
   if (!analysisGallery) return;
-  if (!analysis?.photos?.length) {
-    analysisGallery.innerHTML = '';
-    return;
-  }
-
+  if (!analysis?.photos?.length) { analysisGallery.innerHTML = ''; return; }
   const labels = { window: 'Window', door: 'Door', shutter: 'Shutter', vent: 'Vent' };
 
   analysisGallery.innerHTML = analysis.photos.map((photo) => {
     const boxes = Object.entries(photo.detections || {}).flatMap(([type, list]) =>
       (list || []).map((b, index) => {
-        const left = pct(b.x1);
-        const top = pct(b.y1);
-        const width = Math.max(0, pct(b.x2) - left);
-        const height = Math.max(0, pct(b.y2) - top);
-        return `<button class="detect-box detect-${type}" data-photo-key="${encodeURIComponent(photo.key)}" data-type="${type}" data-index="${index}" title="Click to mark this detection false" style="left:${left}%;top:${top}%;width:${width}%;height:${height}%"><span>${labels[type] || type} ×</span></button>`;
-      })
-    ).join('');
-
-    const counts = Object.entries(photo.detections || {})
-      .map(([type, list]) => `${labels[type] || type}: ${(list || []).length}`)
-      .join(' · ');
-
-    return `
-      <article class="analysis-photo">
-        <div class="overlay-wrap">
-          <img src="${photo.url}" alt="${photo.view} analysis" loading="lazy" />
-          ${boxes}
-        </div>
-        <div class="analysis-caption">
-          <strong>${photo.view}</strong>
-          <span>${counts}</span>
-        </div>
-      </article>`;
+        const left=pct(b.x1), top=pct(b.y1), width=Math.max(0,pct(b.x2)-left), height=Math.max(0,pct(b.y2)-top);
+        return `<button class="detect-box detect-${type}" data-photo-key="${encodeURIComponent(photo.key)}" data-type="${type}" data-index="${index}" style="left:${left}%;top:${top}%;width:${width}%;height:${height}%"><span>${labels[type]||type}</span></button>`;
+      })).join('');
+    const counts=Object.entries(photo.detections||{}).map(([type,list])=>`${labels[type]||type}: ${(list||[]).length}`).join(' · ');
+    return `<article class="analysis-photo">
+      <div class="verify-toolbar">
+        <strong>${photo.view}</strong>
+        <button class="secondary add-feature" data-photo-key="${encodeURIComponent(photo.key)}">+ Add missing feature</button>
+      </div>
+      <div class="overlay-wrap verify-canvas" data-photo-key="${encodeURIComponent(photo.key)}">
+        <img src="${photo.url}" alt="${photo.view} analysis" draggable="false" />${boxes}
+      </div>
+      <div class="analysis-caption"><span>${counts}</span><span>Click a box to edit it.</span></div>
+    </article>`;
   }).join('');
 
-  analysisGallery.querySelectorAll('.detect-box').forEach((box) => {
-    box.addEventListener('click', async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
+  analysisGallery.querySelectorAll('.detect-box').forEach(box => box.addEventListener('click', async e => {
+    e.preventDefault(); e.stopPropagation();
+    const oldType=box.dataset.type;
+    const choice=prompt(`Edit ${oldType}. Type window, door, shutter, vent, or delete:`, oldType);
+    if (!choice) return;
+    const value=choice.trim().toLowerCase();
+    if (!['window','door','shutter','vent','delete'].includes(value)) { alert('Use window, door, shutter, vent, or delete.'); return; }
+    const payload={projectId:PROJECT_ID,photoKey:decodeURIComponent(box.dataset.photoKey),type:oldType,index:Number(box.dataset.index),action:value==='delete'?'delete':'retype'};
+    if(value!=='delete') payload.newType=value;
+    await saveCorrection(payload);
+  }));
 
-      const label = box.querySelector('span')?.textContent?.replace(' ×', '') || 'detection';
-      if (!confirm(`Mark this ${label.toLowerCase()} as a false detection?`)) return;
+  analysisGallery.querySelectorAll('.add-feature').forEach(btn => btn.addEventListener('click', () => {
+    const wrap=btn.closest('.analysis-photo').querySelector('.verify-canvas');
+    const type=prompt('What are you adding? window, door, shutter, or vent:', 'window');
+    if(!type) return;
+    const clean=type.trim().toLowerCase();
+    if(!['window','door','shutter','vent'].includes(clean)){alert('Use window, door, shutter, or vent.');return;}
+    analysisState.textContent=`Draw a box around the missing ${clean}: click and drag across the photo.`;
+    beginDraw(wrap, clean, decodeURIComponent(btn.dataset.photoKey));
+  }));
+}
 
-      box.disabled = true;
-      const res = await fetch('/api/correction', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          projectId: PROJECT_ID,
-          photoKey: decodeURIComponent(box.dataset.photoKey),
-          type: box.dataset.type,
-          index: Number(box.dataset.index),
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
+async function saveCorrection(payload){
+  const res=await fetch('/api/correction',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok){alert(data.error||'Could not save correction.');return;}
+  lastAnalysis=data.analysis; renderAnalysis(lastAnalysis);
+  const t=lastAnalysis.totals||{};
+  analysisState.textContent=`Verification saved: ${t.window||0} windows · ${t.door||0} doors · ${t.shutter||0} shutters · ${t.vent||0} vents.`;
+}
 
-      if (!res.ok) {
-        box.disabled = false;
-        alert(data.error || 'Could not save correction.');
-        return;
-      }
-
-      lastAnalysis = data.analysis;
-      renderAnalysis(lastAnalysis);
-      const t = lastAnalysis.totals || {};
-      analysisState.textContent = `Correction saved: ${t.window || 0} windows · ${t.door || 0} doors · ${t.shutter || 0} shutters · ${t.vent || 0} vents.`;
-    });
-  });
+function beginDraw(wrap,type,photoKey){
+  wrap.classList.add('drawing');
+  let start=null, draft=null;
+  const point=e=>{const r=wrap.getBoundingClientRect();return{x:Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),y:Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))};};
+  const down=e=>{if(e.target.closest('.detect-box'))return;start=point(e);draft=document.createElement('div');draft.className=`draw-box detect-${type}`;wrap.appendChild(draft);e.preventDefault();};
+  const move=e=>{if(!start||!draft)return;const p=point(e),x1=Math.min(start.x,p.x),y1=Math.min(start.y,p.y),x2=Math.max(start.x,p.x),y2=Math.max(start.y,p.y);Object.assign(draft.style,{left:`${x1*100}%`,top:`${y1*100}%`,width:`${(x2-x1)*100}%`,height:`${(y2-y1)*100}%`});};
+  const up=async e=>{if(!start)return;const p=point(e),box={x1:Math.min(start.x,p.x),y1:Math.min(start.y,p.y),x2:Math.max(start.x,p.x),y2:Math.max(start.y,p.y)};cleanup();if(box.x2-box.x1>.01&&box.y2-box.y1>.01)await saveCorrection({projectId:PROJECT_ID,photoKey,type,action:'add',box});};
+  const cleanup=()=>{wrap.classList.remove('drawing');wrap.removeEventListener('pointerdown',down);window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);draft?.remove();};
+  wrap.addEventListener('pointerdown',down);window.addEventListener('pointermove',move);window.addEventListener('pointerup',up);
 }
 
 async function loadAnalysis() {
