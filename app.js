@@ -394,3 +394,16 @@ async function buildMatching(){
   cal.textContent='Next: calibration required. We need one known real-world length on a traced wall plane before converting image geometry into feet and square feet.';
 }
 document.querySelector('#build-matching')?.addEventListener('click',buildMatching);
+
+function openCalibration(){
+ if(!lastAnalysis?.photos?.length){alert('Load the project photos first.');return;}
+ const p=lastAnalysis.photos[0],modal=document.createElement('div');modal.className='zoom-modal';
+ modal.innerHTML='<div class="zoom-panel"><div class="zoom-head"><strong>Calibration · '+p.view+'</strong><div class="zoom-controls"><button data-save>Save length</button><button data-close>Cancel</button></div></div><div class="geo-editor cal-editor"><img src="'+p.url+'" draggable="false"><svg viewBox="0 0 100 100" preserveAspectRatio="none"></svg></div><div class="zoom-help">Click the two endpoints of one known dimension on this photo. Then enter its real length in feet.</div></div>';
+ document.body.appendChild(modal);const ed=modal.querySelector('.cal-editor'),img=ed.querySelector('img'),svg=ed.querySelector('svg');let pts=[];
+ const sync=()=>{const r=img.getBoundingClientRect(),er=ed.getBoundingClientRect();Object.assign(svg.style,{left:(r.left-er.left)+'px',top:(r.top-er.top)+'px',width:r.width+'px',height:r.height+'px'});};
+ const draw=()=>{sync();svg.innerHTML=pts.map(q=>'<circle cx="'+q.x*100+'" cy="'+q.y*100+'" r=".9"></circle>').join('')+(pts.length===2?'<polyline points="'+pts.map(q=>q.x*100+','+q.y*100).join(' ')+'"></polyline>':'');};
+ img.addEventListener('load',sync);setTimeout(sync,0);ed.onclick=e=>{const r=img.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)return;if(pts.length===2)pts=[];pts.push({x:(e.clientX-r.left)/r.width,y:(e.clientY-r.top)/r.height});draw();};
+ modal.querySelector('[data-close]').onclick=()=>modal.remove();
+ modal.querySelector('[data-save]').onclick=async()=>{if(pts.length!==2){alert('Click exactly two endpoints first.');return;}const raw=prompt('Known real-world length in feet (example: 16):');const feet=Number(raw);if(!Number.isFinite(feet)||feet<=0){alert('Enter a valid length in feet.');return;}const res=await fetch('/api/calibration',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID,photoKey:p.key,p1:pts[0],p2:pts[1],feet})});const d=await res.json().catch(()=>({}));if(!res.ok){alert(d.error||'Could not save calibration.');return;}document.querySelector('#calibration-panel').textContent='Calibration saved: '+feet+' ft reference on '+p.view+'. Next we can solve measurements on this wall plane.';modal.remove();};
+}
+document.querySelector('#add-calibration')?.addEventListener('click',openCalibration);
