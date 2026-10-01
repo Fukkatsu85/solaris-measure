@@ -473,3 +473,35 @@ async function runAutoMeasure(){
 }
 function bindAutoMeasure(){const btn=document.querySelector('#auto-measure');if(btn)btn.onclick=e=>{e.preventDefault();runAutoMeasure();};}
 bindAutoMeasure();
+
+
+function canonicalElevation(view){
+  if(view==='front'||view==='front-left'||view==='front-right')return 'front';
+  if(view==='rear'||view==='rear-left'||view==='rear-right')return 'rear';
+  if(view==='left')return 'left';
+  if(view==='right')return 'right';
+  return null;
+}
+function checkReconstructionReadiness(){
+  const state=document.querySelector('#readiness-state'),root=document.querySelector('#readiness-results');
+  if(!state||!root)return;
+  const photos=(lastAnalysis?.photos||[]).map(p=>({key:p.key,view:projectManifest.photoViews?.[p.key]||p.view||'unassigned'}));
+  const shapes=geometryData.photos||{};
+  const names=['front','right','rear','left'];
+  const result=names.map(name=>{
+    const direct=photos.filter(p=>p.view===name);
+    const adjacent=photos.filter(p=>canonicalElevation(p.view)===name&&p.view!==name);
+    const usable=[...direct,...adjacent].filter(p=>(shapes[p.key]||[]).some(s=>s.type==='wall'));
+    const wallPlanes=usable.reduce((n,p)=>n+(shapes[p.key]||[]).filter(s=>s.type==='wall').length,0);
+    let status='Missing',note='Take a '+name+' elevation photo.';
+    if(usable.length>=2){status='Good';note='Multiple usable views with traced wall geometry.';}
+    else if(usable.length===1){status='Limited';note='Only one usable view. Add an overlapping '+name+'-side photo for stronger reconstruction.';}
+    if(!direct.length&&usable.length){status='Limited';note='No straight '+name+' view. Add one for complete coverage.';}
+    return {name,status,views:usable.length,wallPlanes,note};
+  });
+  const good=result.filter(x=>x.status==='Good').length,limited=result.filter(x=>x.status==='Limited').length,missing=result.filter(x=>x.status==='Missing').length;
+  const badge=s=>s==='Good'?'✓ Good':s==='Limited'?'△ Limited':'✕ Missing';
+  root.innerHTML='<table><thead><tr><th>Elevation</th><th>Coverage</th><th>Usable views</th><th>Wall planes</th><th>Next capture</th></tr></thead><tbody>'+result.map(x=>'<tr><td>'+x.name[0].toUpperCase()+x.name.slice(1)+'</td><td><strong>'+badge(x.status)+'</strong></td><td>'+x.views+'</td><td>'+x.wallPlanes+'</td><td>'+x.note+'</td></tr>').join('')+'</tbody></table>';
+  state.textContent=missing?missing+' elevation'+(missing===1?' is':'s are')+' missing. Capture the requested view before treating the house as complete.':limited?good+' elevations have good coverage; '+limited+' remain limited. Extra overlapping photos are recommended.':'All four elevations have multi-view coverage and are ready for reconstruction matching.';
+}
+document.querySelector('#check-readiness')?.addEventListener('click',checkReconstructionReadiness);
