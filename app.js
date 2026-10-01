@@ -24,6 +24,7 @@ const analysisGallery = document.querySelector('#analysis-gallery');
 let projectManifest = { photoViews: {} };
 let currentPhotos = [];
 let lastAnalysis = null;
+let geometryData = { photos: {} };
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
@@ -341,5 +342,40 @@ openTestHouse?.addEventListener('click', () => {
   photosCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 
+async function preserveVerified(){
+  const state=document.querySelector('#geometry-state');
+  const res=await fetch('/api/verified',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID})});
+  const d=await res.json().catch(()=>({})); if(!res.ok){state.textContent=d.error||'Could not preserve verified objects.';return false;}
+  state.textContent='Verified object layer preserved. Geometry edits are stored separately.'; return true;
+}
+async function loadGeometry(){
+  const res=await fetch('/api/geometry?projectId='+encodeURIComponent(PROJECT_ID));const d=await res.json().catch(()=>({}));
+  if(res.ok)geometryData=d.geometry||{photos:{}};renderGeometry();
+}
+function renderGeometry(){
+  const root=document.querySelector('#geometry-gallery');if(!root||!lastAnalysis)return;
+  root.innerHTML=lastAnalysis.photos.map(p=>{
+    const shapes=geometryData.photos?.[p.key]||[];
+    const svg=shapes.map(s=>{const pts=s.points.map(q=>(q.x*100)+','+(q.y*100)).join(' ');const tag=(s.type==='wall'||s.type==='gable')?'polygon':'polyline';return '<'+tag+' class="geo-shape geo-'+s.type+'" points="'+pts+'" vector-effect="non-scaling-stroke" data-shape="'+s.id+'" data-photo="'+encodeURIComponent(p.key)+'"></'+tag+'>';}).join('');
+    return '<article class="analysis-photo"><div class="verify-toolbar"><strong>'+p.view+'</strong><div class="verify-actions"><button class="secondary geo-draw" data-key="'+encodeURIComponent(p.key)+'">Draw geometry</button></div></div><div class="geo-wrap"><img src="'+p.url+'"><svg viewBox="0 0 100 100" preserveAspectRatio="none">'+svg+'</svg></div><div class="analysis-caption"><span>'+shapes.length+' geometry shapes</span><span>Click a line/polygon to delete it.</span></div></article>';
+  }).join('');
+  root.querySelectorAll('.geo-draw').forEach(b=>b.onclick=()=>openGeometryEditor(decodeURIComponent(b.dataset.key)));
+  root.querySelectorAll('.geo-shape').forEach(s=>s.onclick=async()=>{if(!confirm('Delete this '+s.classList[1].replace('geo-','').replace('_',' ')+'?'))return;const res=await fetch('/api/geometry',{method:'DELETE',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID,photoKey:decodeURIComponent(s.dataset.photo),shapeId:s.dataset.shape})});const d=await res.json();geometryData=d.geometry;renderGeometry();});
+}
+function openGeometryEditor(photoKey){
+  const p=lastAnalysis.photos.find(x=>x.key===photoKey);if(!p)return;
+  const type=prompt('Geometry type: wall, gable, outside_corner, inside_corner, eave, rake, ridge, or valley:','wall');if(!type)return;
+  const clean=type.trim().toLowerCase(),allowed=['wall','gable','outside_corner','inside_corner','eave','rake','ridge','valley'];if(!allowed.includes(clean)){alert('Invalid geometry type.');return;}
+  const polygon=clean==='wall'||clean==='gable',modal=document.createElement('div');modal.className='zoom-modal';
+  modal.innerHTML='<div class="zoom-panel"><div class="zoom-head"><strong>'+p.view+' · Draw '+clean.replace('_',' ')+'</strong><div class="zoom-controls"><button data-save>Save</button><button data-undo>Undo</button><button data-close>Cancel</button></div></div><div class="geo-editor"><img src="'+p.url+'" draggable="false"><svg viewBox="0 0 100 100" preserveAspectRatio="none"></svg></div><div class="zoom-help">'+(polygon?'Click each corner of the area. Use at least 3 points, then Save.':'Click the start and end points. Add more points if the edge bends, then Save.')+'</div></div>';
+  document.body.appendChild(modal);const ed=modal.querySelector('.geo-editor'),svg=ed.querySelector('svg');let pts=[];
+  const redraw=()=>{svg.innerHTML=pts.map(q=>'<circle cx="'+q.x*100+'" cy="'+q.y*100+'" r=".8"></circle>').join('')+(pts.length>1?'<'+(polygon?'polygon':'polyline')+' points="'+pts.map(q=>q.x*100+','+q.y*100).join(' ')+'"></'+(polygon?'polygon':'polyline')+'>':'');};
+  ed.onclick=e=>{const r=ed.getBoundingClientRect();pts.push({x:(e.clientX-r.left)/r.width,y:(e.clientY-r.top)/r.height});redraw();};
+  modal.querySelector('[data-undo]').onclick=()=>{pts.pop();redraw();};modal.querySelector('[data-close]').onclick=()=>modal.remove();
+  modal.querySelector('[data-save]').onclick=async()=>{if(pts.length<(polygon?3:2)){alert('Add more points first.');return;}const res=await fetch('/api/geometry',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID,photoKey,type:clean,points:pts})});const d=await res.json().catch(()=>({}));if(!res.ok){alert(d.error||'Could not save geometry.');return;}geometryData=d.geometry;modal.remove();renderGeometry();document.querySelector('#geometry-state').textContent='Geometry saved separately from verified object detections.';};
+}
+document.querySelector('#preserve-verified')?.addEventListener('click',preserveVerified);
+
 loadPhotos();
-loadAnalysis();
+loadAnalysis().then?.(()=>{});
+setTimeout(loadGeometry,800);
