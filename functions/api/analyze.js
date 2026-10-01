@@ -6,10 +6,10 @@ const json = (data, status = 200) =>
 
 const MODEL = "@cf/moondream/moondream3.1-9B-A2B";
 const TARGETS = [
-  { id: "window", label: "Window", target: "window" },
-  { id: "door", label: "Door", target: "exterior door" },
-  { id: "shutter", label: "Shutter", target: "window shutter" },
-  { id: "vent", label: "Vent", target: "exterior wall vent" },
+  { id: "window", label: "Window", targets: ["window on the exterior of the house", "window"] },
+  { id: "door", label: "Door", targets: ["exterior door on the house", "door"] },
+  { id: "shutter", label: "Shutter", targets: ["window shutter on the house", "shutter"] },
+  { id: "vent", label: "Vent", targets: ["exterior wall vent on the house", "vent"] },
 ];
 
 const safeProjectId = (value) =>
@@ -46,15 +46,30 @@ function normalizeBox(obj) {
   return { x1, y1, x2, y2 };
 }
 
-async function detect(env, image, target) {
+async function detect(env, image, targets) {
+  for (const target of targets) {
+    const result = await env.AI.run(MODEL, {
+      task: "detect",
+      image,
+      target,
+      max_objects: 80,
+      stream: false,
+    });
+    const objects = result?.objects || result?.result?.objects || [];
+    const boxes = objects.map(normalizeBox).filter(Boolean);
+    if (boxes.length) return { boxes, target };
+  }
+  return { boxes: [], target: targets[0] };
+}
+
+async function caption(env, image) {
   const result = await env.AI.run(MODEL, {
-    task: "detect",
+    task: "caption",
     image,
-    target,
-    max_objects: 80,
+    caption_length: "short",
+    stream: false,
   });
-  const objects = result?.objects || result?.result?.objects || [];
-  return objects.map(normalizeBox).filter(Boolean);
+  return result?.caption || result?.result?.caption || "";
 }
 
 export async function onRequestGet({ request, env }) {
@@ -90,15 +105,21 @@ export async function onRequestPost({ request, env }) {
     const bytes = new Uint8Array(await object.arrayBuffer());
     const dataUri = `data:${type};base64,${bytesToBase64(bytes)}`;
 
+    const imageCaption = await caption(env, dataUri);
     const detections = {};
+    const matchedTargets = {};
     for (const t of TARGETS) {
-      detections[t.id] = await detect(env, dataUri, t.target);
+      const detected = await detect(env, dataUri, t.targets);
+      detections[t.id] = detected.boxes;
+      matchedTargets[t.id] = detected.target;
     }
 
     results.push({
       key: meta.key,
       view: manifest.photoViews?.[meta.key] || "unassigned",
       url: `/api/photo?key=${encodeURIComponent(meta.key)}`,
+      caption: imageCaption,
+      matchedTargets,
       detections,
     });
   }
