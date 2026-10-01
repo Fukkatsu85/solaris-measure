@@ -24,3 +24,5 @@ button:disabled{opacity:.55;cursor:wait}
 .geo-wrap,.geo-editor{position:relative;background:#071019}.geo-wrap img,.geo-editor img{display:block;width:100%;height:auto}.geo-wrap svg,.geo-editor svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}.geo-shape{fill:rgba(98,199,255,.12);stroke:#62c7ff;stroke-width:2;cursor:pointer;pointer-events:stroke}.geo-gable{stroke:#f1fa8c}.geo-outside_corner{stroke:#ff8c69}.geo-inside_corner{stroke:#f4a261}.geo-eave{stroke:#00d4ff}.geo-rake{stroke:#ff5ca8}.geo-ridge{stroke:#8bd17c}.geo-valley{stroke:#c792ea}.geo-editor{position:relative;width:100%;height:auto;overflow:hidden;line-height:0}.geo-editor svg{cursor:crosshair}.geo-editor svg circle{fill:#fff;stroke:#071019;stroke-width:.25}.geo-editor svg polygon,.geo-editor svg polyline{fill:rgba(98,199,255,.12);stroke:#62c7ff;stroke-width:.45}
 
 .geo-editor>img{display:block;width:100%;height:auto}.geo-editor>svg{position:absolute;inset:0;width:100%;height:100%}
+
+.geo-editor>svg{right:auto;bottom:auto;pointer-events:none}.geo-editor{line-height:0}.geo-editor>img{margin:0;padding:0}
