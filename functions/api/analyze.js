@@ -96,7 +96,7 @@ export async function onRequestPost({ request, env }) {
 
   const manifest = await readJson(env, `${projectId}/_project.json`, { photoViews: {} });
   const listed = await env.MEASURE_PHOTOS.list({ prefix: `${projectId}/`, limit: 250 });
-  const photos = listed.objects.filter(o => !o.key.endsWith("/_project.json") && !o.key.endsWith("/_analysis.json"));
+  const photos = listed.objects.filter((o) => !o.key.split('/').pop().startsWith('_'));
 
   if (!photos.length) return json({ error: "No photos found." }, 400);
 
