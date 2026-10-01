@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Solaris Measure</title>
   <meta name="description" content="Solaris Measure exterior measurement lab" />
-  <link rel="stylesheet" href="/styles.css?v=20261002-readiness1" />
+  <link rel="stylesheet" href="/styles.css?v=20261002-matching1" />
 </head>
 <body>
   <header class="topbar">
@@ -126,8 +126,16 @@
       <div id="readiness-state" class="analysis-state">Ready to check the current photo set. No additional input required.</div>
       <div id="readiness-results" class="table-wrap"></div>
     </section>
+    <section class="card" id="feature-match-card">
+      <div class="card-head">
+        <div><div class="eyebrow">PHASE 4</div><h3>Cross-photo feature matching</h3><p class="muted">Automatically tests the candidate overlaps and scores which photo pairs are usable for 3D reconstruction.</p></div>
+        <button id="run-feature-matching" class="primary">Match Overlapping Photos</button>
+      </div>
+      <div id="feature-match-state" class="analysis-state">Ready to test the saved candidate photo pairs. No additional input required.</div>
+      <div id="feature-match-results" class="table-wrap"></div>
+    </section>
     <section class="card" id="auto-measure-card"><div class="card-head"><div><div class="eyebrow">PHASE 4</div><h3>Auto Reconstruction</h3><p class="muted">Build a house-level reconstruction workspace from the overlapping views, verified objects and traced wall geometry. Manual scale tools are no longer the primary workflow.</p></div><button id="auto-measure" class="primary">Build Auto Reconstruction</button></div><div id="auto-measure-state" class="analysis-state">Ready to reconstruct from the saved five-view dataset. No additional tracing required.</div><div id="auto-measure-results" class="table-wrap"></div></section>\n\n  </main>
 
-  <script src="/app.js?v=20261002-readiness1"></script>
+  <script src="/app.js?v=20261002-matching1"></script>
 </body>
 </html>
