@@ -437,5 +437,22 @@ function openPerspectiveCalibration(){
 }
 document.querySelector('#add-perspective')?.addEventListener('click',openPerspectiveCalibration);
 
-async function runAutoMeasure(){const btn=document.querySelector('#auto-measure'),state=document.querySelector('#auto-measure-state'),root=document.querySelector('#auto-measure-results');btn.disabled=true;state.textContent='Auto-measuring house from saved geometry and verified objects…';root.innerHTML='';try{const r=await fetch('/api/auto-measure',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID})}),d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Auto Measure failed.');const x=d.result,n=v=>Number.isFinite(v)?v.toFixed(1):'—',row=(name,o)=>'<tr><td>'+name+'</td><td>'+n(o.areaFt2)+' ft²</td><td>'+o.benchmark+' ft²</td><td>'+n(o.differenceFt2)+' ft²</td><td>'+n(o.errorPct)+'%</td><td>'+(o.sourceView||o.status)+'</td></tr>';root.innerHTML='<table><thead><tr><th>Elevation</th><th>Solaris</th><th>Hover benchmark</th><th>Difference</th><th>Error</th><th>Source</th></tr></thead><tbody>'+row('Front',x.elevations.front)+row('Right',x.elevations.right)+row('Left',x.elevations.left)+row('Rear',x.elevations.rear)+'<tr><th>Whole house</th><th>'+n(x.totalAreaFt2)+' ft²</th><th>1,666 ft²</th><th>'+n(x.totalDifferenceFt2)+' ft²</th><th>'+n(x.totalErrorPct)+'%</th><th>'+(x.complete?'4 elevations':'partial')+'</th></tr></tbody></table>';state.textContent='Auto Measure complete. These are independent Solaris estimates; Hover values are shown only for validation.';}catch(e){state.textContent='Auto Measure error: '+e.message;}finally{btn.disabled=false;}}
-document.querySelector('#auto-measure')?.addEventListener('click',runAutoMeasure);
+async function runAutoMeasure(){
+ const btn=document.querySelector('#auto-measure'),state=document.querySelector('#auto-measure-state'),root=document.querySelector('#auto-measure-results');
+ if(!btn||!state||!root)return;
+ btn.disabled=true;state.textContent='Auto-measuring house from saved geometry and verified objects…';root.innerHTML='<p class="muted">Working…</p>';
+ try{
+  const r=await fetch('/api/auto-measure',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID})});
+  const raw=await r.text();let d={};try{d=raw?JSON.parse(raw):{}}catch{throw Error('Server returned an unreadable response (HTTP '+r.status+').');}
+  if(!r.ok)throw Error(d.error||('Auto Measure failed (HTTP '+r.status+').'));
+  if(!d.result||!d.result.elevations)throw Error('Auto Measure returned no elevation results.');
+  const x=d.result,n=v=>Number.isFinite(Number(v))?Number(v).toFixed(1):'—';
+  const row=(name,o={})=>'<tr><td>'+name+'</td><td>'+n(o.areaFt2)+' ft²</td><td>'+n(o.benchmark)+' ft²</td><td>'+n(o.differenceFt2)+' ft²</td><td>'+n(o.errorPct)+'%</td><td>'+(o.sourceView||o.status||'—')+'</td></tr>';
+  root.innerHTML='<table><thead><tr><th>Elevation</th><th>Solaris</th><th>Hover benchmark</th><th>Difference</th><th>Error</th><th>Source</th></tr></thead><tbody>'+row('Front',x.elevations.front)+row('Right',x.elevations.right)+row('Left',x.elevations.left)+row('Rear',x.elevations.rear)+'<tr><th>Whole house</th><th>'+n(x.totalAreaFt2)+' ft²</th><th>1,666.0 ft²</th><th>'+n(x.totalDifferenceFt2)+' ft²</th><th>'+n(x.totalErrorPct)+'%</th><th>'+(x.complete?'4 elevations':'partial')+'</th></tr></tbody></table>';
+  state.textContent='Auto Measure complete. Hover values are validation only.';
+ }catch(e){
+  console.error('Auto Measure',e);state.textContent='Auto Measure error: '+(e?.message||String(e));root.innerHTML='<div class="analysis-state"><strong>Could not calculate results.</strong><br>'+(e?.message||String(e))+'</div>';
+ }finally{btn.disabled=false;}
+}
+function bindAutoMeasure(){const btn=document.querySelector('#auto-measure');if(btn)btn.onclick=e=>{e.preventDefault();runAutoMeasure();};}
+bindAutoMeasure();
