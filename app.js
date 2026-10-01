@@ -141,7 +141,7 @@ function pct(v) {
 function renderAnalysis(analysis) {
   if (!analysisGallery) return;
   if (!analysis?.photos?.length) { analysisGallery.innerHTML = ''; return; }
-  const labels = { window: 'Window', door: 'Door', shutter: 'Shutter', vent: 'Vent' };
+  const labels = { window:'Window', door:'Door', shutter:'Shutter', vent:'Vent', outside_corner:'Outside corner', inside_corner:'Inside corner', eave:'Eave', rake:'Rake', gable:'Gable' };
 
   analysisGallery.innerHTML = analysis.photos.map((photo) => {
     const boxes = Object.entries(photo.detections || {}).flatMap(([type, list]) =>
@@ -153,7 +153,7 @@ function renderAnalysis(analysis) {
     return `<article class="analysis-photo">
       <div class="verify-toolbar">
         <strong>${photo.view}</strong>
-        <button class="secondary add-feature" data-photo-key="${encodeURIComponent(photo.key)}">+ Add missing feature</button>
+        <div class="verify-actions"><button class="secondary zoom-feature" data-photo-key="${encodeURIComponent(photo.key)}">Zoom / Edit</button><button class="secondary add-feature" data-photo-key="${encodeURIComponent(photo.key)}">+ Add feature</button></div>
       </div>
       <div class="overlay-wrap verify-canvas" data-photo-key="${encodeURIComponent(photo.key)}">
         <img src="${photo.url}" alt="${photo.view} analysis" draggable="false" />${boxes}
@@ -168,18 +168,20 @@ function renderAnalysis(analysis) {
     const choice=prompt(`Edit ${oldType}. Type window, door, shutter, vent, or delete:`, oldType);
     if (!choice) return;
     const value=choice.trim().toLowerCase();
-    if (!['window','door','shutter','vent','delete'].includes(value)) { alert('Use window, door, shutter, vent, or delete.'); return; }
+    if (!['window','door','shutter','vent','outside_corner','inside_corner','eave','rake','gable','delete'].includes(value)) { alert('Invalid feature type.'); return; }
     const payload={projectId:PROJECT_ID,photoKey:decodeURIComponent(box.dataset.photoKey),type:oldType,index:Number(box.dataset.index),action:value==='delete'?'delete':'retype'};
     if(value!=='delete') payload.newType=value;
     await saveCorrection(payload);
   }));
 
+  analysisGallery.querySelectorAll('.zoom-feature').forEach(btn => btn.addEventListener('click', () => openZoomEditor(decodeURIComponent(btn.dataset.photoKey))));
+
   analysisGallery.querySelectorAll('.add-feature').forEach(btn => btn.addEventListener('click', () => {
     const wrap=btn.closest('.analysis-photo').querySelector('.verify-canvas');
-    const type=prompt('What are you adding? window, door, shutter, or vent:', 'window');
+    const type=prompt('Add: window, door, shutter, vent, outside_corner, inside_corner, eave, rake, or gable:', 'window');
     if(!type) return;
     const clean=type.trim().toLowerCase();
-    if(!['window','door','shutter','vent'].includes(clean)){alert('Use window, door, shutter, or vent.');return;}
+    if(!['window','door','shutter','vent','outside_corner','inside_corner','eave','rake','gable'].includes(clean)){alert('Invalid feature type.');return;}
     analysisState.textContent=`Draw a box around the missing ${clean}: click and drag across the photo.`;
     beginDraw(wrap, clean, decodeURIComponent(btn.dataset.photoKey));
   }));
@@ -203,6 +205,32 @@ function beginDraw(wrap,type,photoKey){
   const up=async e=>{if(!start)return;const p=point(e),box={x1:Math.min(start.x,p.x),y1:Math.min(start.y,p.y),x2:Math.max(start.x,p.x),y2:Math.max(start.y,p.y)};cleanup();if(box.x2-box.x1>.01&&box.y2-box.y1>.01)await saveCorrection({projectId:PROJECT_ID,photoKey,type,action:'add',box});};
   const cleanup=()=>{wrap.classList.remove('drawing');wrap.removeEventListener('pointerdown',down);window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);draft?.remove();};
   wrap.addEventListener('pointerdown',down);window.addEventListener('pointermove',move);window.addEventListener('pointerup',up);
+}
+
+function openZoomEditor(photoKey){
+  const photo=lastAnalysis?.photos?.find(p=>p.key===photoKey);
+  if(!photo)return;
+  const modal=document.createElement('div');
+  modal.className='zoom-modal';
+  modal.innerHTML='<div class="zoom-panel"><div class="zoom-head"><strong>'+photo.view+' · Verification Editor</strong><div class="zoom-controls"><button data-z="out">−</button><button data-z="reset">100%</button><button data-z="in">+</button><button data-close>Close</button></div></div><div class="zoom-viewport"><div class="zoom-stage"><img src="'+photo.url+'" draggable="false"></div></div><div class="zoom-help">Mouse wheel or +/− to zoom. Drag to pan. Click a colored box to reclassify or delete it.</div></div>';
+  document.body.appendChild(modal);
+  const viewport=modal.querySelector('.zoom-viewport'),stage=modal.querySelector('.zoom-stage');
+  let scale=1,tx=0,ty=0,drag=false,lastX=0,lastY=0;
+  const allowed=['window','door','shutter','vent','outside_corner','inside_corner','eave','rake','gable','delete'];
+  Object.entries(photo.detections||{}).forEach(([type,list])=>(list||[]).forEach((b,index)=>{
+    const el=document.createElement('button');el.className='zoom-detect detect-'+type;
+    el.style.left=pct(b.x1)+'%';el.style.top=pct(b.y1)+'%';el.style.width=(pct(b.x2)-pct(b.x1))+'%';el.style.height=(pct(b.y2)-pct(b.y1))+'%';el.textContent=type.replace('_',' ');
+    el.onclick=async e=>{e.stopPropagation();const choice=prompt('Edit '+type+'. Enter a feature type or delete:',type);if(!choice)return;const v=choice.trim().toLowerCase();if(!allowed.includes(v)){alert('Invalid feature type.');return;}const payload={projectId:PROJECT_ID,photoKey,type,index,action:v==='delete'?'delete':'retype'};if(v!=='delete')payload.newType=v;await saveCorrection(payload);modal.remove();openZoomEditor(photoKey);};stage.appendChild(el);
+  }));
+  const apply=()=>{stage.style.transform='translate('+tx+'px,'+ty+'px) scale('+scale+')';modal.querySelector('[data-z="reset"]').textContent=Math.round(scale*100)+'%';};
+  apply();modal.querySelector('[data-close]').onclick=()=>modal.remove();
+  modal.querySelector('[data-z="in"]').onclick=()=>{scale=Math.min(5,scale+.35);apply();};
+  modal.querySelector('[data-z="out"]').onclick=()=>{scale=Math.max(1,scale-.35);if(scale===1){tx=0;ty=0;}apply();};
+  modal.querySelector('[data-z="reset"]').onclick=()=>{scale=1;tx=0;ty=0;apply();};
+  viewport.addEventListener('wheel',e=>{e.preventDefault();scale=Math.max(1,Math.min(5,scale+(e.deltaY<0?.25:-.25)));if(scale===1){tx=0;ty=0;}apply();},{passive:false});
+  viewport.addEventListener('pointerdown',e=>{if(e.target.closest('.zoom-detect'))return;drag=true;lastX=e.clientX;lastY=e.clientY;viewport.setPointerCapture(e.pointerId);});
+  viewport.addEventListener('pointermove',e=>{if(!drag||scale===1)return;tx+=e.clientX-lastX;ty+=e.clientY-lastY;lastX=e.clientX;lastY=e.clientY;apply();});
+  viewport.addEventListener('pointerup',()=>drag=false);
 }
 
 async function loadAnalysis() {
