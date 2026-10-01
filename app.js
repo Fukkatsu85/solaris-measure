@@ -149,12 +149,12 @@ function renderAnalysis(analysis) {
 
   analysisGallery.innerHTML = analysis.photos.map((photo) => {
     const boxes = Object.entries(photo.detections || {}).flatMap(([type, list]) =>
-      (list || []).map((b) => {
+      (list || []).map((b, index) => {
         const left = pct(b.x1);
         const top = pct(b.y1);
         const width = Math.max(0, pct(b.x2) - left);
         const height = Math.max(0, pct(b.y2) - top);
-        return `<div class="detect-box detect-${type}" style="left:${left}%;top:${top}%;width:${width}%;height:${height}%"><span>${labels[type] || type}</span></div>`;
+        return `<button class="detect-box detect-${type}" data-photo-key="${encodeURIComponent(photo.key)}" data-type="${type}" data-index="${index}" title="Click to mark this detection false" style="left:${left}%;top:${top}%;width:${width}%;height:${height}%"><span>${labels[type] || type} ×</span></button>`;
       })
     ).join('');
 
@@ -174,6 +174,40 @@ function renderAnalysis(analysis) {
         </div>
       </article>`;
   }).join('');
+
+  analysisGallery.querySelectorAll('.detect-box').forEach((box) => {
+    box.addEventListener('click', async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const label = box.querySelector('span')?.textContent?.replace(' ×', '') || 'detection';
+      if (!confirm(`Mark this ${label.toLowerCase()} as a false detection?`)) return;
+
+      box.disabled = true;
+      const res = await fetch('/api/correction', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          projectId: PROJECT_ID,
+          photoKey: decodeURIComponent(box.dataset.photoKey),
+          type: box.dataset.type,
+          index: Number(box.dataset.index),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        box.disabled = false;
+        alert(data.error || 'Could not save correction.');
+        return;
+      }
+
+      lastAnalysis = data.analysis;
+      renderAnalysis(lastAnalysis);
+      const t = lastAnalysis.totals || {};
+      analysisState.textContent = `Correction saved: ${t.window || 0} windows · ${t.door || 0} doors · ${t.shutter || 0} shutters · ${t.vent || 0} vents.`;
+    });
+  });
 }
 
 async function loadAnalysis() {
