@@ -515,3 +515,14 @@ async function runFeatureMatching(){
 }
 function bindFeatureMatching(){const btn=document.querySelector('#run-feature-matching');if(btn)btn.onclick=e=>{e.preventDefault();runFeatureMatching();};}
 bindFeatureMatching();
+
+async function processProperty(){
+ const btn=document.querySelector('#process-property'),state=document.querySelector('#process-state'),root=document.querySelector('#process-results');if(!btn||!state||!root)return;
+ btn.disabled=true;btn.textContent='Processing…';state.textContent='Checking coverage, matching views and building the house reconstruction workspace…';root.innerHTML='<div class="analysis-state">Processing property…</div>';
+ try{const r=await fetch('/api/process-property',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID})});const raw=await r.text();let d={};try{d=raw?JSON.parse(raw):{}}catch{throw Error('Unreadable server response (HTTP '+r.status+').')}if(!r.ok)throw Error(d.error||'Property processing failed.');
+ const x=d.pipeline,names=['front','right','rear','left'],label=s=>s==='good'?'✓ Good':s==='limited'?'△ Limited':'✕ Missing';
+ root.innerHTML='<div class="metrics"><div class="metric"><span>Reconstruction confidence</span><strong>'+x.confidence+'%</strong></div><div class="metric"><span>Candidate overlaps</span><strong>'+x.matching.candidatePairs+'</strong></div><div class="metric"><span>Usable matches</span><strong>'+x.matching.usable+'</strong></div><div class="metric"><span>Pipeline status</span><strong>'+x.status.replaceAll('-',' ')+'</strong></div></div><table><thead><tr><th>Elevation</th><th>Coverage</th><th>Score</th><th>Views</th><th>Wall planes</th><th>Action</th></tr></thead><tbody>'+names.map(n=>{const e=x.elevations[n];return '<tr><td>'+n[0].toUpperCase()+n.slice(1)+'</td><td><strong>'+label(e.status)+'</strong></td><td>'+e.score+'/100</td><td>'+e.usableViews+'</td><td>'+e.wallPlanes+'</td><td>'+e.recommendation+'</td></tr>'}).join('')+'</tbody></table>';
+ state.textContent=x.status==='reconstruction-ready'?'Automated pre-reconstruction passed. The next engine can solve shared geometry from the usable cross-photo network.':x.status==='incomplete'?'Property is incomplete. Missing elevations are clearly flagged instead of generating fake measurements.':'More overlapping imagery is recommended before metric reconstruction.';
+ }catch(e){state.textContent='Process Property error: '+(e?.message||String(e));root.innerHTML='<div class="analysis-state">'+(e?.message||String(e))+'</div>';}finally{btn.disabled=false;btn.textContent='Process Property';}
+}
+document.querySelector('#process-property')?.addEventListener('click',e=>{e.preventDefault();processProperty();});
