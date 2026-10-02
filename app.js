@@ -558,10 +558,10 @@ document.querySelector('#build-house-model')?.addEventListener('click',function(
 function waitForCv(ms=20000){return new Promise((resolve,reject)=>{const start=Date.now(),tick=()=>{if(window.cv&&cv.Mat){resolve(cv);return}if(Date.now()-start>ms){reject(new Error('OpenCV did not load'));return}setTimeout(tick,200)};tick()})}
 async function loadMatchImage(key){
  const img=new Image();img.crossOrigin='anonymous';img.src='/api/photo?key='+encodeURIComponent(key);await img.decode();
- const max=1100,scale=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight)),canvas=document.createElement('canvas');canvas.width=Math.round(img.naturalWidth*scale);canvas.height=Math.round(img.naturalHeight*scale);canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);return canvas;
+ const max=640,scale=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight)),canvas=document.createElement('canvas');canvas.width=Math.round(img.naturalWidth*scale);canvas.height=Math.round(img.naturalHeight*scale);canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);return canvas;
 }
 async function pixelMatchPair(pair){
- await waitForCv();const [ca,cb]=await Promise.all([loadMatchImage(pair.a),loadMatchImage(pair.b)]);let a=cv.imread(ca),b=cv.imread(cb),ga=new cv.Mat(),gb=new cv.Mat(),ka=new cv.KeyPointVector(),kb=new cv.KeyPointVector(),da=new cv.Mat(),db=new cv.Mat(),mask=new cv.Mat(),orb=new cv.ORB(1800);
+ await waitForCv();const [ca,cb]=await Promise.all([loadMatchImage(pair.a),loadMatchImage(pair.b)]);let a=cv.imread(ca),b=cv.imread(cb),ga=new cv.Mat(),gb=new cv.Mat(),ka=new cv.KeyPointVector(),kb=new cv.KeyPointVector(),da=new cv.Mat(),db=new cv.Mat(),mask=new cv.Mat(),orb=new cv.ORB(700);
  try{cv.cvtColor(a,ga,cv.COLOR_RGBA2GRAY);cv.cvtColor(b,gb,cv.COLOR_RGBA2GRAY);orb.detectAndCompute(ga,mask,ka,da);orb.detectAndCompute(gb,mask,kb,db);if(da.empty()||db.empty())return {...pair,keypointsA:ka.size(),keypointsB:kb.size(),rawMatches:0,goodMatches:0,inliers:0,inlierRatio:0,status:'insufficient'};
   let matcher=new cv.BFMatcher(cv.NORM_HAMMING,false),knn=new cv.DMatchVectorVector();matcher.knnMatch(da,db,knn,2);let ptsA=[],ptsB=[],good=0;
   for(let i=0;i<knn.size();i++){let v=knn.get(i);if(v.size()>=2){let m=v.get(0),n=v.get(1);if(m.distance<0.72*n.distance){let p=ka.get(m.queryIdx).pt,q=kb.get(m.trainIdx).pt;ptsA.push(p.x,p.y);ptsB.push(q.x,q.y);good++}}v.delete()}
@@ -572,6 +572,6 @@ async function pixelMatchPair(pair){
 async function runPixelGeometry(){
  const state=document.querySelector('#pixel-match-state');if(state)state.textContent='Pixel geometry: loading OpenCV and matching overlapping photos...';
  const r=await fetch('/api/process-property?projectId='+encodeURIComponent(PROJECT_ID)),d=await r.json();const pairs=d.pipeline?.matching?.results||[];if(!pairs.length)throw new Error('No candidate overlap pairs found.');
- const out=[];for(let i=0;i<pairs.length;i++){if(state)state.textContent='Pixel geometry: pair '+(i+1)+' of '+pairs.length+'...';out.push(await pixelMatchPair(pairs[i]));}
+ const out=[];for(let i=0;i<pairs.length;i++){if(state)state.textContent='Pixel geometry: pair '+(i+1)+' of '+pairs.length+'...';await new Promise(function(resolve){setTimeout(resolve,40)});out.push(await pixelMatchPair(pairs[i]));await new Promise(function(resolve){setTimeout(resolve,40)});}
  const save=await fetch('/api/pixel-matches',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID,pairs:out})}),sd=await save.json();if(!save.ok)throw new Error(sd.error||'Could not save pixel matches');if(state)state.textContent='Pixel geometry: '+sd.pixelMatches.summary.usable+' usable, '+sd.pixelMatches.summary.weak+' weak of '+sd.pixelMatches.summary.pairs+' overlap pairs.';return sd.pixelMatches;
 }
