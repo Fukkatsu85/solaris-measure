@@ -3,7 +3,7 @@ export const LEARNED_ROOF_PRIORS = {
  sampleCount:10,
  profiles:{
   simple:{maxCandidateAdds:4,maxLineExtensionM:4.5,candidateConnectM:3.5,minFaceAreaM2:2.6,nodeSnapM:.42},
-  compound:{maxCandidateAdds:12,maxLineExtensionM:7,candidateConnectM:5,minFaceAreaM2:1.1,nodeSnapM:.32},
+  compound:{maxCandidateAdds:6,maxLineExtensionM:5.8,candidateConnectM:4.2,minFaceAreaM2:1.9,nodeSnapM:.36},
   hip:{maxCandidateAdds:12,maxLineExtensionM:7,candidateConnectM:5,minFaceAreaM2:1.2,nodeSnapM:.30},
   mixedFlat:{maxCandidateAdds:12,maxLineExtensionM:6.5,candidateConnectM:4.8,minFaceAreaM2:.9,nodeSnapM:.30},
   smallFacet:{maxCandidateAdds:14,maxLineExtensionM:7.5,candidateConnectM:5.2,minFaceAreaM2:.65,nodeSnapM:.28},
