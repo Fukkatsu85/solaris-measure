@@ -1029,6 +1029,7 @@ async function decodeRoofLidar(){
   if(badge)badge.textContent='Points decoded';
   if(status)status.textContent='Roof LiDAR decoded ✓ · '+Number(result.inside||0).toLocaleString()+' points inside the accepted roof · '+Number(result.surfacePoints?.length||0).toLocaleString()+' surface cells retained.';
   if(vstatus)vstatus.textContent='Top-down LiDAR roof surface · elevation range '+zr+' m · brighter/warmer points are higher. White line is the accepted aerial roof outline.';
+  const planePanel=document.querySelector('#roof-plane-panel');if(planePanel)planePanel.hidden=false;
   saved.lidarDecodedSummary={decoded:result.decoded,inside:result.inside,surfaceCells:result.surfacePoints?.length||0,minZ:result.minZ,maxZ:result.maxZ,decodedAt:new Date().toISOString()};
   localStorage.setItem('solarisRoofProject',JSON.stringify(saved));
  }catch(err){
@@ -1036,3 +1037,97 @@ async function decodeRoofLidar(){
  }finally{if(btn)btn.disabled=false}
 }
 document.querySelector('#decode-roof-lidar')?.addEventListener('click',decodeRoofLidar);
+
+let roofPlaneProposals=[];
+function fitPlane3(p1,p2,p3,ox,oy){
+ const x1=p1.x-ox,y1=p1.y-oy,z1=p1.z,x2=p2.x-ox,y2=p2.y-oy,z2=p2.z,x3=p3.x-ox,y3=p3.y-oy,z3=p3.z;
+ const den=x1*(y2-y3)+x2*(y3-y1)+x3*(y1-y2);if(Math.abs(den)<1e-9)return null;
+ const a=(z1*(y2-y3)+z2*(y3-y1)+z3*(y1-y2))/den;
+ const b=(z1*(x3-x2)+z2*(x1-x3)+z3*(x2-x1))/den;
+ const c=(z1*(x2*y3-x3*y2)+z2*(x3*y1-x1*y3)+z3*(x1*y2-x2*y1))/den;
+ return{a,b,c};
+}
+function planeResidual(p,pl,ox,oy){return Math.abs(p.z-(pl.a*(p.x-ox)+pl.b*(p.y-oy)+pl.c))}
+function refinePlane(points,ox,oy){
+ let sxx=0,syy=0,sxy=0,sx=0,sy=0,sxz=0,syz=0,sz=0,n=points.length;
+ for(const p of points){const x=p.x-ox,y=p.y-oy,z=p.z;sxx+=x*x;syy+=y*y;sxy+=x*y;sx+=x;sy+=y;sxz+=x*z;syz+=y*z;sz+=z}
+ const A=[[sxx,sxy,sx],[sxy,syy,sy],[sx,sy,n]],B=[sxz,syz,sz];
+ for(let i=0;i<3;i++){let m=i;for(let j=i+1;j<3;j++)if(Math.abs(A[j][i])>Math.abs(A[m][i]))m=j;[A[i],A[m]]=[A[m],A[i]];[B[i],B[m]]=[B[m],B[i]];
+  const d=A[i][i];if(Math.abs(d)<1e-10)return null;for(let j=i;j<3;j++)A[i][j]/=d;B[i]/=d;
+  for(let k=0;k<3;k++)if(k!==i){const f=A[k][i];for(let j=i;j<3;j++)A[k][j]-=f*A[i][j];B[k]-=f*B[i]}
+ }
+ return{a:B[0],b:B[1],c:B[2]};
+}
+function lcg(seed){let s=seed>>>0;return()=>((s=(1664525*s+1013904223)>>>0)/4294967296)}
+function fitRoofPlanesFromPoints(points){
+ if(!points||points.length<120)throw new Error('Not enough roof surface points to fit planes.');
+ const ox=points.reduce((s,p)=>s+p.x,0)/points.length,oy=points.reduce((s,p)=>s+p.y,0)/points.length;
+ let remaining=points.map((p,i)=>({...p,_i:i})),planes=[],rand=lcg(24681357),facetId=1;
+ while(remaining.length>=90&&planes.length<10){
+  let best=null,bestInliers=[];
+  const iterations=Math.min(900,Math.max(350,remaining.length));
+  for(let it=0;it<iterations;it++){
+   const p1=remaining[Math.floor(rand()*remaining.length)],p2=remaining[Math.floor(rand()*remaining.length)],p3=remaining[Math.floor(rand()*remaining.length)];
+   const pl=fitPlane3(p1,p2,p3,ox,oy);if(!pl)continue;
+   const slope=Math.hypot(pl.a,pl.b);if(slope>.95)continue;
+   const ins=[];for(const p of remaining)if(planeResidual(p,pl,ox,oy)<.18)ins.push(p);
+   if(ins.length>bestInliers.length){best=pl;bestInliers=ins}
+  }
+  if(!best||bestInliers.length<80)break;
+  const refined=refinePlane(bestInliers,ox,oy)||best;
+  const inliers=remaining.filter(p=>planeResidual(p,refined,ox,oy)<.20);
+  if(inliers.length<80)break;
+  const set=new Set(inliers.map(p=>p._i));remaining=remaining.filter(p=>!set.has(p._i));
+  const slope=Math.hypot(refined.a,refined.b),slopeDeg=Math.atan(slope)*180/Math.PI,pitch12=12*slope;
+  let az=(Math.atan2(refined.a,refined.b)*180/Math.PI+360)%360;
+  let rmse=Math.sqrt(inliers.reduce((s,p)=>{const r=planeResidual(p,refined,ox,oy);return s+r*r},0)/inliers.length);
+  const xs=inliers.map(p=>p.x),ys=inliers.map(p=>p.y);
+  planes.push({id:'facet-'+facetId++,accepted:true,pointCount:inliers.length,pitch12,slopeDeg,azimuthDeg:az,rmse,coefficients:refined,bounds:{minX:Math.min(...xs),maxX:Math.max(...xs),minY:Math.min(...ys),maxY:Math.max(...ys)},points:inliers});
+ }
+ return planes.sort((a,b)=>b.pointCount-a.pointCount);
+}
+function renderRoofPlanePreview(){
+ if(!roofLidarDecoded?.surfacePoints?.length)return;
+ const canvas=document.querySelector('#roof-lidar-canvas');if(!canvas)return;
+ const ctx=canvas.getContext('2d'),w=canvas.width,h=canvas.height,q=roofLidarDecoded.queryBounds;
+ ctx.fillStyle='#111';ctx.fillRect(0,0,w,h);
+ const sx=x=>(x-q[0])/(q[2]-q[0])*w,sy=y=>h-(y-q[1])/(q[3]-q[1])*h;
+ const palette=['#ef4444','#22c55e','#3b82f6','#f59e0b','#a855f7','#06b6d4','#f97316','#84cc16','#ec4899','#14b8a6'];
+ const assigned=new Map();roofPlaneProposals.forEach((pl,i)=>pl.points?.forEach(p=>assigned.set(p._i,palette[i%palette.length])));
+ for(const p of roofLidarDecoded.surfacePoints){ctx.fillStyle=assigned.get(p._i)||'#555';ctx.fillRect(sx(p.x)-2,sy(p.y)-2,4,4)}
+ if(roofLidarDecoded.polygon?.length){ctx.beginPath();roofLidarDecoded.polygon.forEach((p,i)=>{const x=sx(p.x),y=sy(p.y);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.closePath();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke()}
+}
+function renderRoofPlaneList(){
+ const list=document.querySelector('#roof-plane-list'),count=document.querySelector('#roof-plane-count');if(count)count.textContent=roofPlaneProposals.length+' facets';
+ if(!list)return;
+ list.innerHTML=roofPlaneProposals.map((p,i)=>'<div style="display:grid;grid-template-columns:minmax(90px,1fr) repeat(4,minmax(70px,auto));gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid #e5e7eb"><label><input type="checkbox" data-plane-accept="'+i+'" '+(p.accepted?'checked':'')+'> <strong>Facet '+(i+1)+'</strong></label><span>'+p.pointCount+' pts</span><span>'+p.pitch12.toFixed(1)+'/12</span><span>'+p.slopeDeg.toFixed(1)+'°</span><span>RMSE '+p.rmse.toFixed(2)+'m</span></div>').join('');
+ list.querySelectorAll('input[data-plane-accept]').forEach(el=>el.addEventListener('change',e=>{roofPlaneProposals[+e.target.dataset.planeAccept].accepted=e.target.checked}));
+}
+document.querySelector('#fit-roof-planes')?.addEventListener('click',()=>{
+ const status=document.querySelector('#roof-plane-status'),accept=document.querySelector('#accept-roof-planes');
+ if(!roofLidarDecoded?.surfacePoints?.length){if(status)status.textContent='Decode roof points first.';return}
+ if(status)status.textContent='Fitting planar roof surfaces from LiDAR…';
+ try{
+  const pts=roofLidarDecoded.surfacePoints.map((p,i)=>({...p,_i:i}));
+  roofLidarDecoded.surfacePoints=pts;
+  roofPlaneProposals=fitRoofPlanesFromPoints(pts);
+  renderRoofPlanePreview();renderRoofPlaneList();
+  if(!roofPlaneProposals.length)throw new Error('No stable roof planes were found.');
+  if(accept)accept.disabled=false;
+  if(status)status.textContent='Found '+roofPlaneProposals.length+' LiDAR plane proposal'+(roofPlaneProposals.length===1?'':'s')+'. Review pitch/RMSE, uncheck bad facets, then Accept Facets.';
+ }catch(err){if(status)status.textContent='Plane fitting failed: '+err.message}
+});
+document.querySelector('#accept-roof-planes')?.addEventListener('click',async()=>{
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{},status=document.querySelector('#roof-plane-status'),btn=document.querySelector('#accept-roof-planes');
+ if(!roofPlaneProposals.length)return;
+ const projectId=saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
+ const payload=roofPlaneProposals.map(p=>({id:p.id,accepted:p.accepted,pointCount:p.pointCount,pitch12:p.pitch12,slopeDeg:p.slopeDeg,azimuthDeg:p.azimuthDeg,rmse:p.rmse,coefficients:p.coefficients,bounds:p.bounds}));
+ if(btn)btn.disabled=true;if(status)status.textContent='Saving accepted LiDAR roof facets…';
+ try{
+  const r=await fetch('/api/roof-planes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId,address:saved.address,planes:payload})}),d=await r.json();
+  if(!r.ok||!d.ok)throw new Error(d.error||'Could not save roof facets.');
+  const accepted=payload.filter(p=>p.accepted),avgPitch=accepted.length?accepted.reduce((s,p)=>s+p.pitch12,0)/accepted.length:0;
+  const f=document.querySelector('#roof-facets'),p=document.querySelector('#roof-pitch');if(f)f.textContent=accepted.length;if(p)p.textContent=avgPitch.toFixed(1)+'/12 avg';
+  if(status)status.textContent='LiDAR facets accepted ✓ · '+accepted.length+' facets · average pitch '+avgPitch.toFixed(1)+'/12. Next: facet boundaries and true sloped roof area.';
+ }catch(err){if(status)status.textContent='Could not save facets: '+err.message;if(btn)btn.disabled=false}
+});
