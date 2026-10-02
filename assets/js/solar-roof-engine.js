@@ -1001,9 +1001,9 @@ function extractSharedRoofLines(mask,component,labels,candidates,dsm){
 }
 
 function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
-  const candidates=solarSegments
+  const rawCandidates=solarSegments
     .filter(s=>Number.isFinite(Number(s.pitchDegrees))&&Number.isFinite(Number(s.azimuthDegrees))&&s.center)
-    .slice(0,20)
+    .slice(0,64)
     .map((seg,i)=>{
       const center={lat:Number(seg.center.latitude),lng:Number(seg.center.longitude)};
       const sample=dsmSampleAt(dsm,center.lat,center.lng);
@@ -1025,7 +1025,31 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
     })
     .filter(seg=>Number.isFinite(seg.z0)&&seg.z0>-1000);
 
-  if(!candidates.length)return {facets:[],assignedCoverage:0,rgbAssisted:false};
+  // Google can expose multiple near-duplicate roofSegmentStats records for one
+  // physical plane. Collapse only local, nearly coplanar duplicates so simple
+  // roofs do not explode into many artificial facets, while distant coplanar
+  // wings remain separate.
+  const candidates=[];
+  rawCandidates
+    .sort((a,b)=>Number(b.areaMeters2||b.groundAreaMeters2||0)-Number(a.areaMeters2||a.groundAreaMeters2||0))
+    .forEach(seg=>{
+      const duplicate=candidates.find(x=>{
+        const pitchDiff=Math.abs(Number(x.pitch)-Number(seg.pitch));
+        const azDiff=angleDifference(Number(x.azimuth),Number(seg.azimuth));
+        const centerDist=metersBetween(x.center,seg.center);
+        if(pitchDiff>1.35||azDiff>7||centerDist>4.25)return false;
+        const zAtSeg=planeHeightAt(x,seg.center),zAtX=planeHeightAt(seg,x.center);
+        const zOk=(!Number.isFinite(zAtSeg)||Math.abs(zAtSeg-seg.z0)<.45)&&(!Number.isFinite(zAtX)||Math.abs(zAtX-x.z0)<.45);
+        return zOk;
+      });
+      if(duplicate){
+        duplicate.mergedSourceIndices=(duplicate.mergedSourceIndices||[duplicate.sourceIndex]).concat(seg.sourceIndex);
+        duplicate.areaMeters2=Number(duplicate.areaMeters2||0)+Number(seg.areaMeters2||0);
+        duplicate.groundAreaMeters2=Number(duplicate.groundAreaMeters2||0)+Number(seg.groundAreaMeters2||0);
+      }else candidates.push({...seg,mergedSourceIndices:[seg.sourceIndex]});
+    });
+
+  if(!candidates.length)return {facets:[],assignedCoverage:0,rgbAssisted:false,candidateCount:0,rawCandidateCount:rawCandidates.length};
 
   const labels=new Int16Array(mask.width*mask.height);
   labels.fill(-1);
@@ -1192,14 +1216,21 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
   });
 
   facets.sort((a,b)=>b.slopedAreaSqFt-a.slopedAreaSqFt);
-  const kept=facets.slice(0,24);
+  // The original 24-facet ceiling made verified 38–44 facet roofs impossible
+  // to represent. Scale the cap with the number of independent plane seeds,
+  // while retaining a hard safety ceiling for pathological raster noise.
+  const facetCap=Math.min(64,Math.max(12,candidates.length*3));
+  const kept=facets.slice(0,facetCap);
   const coveredPixels=kept.reduce((sum,f)=>sum+(f.pixelCount||0),0);
   const roofLines=extractSharedRoofLines(mask,component,labels,candidates,dsm);
   return {
     facets:kept,
     roofLines,
     assignedCoverage:component.size?Math.min(1,coveredPixels/component.size):0,
-    rgbAssisted:Boolean(rgb?.bands?.length>=3)
+    rgbAssisted:Boolean(rgb?.bands?.length>=3),
+    rawCandidateCount:rawCandidates.length,
+    candidateCount:candidates.length,
+    facetCap
   };
 }
 
@@ -1295,6 +1326,11 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
   model.geometryMode=geometryMode;
   model.facetCoverage=facetResult.assignedCoverage;
   model.rgbAssisted=facetResult.rgbAssisted;
+  model.googleSegmentInputCount=Array.isArray(solarSegments)?solarSegments.length:0;
+  model.rawCandidatePlaneCount=facetResult.rawCandidateCount??null;
+  model.candidatePlaneCount=facetResult.candidateCount??null;
+  model.facetCap=facetResult.facetCap??null;
+  model.facetEngineVersion="2026-10-02-r2";
   return {outline,rawCornerCount,quality:mask.quality||dsm.quality,model};
 }
 
