@@ -42,7 +42,11 @@ function currentMetrics(sm,outline){
  // solving and can overlap while the solver is still learning.
  const facetAreas=modelFacets.map(f=>num(f.slopedAreaSqFt)).filter(Number.isFinite);
  const modelArea=num(sm?.model?.slopedAreaSqFt);
- const slopedArea=modelArea!=null?modelArea:facetAreas.reduce((a,b)=>a+b,0);
+ const googleWhole=num(sm?.googleWholeRoofAreaFt2);
+ // Google Solar wholeRoofStats is the safest area authority for the selected
+ // building. The raster-derived facet model is retained for topology/pitch, but
+ // its facet areas can overlap while segmentation is still being tuned.
+ const slopedArea=googleWhole!=null?googleWhole:(modelArea!=null?modelArea:facetAreas.reduce((a,b)=>a+b,0));
  const w=modelFacets.map(f=>({p:num(f.rise12),a:num(f.slopedAreaSqFt)||0})).filter(x=>x.p!=null);
  const aw=w.reduce((s,x)=>s+x.a,0);
  const avgPitch=w.length?(aw?w.reduce((s,x)=>s+x.p*x.a,0)/aw:w.reduce((s,x)=>s+x.p,0)/w.length):null;
@@ -55,7 +59,10 @@ function currentMetrics(sm,outline){
   footprintPerimeterFt:num(outline?.measurement?.perimeterFt),
   facetAreasFt2:facetAreas,
   topologyFaceCount:topologyFaces.length,
-  googleWholeRoofAreaFt2:num(sm?.googleWholeRoofAreaFt2),
+  googleWholeRoofAreaFt2:googleWhole,
+  rasterFacetAreaFt2:modelArea,
+  areaAuthority:googleWhole!=null?"google-whole-roof":"raster-facet-model",
+  rasterToGoogleAreaRatio:(googleWhole&&modelArea)?modelArea/googleWhole:null,
   learnedProfile:topology?.learnedProfile||null,
   topologyVersion:topology?.version||null
  };
