@@ -30,7 +30,8 @@ export async function onRequestGet({request,env}){
  if(!o)return json({outline:null});
  return json({outline:JSON.parse(await o.text())});
 }
-export async function onRequestPost({request,env}){
+export async function onRequestPost(context){
+ const {request,env}=context;
  if(!env.MEASURE_PHOTOS)return json({error:"R2 binding MEASURE_PHOTOS is not configured."},500);
  const b=await request.json().catch(()=>({}));
  const poly=Array.isArray(b.polygon)?b.polygon:[];
@@ -50,6 +51,7 @@ export async function onRequestPost({request,env}){
    measurement,
    status:"accepted-plan-view"
  };
- await env.MEASURE_PHOTOS.put(projectId+"/_roof_outline_accepted.json",JSON.stringify(outline),{httpMetadata:{contentType:"application/json"}});
+ const write=env.MEASURE_PHOTOS.put(projectId+"/_roof_outline_accepted.json",JSON.stringify(outline),{httpMetadata:{contentType:"application/json"}});
+ if(typeof context.waitUntil==="function") context.waitUntil(write); else await write;
  return json({ok:true,outline});
 }
