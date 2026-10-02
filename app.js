@@ -949,6 +949,7 @@ async function findRoofLidar(){
   saved.lidarSource=d.best;saved.lidarDataset=d.dataset;saved.lidarResolvedAt=new Date().toISOString();
   localStorage.setItem('solarisRoofProject',JSON.stringify(saved));
   if(badge)badge.textContent='Coverage found';
+  const extractBtn=document.querySelector('#extract-roof-lidar');if(extractBtn)extractBtn.disabled=false;
   const mb=d.best.sizeInBytes?((Number(d.best.sizeInBytes)/1048576).toFixed(1)+' MB'):'size unavailable';
   if(status)status.textContent='USGS 3DEP LiDAR coverage found. Next step is extracting only the roof-area points from this point cloud.';
   if(details)details.innerHTML='<div class="analysis-state"><strong>'+String(d.best.title||'USGS LiDAR tile').replace(/[&<>"]/g,s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s]))+'</strong><br><span class="muted">'+
@@ -958,3 +959,29 @@ async function findRoofLidar(){
  }finally{if(btn)btn.disabled=false}
 }
 document.querySelector('#find-roof-lidar')?.addEventListener('click',findRoofLidar);
+
+async function extractRoofLidar(){
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
+ const status=document.querySelector('#roof-lidar-status'),box=document.querySelector('#roof-lidar-extract'),btn=document.querySelector('#extract-roof-lidar'),badge=document.querySelector('#roof-lidar-badge');
+ if(!saved?.lidarSource){if(status)status.textContent='Find LiDAR coverage first.';return}
+ if(!Number.isFinite(Number(saved.lat))||!Number.isFinite(Number(saved.lng))){if(status)status.textContent='Property coordinates are missing.';return}
+ if(btn)btn.disabled=true;if(badge)badge.textContent='Extracting';if(status)status.textContent='Resolving the streamable USGS EPT resource and isolating the roof-area nodes…';
+ if(box){box.hidden=false;box.textContent='Working…'}
+ try{
+  const r=await fetch('/api/lidar-extract',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+    lat:saved.lat,lng:saved.lng,source:saved.lidarSource,halfMeters:28
+  })});
+  const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'LiDAR extraction failed.');
+  saved.lidarEpt=d.ept;saved.lidarSubset=d.subset;saved.lidarExtractedAt=new Date().toISOString();
+  localStorage.setItem('solarisRoofProject',JSON.stringify(saved));
+  const pts=Number(d.subset.estimatedPoints||0).toLocaleString();
+  if(badge)badge.textContent='Roof window ready';
+  if(status)status.textContent='Roof-area LiDAR window resolved. Solaris found '+d.subset.nodeCount+' EPT node'+(d.subset.nodeCount===1?'':'s')+' intersecting the roof search area.';
+  if(box)box.innerHTML='<strong>Roof LiDAR subset ready</strong><br><span class="muted">EPT resource: '+String(d.ept.name||'USGS 3DEP').replace(/[&<>"]/g,s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s]))+'<br>'+d.subset.nodeCount+' intersecting EPT nodes · approximately '+pts+' points represented in the selected hierarchy window.<br>Next: decode only these LAZ/EPT nodes and fit roof planes.</span>';
+ }catch(err){
+  if(badge)badge.textContent='Extraction needs setup';
+  if(status)status.textContent='Could not isolate the roof LiDAR stream: '+err.message;
+  if(box)box.textContent='The source tile was found, but Solaris could not yet resolve its matching public EPT resource.';
+ }finally{if(btn)btn.disabled=false}
+}
+document.querySelector('#extract-roof-lidar')?.addEventListener('click',extractRoofLidar);
