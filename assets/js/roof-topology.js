@@ -242,6 +242,24 @@ function connectCandidate(seg,existing,perimeter,maxExtension=4.0){
   }
   return out;
 }
+function projectionPrimitiveCandidates(projections,perimeter,families,existing){
+  const out=[];
+  for(const p of projections){
+    // A three-edge perimeter projection generally creates a roof primitive whose
+    // interior boundary runs across the mouth of the projection.
+    const mouthA=p.a,mouthB=p.d;
+    if(dist(mouthA,mouthB)<1.8)continue;
+    let a={...mouthA},b={...mouthB};
+    const snap=snapAngle(angle180(a,b),families,14),clean=infiniteLineThroughMid(a,b,snap.angle);
+    a=pointSegDistance(a,clean.a,clean.b).point;
+    b=pointSegDistance(b,clean.a,clean.b).point;
+    const seg={a,b,type:"internal",source:"perimeter-projection",support:3,priority:3};
+    const mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+    if(!pointInPoly(mid,perimeter)||candidateDuplicate(seg,existing)||candidateDuplicate(seg,out))continue;
+    out.push(seg);
+  }
+  return out;
+}
 function facetEdgeCandidates(facets,F,perimeter,families,existing){
   const raw=[];
   facets.forEach((facet,fi)=>{
@@ -435,7 +453,9 @@ export function buildRoofTopology(solarModel){
   const connectedInternal=extendInternalLinesToJunctions(acceptedInternal,perimeter,5.5);
   segments.push(...connectedInternal);
 
-  const candidates=facetEdgeCandidates(facets,F,perimeter,families,connectedInternal);
+  const primitiveCandidates=projectionPrimitiveCandidates(perimeterProjections,perimeter,families,connectedInternal);
+  const facetCandidates=facetEdgeCandidates(facets,F,perimeter,families,connectedInternal);
+  const candidates=[...primitiveCandidates,...facetCandidates];
   const augmented=addFaceImprovingCandidates(segments,connectedInternal,candidates,perimeter,8);
   const solved=augmented.solved,split=solved.split,graph=solved.graph;
   const facesRaw=solved.faces;
@@ -456,8 +476,8 @@ export function buildRoofTopology(solarModel){
     lengthMeters:dist(graph.nodes[e.a],graph.nodes[e.b])
   }));
   return {
-    version:2.6,
-    source:"architectural-planar-topology-sanitized-perimeter",
+    version:2.7,
+    source:"architectural-planar-topology-projection-primitives",
     dominantAngle:longest.ang,
     vertices,edges,faces,
     outline:perimeter.map(F.toLL),
