@@ -1253,6 +1253,19 @@ async function generateRoofReport(){
   const waste=[10,12,15].map(w=>({w,area:sloped*(1+w/100),sq:squares*(1+w/100)}));
   const facetRows=facets.map((p,i)=>'<tr><td>F'+(i+1)+'</td><td>'+Number(p.pitch12).toFixed(1)+'/12</td><td>'+Number(p.slopeDeg).toFixed(1)+'°</td><td>'+Math.round(Number(p.planAreaFt2||0)).toLocaleString()+'</td><td>'+Math.round(Number(p.slopedAreaFt2||0)).toLocaleString()+'</td><td>'+Number(p.rmse||0).toFixed(2)+' m</td></tr>').join('');
   const v=d.validation||{};
+  const sm=d.solarModel||null,dm=sm?.measurements||{};
+  const dsmGeometryBlock=sm?.accepted
+   ?('<h2>Accepted Google DSM Geometry</h2><table class="roof-report-table"><tbody>'+
+     '<tr><th>DSM sloped area</th><td>'+Math.round(Number(sm.model?.slopedAreaSqFt||0)).toLocaleString()+' ft²</td></tr>'+
+     '<tr><th>DSM average pitch</th><td>'+Number(sm.model?.rise12||0).toFixed(1)+'/12</td></tr>'+
+     '<tr><th>DSM facets</th><td>'+Number(sm.model?.facets?.length||0)+'</td></tr>'+
+     '<tr><th>Eave</th><td>'+fmtHybridFt(dm.eaveFt)+'</td></tr>'+
+     '<tr><th>Rake</th><td>'+fmtHybridFt(dm.rakeFt)+'</td></tr>'+
+     '<tr><th>Ridge</th><td>'+fmtHybridFt(dm.ridgeFt)+'</td></tr>'+
+     '<tr><th>Hip</th><td>'+fmtHybridFt(dm.hipFt)+'</td></tr>'+
+     '<tr><th>Valley</th><td>'+fmtHybridFt(dm.valleyFt)+'</td></tr>'+
+     '</tbody></table><p class="roof-report-note">These linear classifications come from the accepted Google rooftop-mask/DSM model and remain independently traceable from the LiDAR-derived primary roof model.</p>')
+   :'';
   const validationBlock=v.available
    ?('<h2>Hybrid Validation</h2><table class="roof-report-table"><tbody>'+
      '<tr><th>Google Solar whole-roof area</th><td>'+(Number.isFinite(Number(v.googleWholeRoofAreaFt2))?Math.round(Number(v.googleWholeRoofAreaFt2)).toLocaleString()+' ft²':'—')+'</td></tr>'+
@@ -1271,8 +1284,9 @@ async function generateRoofReport(){
    '<h2>Facet Measurements</h2><table class="roof-report-table"><thead><tr><th>Facet</th><th>Pitch</th><th>Slope</th><th>Plan ft²</th><th>Sloped ft²</th><th>Plane RMSE</th></tr></thead><tbody>'+facetRows+'</tbody></table>'+
    '<h2>Linear Measurements</h2><table class="roof-report-table"><tbody><tr><th>Roof perimeter</th><td>'+perim.toFixed(1)+' ft</td></tr><tr><th>Ridge</th><td>'+(lines.ridge?lines.ridge.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Hip</th><td>'+(lines.hip?lines.hip.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Valley</th><td>'+(lines.valley?lines.valley.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Eave / rake split</th><td>Not yet classified</td></tr></tbody></table>'+
    '<h2>Waste / Ordering Area</h2><table class="roof-report-table"><thead><tr><th>Waste</th><th>Order area</th><th>Squares</th></tr></thead><tbody><tr><td>0%</td><td>'+Math.round(sloped).toLocaleString()+' ft²</td><td>'+squares.toFixed(2)+'</td></tr>'+waste.map(x=>'<tr><td>'+x.w+'%</td><td>'+Math.round(x.area).toLocaleString()+' ft²</td><td>'+x.sq.toFixed(2)+'</td></tr>').join('')+'</tbody></table>'+
+   dsmGeometryBlock+
    validationBlock+
-   '<p class="roof-report-note">Primary measurements are derived from the accepted aerial roof outline and accepted USGS 3DEP LiDAR plane fits. When Google Solar data is available, it is shown as an independent cross-check rather than silently replacing the reviewed Solaris geometry. Internal line totals appear only when reviewed roof geometry has been saved.</p></div>';
+   '<p class="roof-report-note">Primary measurements are derived from the accepted aerial roof outline and accepted USGS 3DEP LiDAR plane fits. Accepted Google DSM geometry is retained as a second independently traceable source for facet and line classification. Google data does not silently overwrite the reviewed Solaris geometry.</p></div>';
   if(panel){panel.hidden=false;panel.scrollIntoView({behavior:'smooth',block:'start'});}
   if(state)state.textContent='Roof measurement report ready.';
  }catch(err){if(state)state.textContent='Could not build roof report: '+err.message}
