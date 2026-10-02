@@ -1171,17 +1171,97 @@ document.querySelector('#fit-roof-planes')?.addEventListener('click',()=>{
   if(status)status.textContent='Found '+roofPlaneProposals.length+' LiDAR plane proposal'+(roofPlaneProposals.length===1?'':'s')+'. Review pitch/RMSE, uncheck bad facets, then Accept Facets.';
  }catch(err){if(status)status.textContent='Plane fitting failed: '+err.message}
 });
+function convexHullRoof(points){
+ const pts=[...points].sort((a,b)=>a.x-b.x||a.y-b.y);if(pts.length<=3)return pts;
+ const cross=(o,a,b)=>(a.x-o.x)*(b.y-o.y)-(a.y-o.y)*(b.x-o.x);
+ const lo=[];for(const p of pts){while(lo.length>=2&&cross(lo[lo.length-2],lo[lo.length-1],p)<=0)lo.pop();lo.push(p)}
+ const hi=[];for(let i=pts.length-1;i>=0;i--){const p=pts[i];while(hi.length>=2&&cross(hi[hi.length-2],hi[hi.length-1],p)<=0)hi.pop();hi.push(p)}
+ lo.pop();hi.pop();return lo.concat(hi);
+}
+function lidarPointToAerialNorm(p,saved){
+ const center=roofMercator(Number(saved.lat),Number(saved.lng)),half=Number(saved.imageryCropHalfMeters||42),size=half*2;
+ return{x:.5+(p.x-center.x)/size,y:.5-(p.y-center.y)/size};
+}
 document.querySelector('#accept-roof-planes')?.addEventListener('click',async()=>{
  const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{},status=document.querySelector('#roof-plane-status'),btn=document.querySelector('#accept-roof-planes');
  if(!roofPlaneProposals.length)return;
+ const acceptedPlanes=roofPlaneProposals.filter(p=>p.accepted);
+ if(!acceptedPlanes.length){if(status)status.textContent='Select at least one facet before accepting.';return}
  const projectId=saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
- const payload=roofPlaneProposals.map(p=>({id:p.id,accepted:p.accepted,pointCount:p.pointCount,pitch12:p.pitch12,slopeDeg:p.slopeDeg,azimuthDeg:p.azimuthDeg,rmse:p.rmse,coefficients:p.coefficients,bounds:p.bounds}));
- if(btn)btn.disabled=true;if(status)status.textContent='Saving accepted LiDAR roof facets…';
+ let outline=roofOutlineProposal?.polygon;
+ let planMetrics=outline?.length>=3?localRoofPlanMetrics(outline,Number(saved.lat),saved.imageryCropHalfMeters||42):null;
+ if(!planMetrics){
+  const rr=await fetch('/api/roof-outline?projectId='+encodeURIComponent(projectId)),rd=await rr.json();
+  if(!rr.ok||!rd.outline?.polygon)throw new Error('Accepted roof outline is required.');
+  outline=rd.outline.polygon;planMetrics=rd.outline.measurement;
+ }
+ const totalPts=acceptedPlanes.reduce((s,p)=>s+Number(p.pointCount||0),0)||1;
+ const payload=roofPlaneProposals.map(p=>{
+  const hull=convexHullRoof((p.points||[]).map(q=>({x:q.x,y:q.y})));
+  const polygon=hull.map(q=>lidarPointToAerialNorm(q,saved)).filter(q=>Number.isFinite(q.x)&&Number.isFinite(q.y));
+  const share=p.accepted?Number(p.pointCount||0)/totalPts:0;
+  const planAreaFt2=p.accepted?Number(planMetrics.planAreaFt2)*share:0;
+  const slopedAreaFt2=planAreaFt2*Math.sqrt(1+Math.pow(Number(p.pitch12||0)/12,2));
+  return{id:p.id,accepted:p.accepted,pointCount:p.pointCount,pitch12:p.pitch12,slopeDeg:p.slopeDeg,azimuthDeg:p.azimuthDeg,rmse:p.rmse,coefficients:p.coefficients,bounds:p.bounds,polygon,planAreaFt2,slopedAreaFt2};
+ });
+ if(btn)btn.disabled=true;if(status)status.textContent='Saving accepted LiDAR roof facets and measurement model…';
  try{
   const r=await fetch('/api/roof-planes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId,address:saved.address,planes:payload})}),d=await r.json();
   if(!r.ok||!d.ok)throw new Error(d.error||'Could not save roof facets.');
-  const accepted=payload.filter(p=>p.accepted),avgPitch=accepted.length?accepted.reduce((s,p)=>s+p.pitch12,0)/accepted.length:0;
-  const f=document.querySelector('#roof-facets'),p=document.querySelector('#roof-pitch');if(f)f.textContent=accepted.length;if(p)p.textContent=avgPitch.toFixed(1)+'/12 avg';
-  if(status)status.textContent='LiDAR facets accepted ✓ · '+accepted.length+' facets · average pitch '+avgPitch.toFixed(1)+'/12. Next: facet boundaries and true sloped roof area.';
+  const accepted=payload.filter(p=>p.accepted),avgPitch=accepted.reduce((s,p)=>s+p.pitch12,0)/accepted.length,totalSloped=accepted.reduce((s,p)=>s+p.slopedAreaFt2,0),squares=totalSloped/100;
+  const fc=document.querySelector('#roof-facets'),pit=document.querySelector('#roof-pitch'),sq=document.querySelector('#roof-squares');
+  if(fc)fc.textContent=accepted.length;if(pit)pit.textContent=avgPitch.toFixed(1)+'/12 avg';if(sq)sq.textContent=squares.toFixed(2)+' sq';
+  const takeoff=document.querySelector('#roof-takeoff');if(takeoff)takeoff.disabled=false;
+  if(status)status.textContent='LiDAR facets accepted ✓ · '+accepted.length+' facets · '+Math.round(totalSloped).toLocaleString()+' ft² sloped area · '+squares.toFixed(2)+' squares. Report is ready.';
  }catch(err){if(status)status.textContent='Could not save facets: '+err.message;if(btn)btn.disabled=false}
 });
+
+function escRoof(v){return String(v??'').replace(/[&<>"]/g,s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s]))}
+function roofNormLengthFt(a,b,outline){
+ const size=Number(outline.cropHalfMeters||42)*2,k=Math.cos(Number(outline.lat)*Math.PI/180);
+ return Math.hypot(Number(b.x)-Number(a.x),Number(b.y)-Number(a.y))*size*k*3.280839895;
+}
+function roofCentroid(poly){if(!poly?.length)return{x:.5,y:.5};return{x:poly.reduce((s,p)=>s+p.x,0)/poly.length,y:poly.reduce((s,p)=>s+p.y,0)/poly.length}}
+function roofDiagramSvg(data){
+ const outline=data.outline,poly=outline.polygon||[],planes=(data.planes?.planes||[]).filter(p=>p.accepted),geom=(data.geometry?.lines||[]).filter(l=>l.type!=='ignore'&&l.type!=='candidate');
+ const P=p=>(Number(p.x)*1000).toFixed(1)+','+(Number(p.y)*1000).toFixed(1);
+ const fills=['#e8eef5','#dbe7f0','#e6e2f3','#e3efe7','#f2e8dc','#e0ebeb','#eee5e5','#e5e5ef','#edf0df','#e7e7e7'];
+ let s='<svg viewBox="0 0 1000 1000" role="img" aria-label="2D roof measurement diagram"><rect width="1000" height="1000" fill="#fff"/>';
+ planes.forEach((f,i)=>{if(!f.polygon?.length)return;const c=roofCentroid(f.polygon);s+='<polygon points="'+f.polygon.map(P).join(' ')+'" fill="'+fills[i%fills.length]+'" stroke="#444" stroke-width="3"/>';s+='<text x="'+(c.x*1000).toFixed(1)+'" y="'+(c.y*1000).toFixed(1)+'" text-anchor="middle" font-size="24" font-weight="700" fill="#111">F'+(i+1)+'</text><text x="'+(c.x*1000).toFixed(1)+'" y="'+(c.y*1000+28).toFixed(1)+'" text-anchor="middle" font-size="18" fill="#333">'+Number(f.pitch12).toFixed(1)+'/12 · '+Math.round(f.slopedAreaFt2||0)+' ft²</text>'});
+ s+='<polygon points="'+poly.map(P).join(' ')+'" fill="none" stroke="#111" stroke-width="7"/>';
+ for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length],mx=(a.x+b.x)/2,my=(a.y+b.y)/2,len=roofNormLengthFt(a,b,outline);s+='<text x="'+(mx*1000).toFixed(1)+'" y="'+(my*1000-8).toFixed(1)+'" text-anchor="middle" font-size="16" font-weight="600" fill="#111" stroke="#fff" stroke-width="5" paint-order="stroke">'+len.toFixed(1)+' ft</text>'}
+ const lc={ridge:'#198754',hip:'#2563eb',valley:'#dc2626'};
+ geom.forEach(l=>{s+='<line x1="'+(l.a.x*1000)+'" y1="'+(l.a.y*1000)+'" x2="'+(l.b.x*1000)+'" y2="'+(l.b.y*1000)+'" stroke="'+(lc[l.type]||'#555')+'" stroke-width="6"/>'});
+ s+='<g transform="translate(28 940)" font-size="17" fill="#111"><text x="0" y="0">Perimeter dimensions shown in feet</text><text x="0" y="26">F# = LiDAR facet · pitch /12 · sloped facet area</text></g></svg>';
+ return s;
+}
+function roofLineTotals(data){
+ const out={ridge:0,hip:0,valley:0};const lines=data.geometry?.lines||[];
+ for(const l of lines){if(out[l.type]==null)continue;out[l.type]+=roofNormLengthFt(l.a,l.b,data.outline)}
+ return out;
+}
+async function generateRoofReport(){
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{},panel=document.querySelector('#roof-report-panel'),content=document.querySelector('#roof-report-content'),state=document.querySelector('#roof-state');
+ const projectId=saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
+ if(state)state.textContent='Building roof measurement report…';
+ try{
+  const r=await fetch('/api/roof-report?projectId='+encodeURIComponent(projectId)),d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Report data is incomplete.');
+  const facets=(d.planes?.planes||[]).filter(p=>p.accepted),plan=Number(d.outline.measurement?.planAreaFt2||0),perim=Number(d.outline.measurement?.perimeterFt||0);
+  const sloped=facets.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0),squares=sloped/100,avgPitch=facets.length?facets.reduce((s,p)=>s+Number(p.pitch12||0),0)/facets.length:0,lines=roofLineTotals(d);
+  const waste=[10,12,15].map(w=>({w,area:sloped*(1+w/100),sq:squares*(1+w/100)}));
+  const facetRows=facets.map((p,i)=>'<tr><td>F'+(i+1)+'</td><td>'+Number(p.pitch12).toFixed(1)+'/12</td><td>'+Number(p.slopeDeg).toFixed(1)+'°</td><td>'+Math.round(Number(p.planAreaFt2||0)).toLocaleString()+'</td><td>'+Math.round(Number(p.slopedAreaFt2||0)).toLocaleString()+'</td><td>'+Number(p.rmse||0).toFixed(2)+' m</td></tr>').join('');
+  content.innerHTML='<div class="roof-report-sheet">'+
+   '<div class="roof-report-head"><div><div class="roof-report-brand">SOLARIS ROOFING</div><h1>Roof Measurement Report</h1><p>'+escRoof(d.outline.address||saved.address||'')+'</p></div><div style="text-align:right"><strong>Solaris Measure</strong><br><span>Generated '+new Date().toLocaleDateString()+'</span><br><span>LiDAR + aerial verified geometry</span></div></div>'+
+   '<div class="roof-report-grid"><div class="roof-report-stat"><span>Plan area</span><strong>'+Math.round(plan).toLocaleString()+' ft²</strong></div><div class="roof-report-stat"><span>Sloped roof area</span><strong>'+Math.round(sloped).toLocaleString()+' ft²</strong></div><div class="roof-report-stat"><span>Roofing squares</span><strong>'+squares.toFixed(2)+'</strong></div><div class="roof-report-stat"><span>Roof perimeter</span><strong>'+perim.toFixed(1)+' ft</strong></div><div class="roof-report-stat"><span>Facets</span><strong>'+facets.length+'</strong></div><div class="roof-report-stat"><span>Average pitch</span><strong>'+avgPitch.toFixed(1)+'/12</strong></div><div class="roof-report-stat"><span>Ridge</span><strong>'+(lines.ridge?lines.ridge.toFixed(1)+' ft':'Not verified')+'</strong></div><div class="roof-report-stat"><span>Valley</span><strong>'+(lines.valley?lines.valley.toFixed(1)+' ft':'Not verified')+'</strong></div></div>'+
+   '<h2>2D Roof Diagram</h2><div class="roof-diagram-wrap">'+roofDiagramSvg(d)+'</div>'+
+   '<h2>Facet Measurements</h2><table class="roof-report-table"><thead><tr><th>Facet</th><th>Pitch</th><th>Slope</th><th>Plan ft²</th><th>Sloped ft²</th><th>Plane RMSE</th></tr></thead><tbody>'+facetRows+'</tbody></table>'+
+   '<h2>Linear Measurements</h2><table class="roof-report-table"><tbody><tr><th>Roof perimeter</th><td>'+perim.toFixed(1)+' ft</td></tr><tr><th>Ridge</th><td>'+(lines.ridge?lines.ridge.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Hip</th><td>'+(lines.hip?lines.hip.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Valley</th><td>'+(lines.valley?lines.valley.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Eave / rake split</th><td>Not yet classified</td></tr></tbody></table>'+
+   '<h2>Waste / Ordering Area</h2><table class="roof-report-table"><thead><tr><th>Waste</th><th>Order area</th><th>Squares</th></tr></thead><tbody><tr><td>0%</td><td>'+Math.round(sloped).toLocaleString()+' ft²</td><td>'+squares.toFixed(2)+'</td></tr>'+waste.map(x=>'<tr><td>'+x.w+'%</td><td>'+Math.round(x.area).toLocaleString()+' ft²</td><td>'+x.sq.toFixed(2)+'</td></tr>').join('')+'</tbody></table>'+
+   '<p class="roof-report-note">Measurements are derived from the accepted aerial roof outline and accepted USGS 3DEP LiDAR plane fits. Internal line totals appear only when reviewed roof geometry has been saved. Eave/rake classification and product-specific material quantities remain pending verification.</p></div>';
+  if(panel){panel.hidden=false;panel.scrollIntoView({behavior:'smooth',block:'start'});}
+  if(state)state.textContent='Roof measurement report ready.';
+ }catch(err){if(state)state.textContent='Could not build roof report: '+err.message}
+}
+document.querySelector('#roof-takeoff')?.addEventListener('click',generateRoofReport);
+document.querySelector('#print-roof-report')?.addEventListener('click',()=>window.print());
+document.querySelector('#close-roof-report')?.addEventListener('click',()=>{const p=document.querySelector('#roof-report-panel');if(p)p.hidden=true});
