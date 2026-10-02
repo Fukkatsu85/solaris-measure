@@ -698,7 +698,7 @@ async function openRoofGeometryWorkspace(){
   if(!ar.ok)throw new Error(ad.error||'Aerial imagery lookup failed.');
   project.lat=ad.lat;project.lng=ad.lng;project.formattedAddress=ad.address;project.imagerySource=ad.source;project.imageryLayer=ad.imageryLayer;project.imageryLabel=ad.imageryLabel;project.imageryResolution=ad.resolution;project.imageryProjection=ad.projection;project.imageryCropHalfMeters=ad.cropHalfMeters;
   localStorage.setItem('solarisRoofProject',JSON.stringify({...JSON.parse(localStorage.getItem('solarisRoofProject')||'{}'),...project}));
-  if(aerialWrap)aerialWrap.innerHTML='<img id="mn-aerial-img" src="'+ad.imageryUrl+'" alt="MnGeo aerial image of selected roof" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#111"><svg id="roof-outline-overlay" viewBox="0 0 1000 1000" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></svg>';
+  if(aerialWrap){aerialWrap.innerHTML='<img id="mn-aerial-img" src="'+ad.imageryUrl+'" alt="MnGeo aerial image of selected roof" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#111"><svg id="roof-outline-overlay" viewBox="0 0 1000 1000" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;touch-action:none;cursor:crosshair"></svg>';bindRoofOverlayEditor();}
   if(aerialStatus)aerialStatus.textContent='Analysis imagery loaded: '+ad.imageryLabel+' ('+ad.resolution+') · '+ad.county+' · '+ad.lat.toFixed(6)+', '+ad.lng.toFixed(6)+'.';
   if(aerialBadge)aerialBadge.textContent='Ready';
  }catch(err){
@@ -749,6 +749,7 @@ document.querySelector('#accept-roof-outline')?.addEventListener('click',()=>{
 let roofEditMode=false,dragRoofPoint=-1;
 function roofSvgPoint(e,svg){const r=svg.getBoundingClientRect();return{x:Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),y:Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))}}
 function enableRoofPointEditing(){
+ bindRoofOverlayEditor();
  const svg=document.querySelector('#roof-outline-overlay');if(!svg||!roofOutlineProposal?.polygon)return;
  roofEditMode=!roofEditMode;svg.style.pointerEvents=roofEditMode?'auto':'none';
  document.querySelector('#edit-roof-outline').textContent=roofEditMode?'Finish Editing':'Edit Points';
@@ -756,17 +757,28 @@ function enableRoofPointEditing(){
  const s=document.querySelector('#mn-aerial-status');if(s)s.textContent=roofEditMode?'Drag white points to align them with the actual roof corners. Double-click an edge area to add another point.':'Roof point editing finished. Review the outline, then accept it.';
 }
 document.querySelector('#edit-roof-outline')?.addEventListener('click',enableRoofPointEditing);
-document.querySelector('#roof-outline-overlay')?.addEventListener('pointerdown',e=>{
- if(!roofEditMode||!roofOutlineProposal?.polygon)return;const svg=e.currentTarget,p=roofSvgPoint(e,svg);
- let best=-1,dist=.04;roofOutlineProposal.polygon.forEach((q,i)=>{const d=Math.hypot(q.x-p.x,q.y-p.y);if(d<dist){dist=d;best=i}});
- if(best>=0){dragRoofPoint=best;svg.setPointerCapture?.(e.pointerId)}
-});
-document.querySelector('#roof-outline-overlay')?.addEventListener('pointermove',e=>{
- if(!roofEditMode||dragRoofPoint<0)return;roofOutlineProposal.polygon[dragRoofPoint]=roofSvgPoint(e,e.currentTarget);renderRoofOutline(roofOutlineProposal.polygon,false);
-});
-document.querySelector('#roof-outline-overlay')?.addEventListener('pointerup',()=>{dragRoofPoint=-1});
-document.querySelector('#roof-outline-overlay')?.addEventListener('dblclick',e=>{
- if(!roofEditMode||!roofOutlineProposal?.polygon)return;const p=roofSvgPoint(e,e.currentTarget),poly=roofOutlineProposal.polygon;let best=0,bd=Infinity;
- for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length],mx=(a.x+b.x)/2,my=(a.y+b.y)/2,d=Math.hypot(p.x-mx,p.y-my);if(d<bd){bd=d;best=i}}
- poly.splice(best+1,0,p);renderRoofOutline(poly,false);
-});
+function bindRoofOverlayEditor(){
+ const svg=document.querySelector('#roof-outline-overlay');
+ if(!svg||svg.dataset.editorBound==='1')return;
+ svg.dataset.editorBound='1';
+ svg.addEventListener('pointerdown',e=>{
+  if(!roofEditMode||!roofOutlineProposal?.polygon)return;
+  const p=roofSvgPoint(e,svg);let best=-1,dist=.05;
+  roofOutlineProposal.polygon.forEach((q,i)=>{const d=Math.hypot(q.x-p.x,q.y-p.y);if(d<dist){dist=d;best=i}});
+  if(best>=0){dragRoofPoint=best;svg.setPointerCapture?.(e.pointerId);e.preventDefault();}
+ });
+ svg.addEventListener('pointermove',e=>{
+  if(!roofEditMode||dragRoofPoint<0)return;
+  roofOutlineProposal.polygon[dragRoofPoint]=roofSvgPoint(e,svg);
+  renderRoofOutline(roofOutlineProposal.polygon,false);
+  e.preventDefault();
+ });
+ const stop=()=>{dragRoofPoint=-1};
+ svg.addEventListener('pointerup',stop);svg.addEventListener('pointercancel',stop);
+ svg.addEventListener('dblclick',e=>{
+  if(!roofEditMode||!roofOutlineProposal?.polygon)return;
+  const p=roofSvgPoint(e,svg),poly=roofOutlineProposal.polygon;let best=0,bd=Infinity;
+  for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length],mx=(a.x+b.x)/2,my=(a.y+b.y)/2,d=Math.hypot(p.x-mx,p.y-my);if(d<bd){bd=d;best=i}}
+  poly.splice(best+1,0,p);renderRoofOutline(poly,false);e.preventDefault();
+ });
+}
