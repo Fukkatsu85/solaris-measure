@@ -1081,15 +1081,18 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
       if(indices.length<2)return;
       const groups=connectedComponentsForLabel(indices,mask.width,mask.height);
       if(groups.length<=1)return;
-      const minKeep=Math.max(12,Math.min(28,Math.round(component.size*.002)));
+      const pixelMeters=Math.max(.1,Number(mask.pixelSize)||.1);
+      const pixelAreaM2=pixelMeters*pixelMeters;
+      const minExtraAreaM2=.65; // about 7 ft²: below this, extra islands are usually raster noise
       groups.slice(1).forEach(group=>{
-        if(group.length>=minKeep)return;
-        // Preserve a small component when it has a real 2D footprint instead of
-        // looking like a one-pixel raster/string artifact.
         const xs=group.map(idx=>idx%mask.width),ys=group.map(idx=>Math.floor(idx/mask.width));
-        const spanX=Math.max(...xs)-Math.min(...xs)+1,spanY=Math.max(...ys)-Math.min(...ys)+1;
-        const compactEnough=spanX>=3&&spanY>=3&&group.length>=10;
-        if(compactEnough)return;
+        const spanXpx=Math.max(...xs)-Math.min(...xs)+1,spanYpx=Math.max(...ys)-Math.min(...ys)+1;
+        const spanXm=spanXpx*pixelMeters,spanYm=spanYpx*pixelMeters;
+        const areaM2=group.length*pixelAreaM2;
+        const bboxPixels=Math.max(1,spanXpx*spanYpx);
+        const compactness=group.length/bboxPixels;
+        // Preserve only physically meaningful secondary pieces of the same roof plane.
+        if(areaM2>=minExtraAreaM2&&Math.min(spanXm,spanYm)>=.65&&compactness>=.28)return;
         const votes=new Map();
         group.forEach(idx=>{
           const x=idx%mask.width,y=Math.floor(idx/mask.width);
@@ -1113,14 +1116,23 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
   component.forEach(idx=>{const lab=labels[idx];if(lab>=0)byLabel[lab].push(idx);});
 
   const facets=[];
-  const minFacetPixels=Math.max(10,Math.min(32,Math.round(component.size*.0018)));
+  const pixelMeters=Math.max(.1,Number(mask.pixelSize)||.1);
+  const minSecondaryAreaM2=.65; // ~7 ft²
   byLabel.forEach((indices,i)=>{
-    if(indices.length<minFacetPixels)return;
+    if(!indices.length)return;
     const groups=connectedComponentsForLabel(indices,mask.width,mask.height);
     const seg=candidates[i];
-    const meaningful=groups.filter(group=>group.length>=minFacetPixels);
 
-    meaningful.forEach((group,componentIndex)=>{
+    groups.forEach((group,componentIndex)=>{
+      const xs=group.map(idx=>idx%mask.width),ys=group.map(idx=>Math.floor(idx/mask.width));
+      const spanXpx=Math.max(...xs)-Math.min(...xs)+1,spanYpx=Math.max(...ys)-Math.min(...ys)+1;
+      const spanXm=spanXpx*pixelMeters,spanYm=spanYpx*pixelMeters;
+      const areaM2=group.length*maskPixelArea;
+      const compactness=group.length/Math.max(1,spanXpx*spanYpx);
+      const isPrimary=componentIndex===0;
+      const physicalSecondary=isPrimary||(areaM2>=minSecondaryAreaM2&&Math.min(spanXm,spanYm)>=.65&&compactness>=.28);
+      if(!physicalSecondary)return;
+
       const groupSet=new Set(group);
       let boundary=removeCollinearPixelPoints(traceComponentBoundary(groupSet,mask.width,mask.height));
       if(boundary.length<3)return;
@@ -1128,8 +1140,6 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
       outline=simplifyOutline(outline,14);
       outline=regularizeFacetOutline(outline,seg.azimuth,6);
 
-      // A single Google plane can legitimately occur in several disconnected roof
-      // regions. Preserve each connected component as its own physical facet.
       const localCenter=outline.length
         ?{lat:outline.reduce((s,p)=>s+Number(p.lat),0)/outline.length,lng:outline.reduce((s,p)=>s+Number(p.lng),0)/outline.length}
         :seg.center;
@@ -1146,18 +1156,20 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
         z0:seg.z0,
         gradientEast:seg.gradientEast,
         gradientNorth:seg.gradientNorth,
-        flatAreaSqFt:group.length*maskPixelArea*SQ_METERS_TO_SQ_FEET,
-        slopedAreaSqFt:group.length*maskPixelArea/Math.max(.35,Math.cos(seg.pitch*Math.PI/180))*SQ_METERS_TO_SQ_FEET,
+        flatAreaSqFt:areaM2*SQ_METERS_TO_SQ_FEET,
+        slopedAreaSqFt:areaM2/Math.max(.35,Math.cos(seg.pitch*Math.PI/180))*SQ_METERS_TO_SQ_FEET,
         pixelCount:group.length,
         supportRatio:group.length/Math.max(1,indices.length),
-        smallFacet:group.length<70,
+        smallFacet:!isPrimary,
+        componentAreaM2:areaM2,
+        compactness,
         outline
       });
     });
   });
 
   facets.sort((a,b)=>b.slopedAreaSqFt-a.slopedAreaSqFt);
-  const kept=facets.slice(0,30);
+  const kept=facets.slice(0,24);
   const coveredPixels=kept.reduce((sum,f)=>sum+(f.pixelCount||0),0);
   const roofLines=extractSharedRoofLines(mask,component,labels,candidates,dsm);
   return {
