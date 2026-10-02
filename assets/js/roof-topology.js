@@ -66,8 +66,64 @@ function infiniteLineThroughMid(a,b,angle){
   const m={x:(a.x+b.x)/2,y:(a.y+b.y)/2},r=rad(angle),dx=Math.cos(r),dy=Math.sin(r);
   return {a:{x:m.x-dx*1000,y:m.y-dy*1000},b:{x:m.x+dx*1000,y:m.y+dy*1000}};
 }
+function sanitizeArchitecturalPerimeter(poly){
+  let pts=[...poly];
+  if(pts.length<4)return pts;
+
+  // Remove tiny raster stair-steps unless they participate in a meaningful projection.
+  let changed=true;
+  while(changed&&pts.length>4){
+    changed=false;
+    for(let i=0;i<pts.length;i++){
+      const a=pts[(i-1+pts.length)%pts.length],b=pts[i],d=pts[(i+1)%pts.length];
+      const ab=dist(a,b),bd=dist(b,d),ad=dist(a,d);
+      const dev=pointSegDistance(b,a,d).distance;
+
+      // Typical 0.1m rooftop-mask stair steps. Keep a corner when the offset is substantial.
+      const tiny=Math.min(ab,bd)<0.65;
+      const shallow=dev<0.42;
+      if((tiny&&shallow)||(ab<0.32)||(bd<0.32)){
+        pts.splice(i,1);changed=true;break;
+      }
+
+      // Collapse paired short zig-zags when the shortcut remains close to both intermediate points.
+      if(pts.length>5){
+        const e=pts[(i+2)%pts.length];
+        const de=dist(d,e);
+        if(ab<1.0&&bd<1.0&&de>1.3){
+          const devB=pointSegDistance(b,a,d).distance;
+          if(devB<0.38){pts.splice(i,1);changed=true;break}
+        }
+      }
+    }
+  }
+  return pts;
+}
+
+function detectPerimeterProjections(poly,baseAngle){
+  const families=[baseAngle,(baseAngle+90)%180];
+  const projections=[];
+  for(let i=0;i<poly.length;i++){
+    const a=poly[(i-1+poly.length)%poly.length],b=poly[i],c=poly[(i+1)%poly.length],d=poly[(i+2)%poly.length];
+    const ab=dist(a,b),bc=dist(b,c),cd=dist(c,d);
+    if(ab<1.0||bc<1.0||cd<1.0)continue;
+    const ang1=angle180(a,b),ang2=angle180(b,c),ang3=angle180(c,d);
+    const orth12=Math.abs(angleDiff(ang1,ang2)-90)<14;
+    const orth23=Math.abs(angleDiff(ang2,ang3)-90)<14;
+    const parallel13=angleDiff(ang1,ang3)<12;
+    if(!orth12||!orth23||!parallel13)continue;
+
+    // Three-edge rectangular step / projection.
+    const width=bc,depth=Math.min(ab,cd);
+    if(width>=1.8&&depth>=1.2){
+      projections.push({a,b,c,d,index:i,width,depth,orientation:angle180(b,c)});
+    }
+  }
+  return projections;
+}
 function regularizePerimeter(poly){
-  let pts=simplifyPoly(poly,.28,.10);
+  let pts=sanitizeArchitecturalPerimeter(poly);
+  pts=simplifyPoly(pts,.48,.12);
   if(pts.length<3)return pts;
   let longest={len:0,ang:0};
   for(let i=0;i<pts.length;i++){
@@ -85,7 +141,7 @@ function regularizePerimeter(poly){
     const prev=lines[(i-1+lines.length)%lines.length],cur=lines[i],hit=lineIntersection(prev.a,prev.b,cur.a,cur.b),ref=pts[i];
     rebuilt.push(hit&&dist(hit,ref)<4?{x:hit.x,y:hit.y}:ref);
   }
-  return simplifyPoly(rebuilt,.32,.10);
+  return sanitizeArchitecturalPerimeter(simplifyPoly(rebuilt,.48,.12));
 }
 function nearestPointOnPerimeter(p,poly){
   let best={distance:Infinity,point:null,edge:-1};
@@ -360,6 +416,7 @@ export function buildRoofTopology(solarModel){
   let longest={len:0,ang:0};
   for(let i=0;i<perimeter.length;i++){const a=perimeter[i],b=perimeter[(i+1)%perimeter.length],len=dist(a,b);if(len>longest.len)longest={len,ang:angle180(a,b)}}
   const families=[longest.ang,(longest.ang+90)%180,(longest.ang+45)%180,(longest.ang+135)%180];
+  const perimeterProjections=detectPerimeterProjections(perimeter,longest.ang);
 
   const segments=[];
   for(let i=0;i<perimeter.length;i++)segments.push({a:perimeter[i],b:perimeter[(i+1)%perimeter.length],type:"perimeter",source:"perimeter"});
@@ -399,8 +456,8 @@ export function buildRoofTopology(solarModel){
     lengthMeters:dist(graph.nodes[e.a],graph.nodes[e.b])
   }));
   return {
-    version:2.5,
-    source:"architectural-planar-topology-detailed-perimeter",
+    version:2.6,
+    source:"architectural-planar-topology-sanitized-perimeter",
     dominantAngle:longest.ang,
     vertices,edges,faces,
     outline:perimeter.map(F.toLL),
@@ -411,7 +468,8 @@ export function buildRoofTopology(solarModel){
       hipEdges:edges.filter(e=>e.type==="hip").length,
       valleyEdges:edges.filter(e=>e.type==="valley").length,
       closedFaces:faces.length,
-      acceptedCandidateEdges:augmented.adds
+      acceptedCandidateEdges:augmented.adds,
+      perimeterProjections:perimeterProjections.length
     }
   };
 }
