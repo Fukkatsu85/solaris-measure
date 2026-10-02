@@ -634,15 +634,6 @@ async function getRoofMapsKey(){
  roofMapsKey=d.key;return roofMapsKey;
 }
 const roofAddressInput=document.querySelector('#roof-address');
-let roofAddressNeedsReplace=true;
-roofAddressInput?.addEventListener('focus',()=>{if(roofAddressNeedsReplace)roofAddressInput.select();});
-roofAddressInput?.addEventListener('pointerdown',()=>{if(document.activeElement!==roofAddressInput)roofAddressNeedsReplace=true;});
-roofAddressInput?.addEventListener('keydown',e=>{
- if(roofAddressNeedsReplace && e.key.length===1 && !e.ctrlKey && !e.metaKey && !e.altKey){
-  roofAddressInput.value='';roofAddressNeedsReplace=false;
- }
-});
-roofAddressInput?.addEventListener('input',()=>{roofAddressNeedsReplace=false;});
 let roofAutocompleteReady=false;
 async function initRoofAddressAutocomplete(){
  if(roofAutocompleteReady||!roofAddressInput)return;
@@ -661,8 +652,8 @@ async function initRoofAddressAutocomplete(){
   }
  }catch(err){console.warn('Roof address autocomplete unavailable:',err);}
 }
-roofAddressInput?.addEventListener('focus',initRoofAddressAutocomplete,{once:true});
-document.querySelector('#roof-address')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();document.querySelector('#locate-roof')?.click();}});
+roofAddressInput?.addEventListener('focus',()=>{roofAddressInput.select();initRoofAddressAutocomplete();},{once:true});
+roofAddressInput?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();document.querySelector('#locate-roof')?.click();}});
 document.querySelector('#locate-roof')?.addEventListener('click',async()=>{
  const address=document.querySelector('#roof-address')?.value.trim();if(!address){alert('Enter a property address first.');return;}
  const status=document.querySelector('#roof-location-status'),map=document.querySelector('#roof-map'),confirm=document.querySelector('#confirm-roof-property'),btn=document.querySelector('#locate-roof');
