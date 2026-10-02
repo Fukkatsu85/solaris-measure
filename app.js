@@ -26,6 +26,20 @@ let currentPhotos = [];
 let lastAnalysis = null;
 let geometryData = { photos: {} };
 
+// Register the guided roof button immediately. Function declarations are hoisted,
+// so this remains available even if a later optional UI initializer encounters an error.
+const earlyProcessRoofButton=document.querySelector('#process-roof-all');
+if(earlyProcessRoofButton){
+  earlyProcessRoofButton.addEventListener('click',async()=>{
+    const status=document.querySelector('#roof-process-status');
+    try{await processRoofGuided()}
+    catch(err){
+      if(status)status.textContent='Process Roof failed: '+(err?.message||String(err));
+      console.error('Process Roof failed',err);
+    }
+  });
+}
+
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB'];
@@ -1750,7 +1764,7 @@ async function processRoofGuided(){
   if(btn){btn.disabled=false;btn.textContent='Process Roof'}
  }
 }
-document.querySelector('#process-roof-all')?.addEventListener('click',processRoofGuided);
+// Process Roof listener is registered near the top of this file for resilience.
 
 async function ensureRoofMeasurementsAccepted(){
  const badge=document.querySelector('#roof-process-badge'),status=document.querySelector('#roof-process-status');
