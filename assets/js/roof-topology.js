@@ -189,6 +189,7 @@ function connectCandidate(seg,existing,perimeter,maxExtension=4.0){
 function facetEdgeCandidates(facets,F,perimeter,families,existing){
   const raw=[];
   facets.forEach((facet,fi)=>{
+    if(facet.smallFacet&&Number(facet.supportRatio||0)<.55)return;
     const poly=(facet.outline||[]).map(F.toXY);
     for(let i=0;i<poly.length;i++){
       const a=poly[i],b=poly[(i+1)%poly.length];
@@ -220,11 +221,12 @@ function facetEdgeCandidates(facets,F,perimeter,families,existing){
     const snap=snapAngle(angle180(a,b),families,14),clean=infiniteLineThroughMid(a,b,snap.angle);
     a=pointSegDistance(a,clean.a,clean.b).point;
     b=pointSegDistance(b,clean.a,clean.b).point;
-    const seg={a,b,type:"internal",source:"paired-facet-boundary",support:2,facets:[A.facet,B.facet]};
+    const fa=facets[A.facet]||{},fb=facets[B.facet]||{};
+    const seg={a,b,type:"internal",source:"paired-facet-boundary",support:2,facets:[A.facet,B.facet],priority:(fa.smallFacet||fb.smallFacet)?2:1};
     if(candidateDuplicate(seg,existing)||candidateDuplicate(seg,paired))continue;
     paired.push(seg);
   }
-  return paired.sort((a,b)=>dist(b.a,b.b)-dist(a.a,a.b));
+  return paired.sort((a,b)=>(Number(b.priority||0)-Number(a.priority||0))||(dist(b.a,b.b)-dist(a.a,a.b)));
 }
 function addFaceImprovingCandidates(baseSegments,baseInternal,candidates,perimeter,maxAdds=6){
   let accepted=[...baseInternal],segments=[...baseSegments],solved=validFaceSet(segments,perimeter),adds=0;
