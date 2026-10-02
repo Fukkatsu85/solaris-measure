@@ -1311,7 +1311,7 @@ function roofNormLengthFt(a,b,outline){
 }
 function roofCentroid(poly){if(!poly?.length)return{x:.5,y:.5};return{x:poly.reduce((s,p)=>s+p.x,0)/poly.length,y:poly.reduce((s,p)=>s+p.y,0)/poly.length}}
 function roofDiagramSvg(data){
- const sm=data.solarModel?.accepted?data.solarModel:null;
+ const sm=data.solarModel||null;
  if(sm?.outline?.length>=3&&sm?.model?.facets?.length){
   const outline=sm.outline,facets=sm.model.facets||[],lines=sm.model.roofLines||[],edges=sm.measurements?.exteriorEdges||[];
   const all=[...outline,...facets.flatMap(f=>f.outline||[]),...lines.flatMap(l=>[l.a,l.b]).filter(Boolean)];
@@ -1357,7 +1357,7 @@ function roofDiagramSvg(data){
  return s;
 }
 function roofLineTotals(data){
- const sm=data.solarModel?.accepted?data.solarModel:null;
+ const sm=data.solarModel||null;
  if(sm?.measurements)return{
   ridge:Number(sm.measurements.ridgeFt||0),
   hip:Number(sm.measurements.hipFt||0),
@@ -1380,7 +1380,7 @@ async function generateRoofReport(){
  try{
   const r=await fetch('/api/roof-report?projectId='+encodeURIComponent(projectId),{signal:controller.signal}),d=await r.json().catch(()=>({}));if(!r.ok||!d.ok)throw new Error(d.error||'Report data is incomplete.');
   const facets=(d.planes?.planes||[]).filter(p=>p.accepted),plan=Number(d.outline.measurement?.planAreaFt2||0),perim=Number(d.outline.measurement?.perimeterFt||0);
-  const sm=d.solarModel||null,dm=sm?.measurements||{},dsmFacets=sm?.accepted?(sm.model?.facets||[]):[];
+  const sm=d.solarModel||null,dm=sm?.measurements||{},dsmFacets=sm?.model?.facets||[];
   const sloped=facets.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0),squares=sloped/100,lines=roofLineTotals(d);
   const wholePitch=v=>Math.round(Number(v)||0);
   const pitchWeightTotal=dsmFacets.reduce((s,f)=>s+Number(f.slopedAreaSqFt||f.flatAreaSqFt||0),0);
@@ -1393,7 +1393,7 @@ async function generateRoofReport(){
    return '<tr><td>F'+(i+1)+'</td><td>'+pitch+'/12</td><td>'+slope.toFixed(1)+'°</td><td>'+Math.round(planArea).toLocaleString()+'</td><td>'+Math.round(slopedArea).toLocaleString()+'</td><td>'+(isDsm?'DSM':'LiDAR '+Number(p.rmse||0).toFixed(2)+' m')+'</td></tr>';
   }).join('');
   const v=d.validation||{};
-  const dsmGeometryBlock=sm?.accepted
+  const dsmGeometryBlock=sm?.model?.facets?.length
    ?('<h2>Accepted Google DSM Geometry</h2><table class="roof-report-table"><tbody>'+
      '<tr><th>DSM sloped area</th><td>'+Math.round(Number(sm.model?.slopedAreaSqFt||0)).toLocaleString()+' ft²</td></tr>'+
      '<tr><th>DSM average pitch</th><td>'+wholePitch(sm.model?.rise12||avgPitch)+'/12</td></tr>'+
@@ -1664,17 +1664,15 @@ document.querySelector('#approve-roof-analysis')?.addEventListener('click',async
  }
 });
 document.querySelector('#roof-report-main')?.addEventListener('click',async()=>{
- const btn=document.querySelector('#roof-report-main'),status=document.querySelector('#roof-process-status'),badge=document.querySelector('#roof-process-badge');
+ const btn=document.querySelector('#roof-report-main'),status=document.querySelector('#roof-process-status');
  const oldText=btn?.textContent;
- if(btn){btn.disabled=true;btn.textContent='Preparing Report…'}
+ if(btn)btn.textContent='Building Report…';
  try{
-  await ensureRoofMeasurementsAccepted();
   await generateRoofReport();
  }catch(err){
-  if(status)status.textContent='Could not prepare report: '+(err?.message||String(err));
-  if(badge)badge.textContent='Needs review';
+  if(status)status.textContent='Could not build report: '+(err?.message||String(err));
  }finally{
-  if(btn){btn.disabled=false;btn.textContent=oldText||'Generate Roof Measurement Report'}
+  if(btn)btn.textContent=oldText||'Generate Roof Measurement Report';
  }
 });
 
