@@ -1362,6 +1362,7 @@ async function generateRoofReport(){
  }catch(err){if(state)state.textContent='Could not build roof report: '+err.message}
 }
 document.querySelector('#roof-takeoff')?.addEventListener('click',generateRoofReport);
+document.querySelector('#roof-report-inline')?.addEventListener('click',generateRoofReport);
 document.querySelector('#print-roof-report')?.addEventListener('click',()=>window.print());
 document.querySelector('#close-roof-report')?.addEventListener('click',()=>{const p=document.querySelector('#roof-report-panel');if(p)p.hidden=true});
 
