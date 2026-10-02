@@ -935,3 +935,25 @@ document.querySelector('#save-roof-lines')?.addEventListener('click',async()=>{
   const p=document.querySelector('#roof-pitch');if(p)p.textContent=defaultPitch+'/12 default';
  }catch(err){if(status)status.textContent='Could not save roof geometry: '+err.message}
 });
+
+async function findRoofLidar(){
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
+ const status=document.querySelector('#roof-lidar-status'),badge=document.querySelector('#roof-lidar-badge'),details=document.querySelector('#roof-lidar-details'),btn=document.querySelector('#find-roof-lidar');
+ if(!Number.isFinite(Number(saved.lat))||!Number.isFinite(Number(saved.lng))){if(status)status.textContent='Property coordinates are missing. Reopen the roof workspace first.';return}
+ if(btn)btn.disabled=true;if(badge)badge.textContent='Checking';if(status)status.textContent='Searching USGS 3DEP point-cloud coverage for this roof…';
+ try{
+  const r=await fetch('/api/lidar-source?lat='+encodeURIComponent(saved.lat)+'&lng='+encodeURIComponent(saved.lng));
+  const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'LiDAR lookup failed.');
+  if(!d.best){if(badge)badge.textContent='No coverage';if(status)status.textContent='No USGS LPC tile was returned for this roof location.';if(details)details.innerHTML='';return}
+  saved.lidarSource=d.best;saved.lidarDataset=d.dataset;saved.lidarResolvedAt=new Date().toISOString();
+  localStorage.setItem('solarisRoofProject',JSON.stringify(saved));
+  if(badge)badge.textContent='Coverage found';
+  const mb=d.best.sizeInBytes?((Number(d.best.sizeInBytes)/1048576).toFixed(1)+' MB'):'size unavailable';
+  if(status)status.textContent='USGS 3DEP LiDAR coverage found. Next step is extracting only the roof-area points from this point cloud.';
+  if(details)details.innerHTML='<div class="analysis-state"><strong>'+String(d.best.title||'USGS LiDAR tile').replace(/[&<>"]/g,s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s]))+'</strong><br><span class="muted">'+
+   (d.best.publicationDate?'Published '+d.best.publicationDate+' · ':'')+mb+' · '+d.count+' intersecting tile'+(d.count===1?'':'s')+' found</span></div>';
+ }catch(err){
+  if(badge)badge.textContent='Lookup failed';if(status)status.textContent='Could not resolve LiDAR coverage: '+err.message;if(details)details.innerHTML='';
+ }finally{if(btn)btn.disabled=false}
+}
+document.querySelector('#find-roof-lidar')?.addEventListener('click',findRoofLidar);
