@@ -33,9 +33,9 @@ function edgeTotals(topology,sm){
  for(const k of ["ridgeFt","hipFt","valleyFt","eaveFt","rakeFt"])if(!(out[k]>0)&&num(m[k])!=null)out[k]=num(m[k]);
  return out;
 }
-function currentMetrics(sm,outline){
+function currentMetrics(sm,outline,profileOverrides){
  let topology=null;
- try{topology=buildRoofTopology(sm)}catch{}
+ try{topology=buildRoofTopology(sm,{profileOverrides:profileOverrides||{}})}catch{}
  const modelFacets=(sm?.model?.facets||[]).filter(f=>Number(f.slopedAreaSqFt||0)>0);
  // Match production reporting: Google DSM model is authoritative for area,
  // pitch and facet count. Topology faces are derived geometry used for line
@@ -96,6 +96,8 @@ function refFor(t){return {
 }}
 export async function onRequestGet({env}){
  if(!env.MEASURE_PHOTOS)return json({error:"R2 binding MEASURE_PHOTOS is not configured."},500);
+ const optimizer=await readJson(env,"training/_topology_optimizer.json");
+ const profileOverrides=optimizer?.profileOverrides||{};
  const keys=await listSolarModels(env);
  const models=[];
  for(const key of keys){
@@ -109,7 +111,7 @@ export async function onRequestGet({env}){
   const found=candidates.sort((a,b)=>String(b.sm.savedAt||"").localeCompare(String(a.sm.savedAt||"")))[0];
   if(!found){rows.push({caseId:t.caseId||null,address:t.address,scope:t.scope||"all-structures",source:t.source,archetype:t.archetype,status:"not-processed",reference:refFor(t)});continue}
   const projectId=found.key.split("/")[0],outline=await readJson(env,projectId+"/_roof_outline_accepted.json");
-  const current=currentMetrics(found.sm,outline),result=score(current,refFor(t));
+  const current=currentMetrics(found.sm,outline,profileOverrides),result=score(current,refFor(t));
   const scope=t.scope||"all-structures";
   const scopeComparable=scope==="primary-building"||scope==="all-structures";
   rows.push({caseId:t.caseId||null,address:t.address,scope,source:t.source,archetype:t.archetype,status:scopeComparable?"scored":"scope-specific",projectId,reference:refFor(t),current,score:result});
@@ -121,7 +123,9 @@ export async function onRequestGet({env}){
   averageScore:mean(scored.map(r=>r.score.overall)),medianScore:median(scored.map(r=>r.score.overall)),
   averageAreaErrorPct:av("area"),averageFacetErrorPct:av("facets"),averageEdgeErrorPct:av("edges"),
   averagePitchErrorPct:av("pitch"),averageFootprintAreaErrorPct:av("footprintArea"),averageFootprintPerimeterErrorPct:av("footprintPerimeter"),
-  regressionGate:{maxAreaErrorPct:8,maxFacetErrorPct:25,maxEdgeErrorPct:25,minOverallScore:70}
+  regressionGate:{maxAreaErrorPct:8,maxFacetErrorPct:25,maxEdgeErrorPct:25,minOverallScore:70},
+  topologyOptimizerVersion:optimizer?.version||null,
+  optimizedProfiles:Object.keys(profileOverrides).length
  };
  for(const r of rows)if(r.status==="scored"){
   const e=r.score.errors,g=summary.regressionGate;
