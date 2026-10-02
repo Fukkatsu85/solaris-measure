@@ -108,6 +108,54 @@ function trimOrSnapInternalLine(line,poly,families){
   if(nb.distance<=1.8)b=nb.point;
   return {...line,a,b,architecturalAngle:snap.angle};
 }
+function extendInternalLinesToJunctions(lines,perimeter,maxExtension=5.5){
+  const out=lines.map(l=>({...l,a:{...l.a},b:{...l.b}}));
+  const perSegs=perimeter.map((a,i)=>({a,b:perimeter[(i+1)%perimeter.length],kind:"perimeter"}));
+
+  function chooseEndpoint(line,index,key){
+    const p=line[key],q=line[key==="a"?"b":"a"],vx=p.x-q.x,vy=p.y-q.y,vl=Math.hypot(vx,vy)||1,ux=vx/vl,uy=vy/vl;
+    const infA={x:p.x-ux*1000,y:p.y-uy*1000},infB={x:p.x+ux*1000,y:p.y+uy*1000};
+    const candidates=[];
+
+    const addCandidate=(a,b,kind,otherIndex)=>{
+      const h=lineIntersection(infA,infB,a,b);if(!h)return;
+      const pt={x:h.x,y:h.y};
+      const along=(pt.x-p.x)*ux+(pt.y-p.y)*uy;
+      if(along<-.15||along>maxExtension)return;
+      const seg=pointSegDistance(pt,a,b);
+      if(seg.distance>.15)return;
+      candidates.push({pt,d:Math.max(0,along),kind,otherIndex});
+    };
+
+    perSegs.forEach(s=>addCandidate(s.a,s.b,"perimeter",-1));
+    out.forEach((other,j)=>{
+      if(j===index)return;
+      addCandidate(other.a,other.b,"line",j);
+      for(const ep of [other.a,other.b]){
+        const d=dist(p,ep);
+        if(d<=maxExtension)candidates.push({pt:{...ep},d,kind:"endpoint",otherIndex:j});
+      }
+    });
+
+    candidates.sort((x,y)=>x.d-y.d);
+    return candidates[0]?.pt||p;
+  }
+
+  // Iterate twice so one snap can create a useful junction for another line.
+  for(let pass=0;pass<2;pass++){
+    for(let i=0;i<out.length;i++){
+      out[i].a=chooseEndpoint(out[i],i,"a");
+      out[i].b=chooseEndpoint(out[i],i,"b");
+    }
+  }
+  return out.filter(l=>dist(l.a,l.b)>.45);
+}
+
+function validFaceSet(segments,perimeter){
+  const split=splitSegments(segments),graph=buildPlanarGraph(split,.28),faces=extractFaces(graph.nodes,graph.edges,perimeter);
+  const areas=faces.map(ids=>Math.abs(polygonArea(ids.map(id=>graph.nodes[id]))));
+  return {split,graph,faces,areas};
+}
 function segmentIntersection(a,b,c,d){
   const h=lineIntersection(a,b,c,d);
   if(!h||h.t<-1e-7||h.t>1+1e-7||h.u<-1e-7||h.u>1+1e-7)return null;
@@ -234,10 +282,11 @@ export function buildRoofTopology(solarModel){
     });
     if(!duplicate)acceptedInternal.push({...clean,source:"dsm-line"});
   });
-  segments.push(...acceptedInternal);
+  const connectedInternal=extendInternalLinesToJunctions(acceptedInternal,perimeter,5.5);
+  segments.push(...connectedInternal);
 
-  const split=splitSegments(segments),graph=buildPlanarGraph(split,.3);
-  const facesRaw=extractFaces(graph.nodes,graph.edges,perimeter);
+  const solved=validFaceSet(segments,perimeter),split=solved.split,graph=solved.graph;
+  const facesRaw=solved.faces;
   const faces=facesRaw.map((ids,i)=>{
     const c=faceCentroid(ids,graph.nodes),meta=nearestFacetMeta(c,facets,F)||{};
     return {
@@ -255,8 +304,8 @@ export function buildRoofTopology(solarModel){
     lengthMeters:dist(graph.nodes[e.a],graph.nodes[e.b])
   }));
   return {
-    version:2.1,
-    source:"architectural-planar-topology-stable",
+    version:2.2,
+    source:"architectural-planar-topology-junctions",
     dominantAngle:longest.ang,
     vertices,edges,faces,
     outline:perimeter.map(F.toLL),
@@ -265,7 +314,8 @@ export function buildRoofTopology(solarModel){
       perimeterEdges:edges.filter(e=>e.type==="perimeter").length,
       ridgeEdges:edges.filter(e=>e.type==="ridge").length,
       hipEdges:edges.filter(e=>e.type==="hip").length,
-      valleyEdges:edges.filter(e=>e.type==="valley").length
+      valleyEdges:edges.filter(e=>e.type==="valley").length,
+      closedFaces:faces.length
     }
   };
 }
