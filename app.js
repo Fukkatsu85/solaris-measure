@@ -582,7 +582,7 @@ async function runPixelGeometryWorker(){
  if(!window.Worker)throw new Error('Web Worker unavailable');
  const r=await fetch('/api/process-property?projectId='+encodeURIComponent(PROJECT_ID)),d=await r.json(),pairs=d.pipeline?.matching?.results||[];
  if(!pairs.length)throw new Error('No candidate overlap pairs found.');
- const worker=new Worker('/pixel-worker.js?v=1');
+ const worker=new Worker('/pixel-worker.js?v=2');
  const result=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{worker.terminate();reject(new Error('background matching timed out'))},45000);worker.onmessage=e=>{const m=e.data||{};if(m.type==='progress'){if(state)state.textContent='Pixel geometry: pair '+m.current+' of '+m.total+'...';return}clearTimeout(timer);worker.terminate();m.type==='done'?resolve(m.pairs):reject(new Error(m.error||'background matching failed'))};worker.onerror=e=>{clearTimeout(timer);worker.terminate();reject(new Error(e.message||'background worker error'))};worker.postMessage({projectId:PROJECT_ID,pairs})});
  const save=await fetch('/api/pixel-matches',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID,pairs:result})}),sd=await save.json();if(!save.ok)throw new Error(sd.error||'Could not save pixel matches');if(state)state.textContent='Pixel geometry: '+sd.pixelMatches.summary.usable+' usable, '+sd.pixelMatches.summary.weak+' weak of '+sd.pixelMatches.summary.pairs+' overlap pairs.';return sd.pixelMatches;
 }
