@@ -53,6 +53,11 @@
       <section id="roof-geometry-workspace" class="card" hidden style="margin-top:16px">
         <div class="card-head"><div><div class="eyebrow">ROOF GEOMETRY WORKSPACE</div><h3 id="roof-workspace-address">Selected roof</h3><p class="muted">Trace the roof directly over the satellite reference. Geometry tools are the next measurement layer.</p></div><span class="status">Active</span></div>
         <div id="roof-workspace-map" style="min-height:560px;border-radius:14px;overflow:hidden;background:#e5e7eb;margin-top:12px"></div>
+        <div class="card" style="margin-top:12px">
+          <div class="card-head"><div><div class="eyebrow">ANALYSIS IMAGERY</div><h3>MnGeo aerial roof image</h3><p class="muted">Independent Minnesota aerial imagery used for roof analysis. Google remains the locator/reference map.</p></div><span id="mn-aerial-badge" class="status">Loading</span></div>
+          <div id="mn-aerial-wrap" style="min-height:420px;border-radius:14px;overflow:hidden;background:#e5e7eb;display:grid;place-items:center"><span class="muted">Loading Minnesota aerial imagery…</span></div>
+          <p class="muted" id="mn-aerial-status">Resolving property coordinates…</p>
+        </div>
         <div class="actions" style="margin-top:12px"><button id="roof-outline-tool" class="primary" type="button">Roof Outline</button><button class="secondary" type="button" disabled>Ridge</button><button class="secondary" type="button" disabled>Hip</button><button class="secondary" type="button" disabled>Valley</button><button class="secondary" type="button" disabled>Pitch</button></div>
         <p class="muted" id="roof-workspace-status">Satellite workspace loaded. Roof drawing controls are being enabled in stages.</p>
       </section>
@@ -192,6 +197,6 @@
     </div>
   </main>
 
-  <script src="/app.js?v=20261001-selectedroof1"></script>
+  <script src="/app.js?v=20261001-mngeo1"></script>
 </body>
 </html>
