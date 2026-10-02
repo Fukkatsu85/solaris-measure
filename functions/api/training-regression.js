@@ -1,4 +1,4 @@
-import { ROOF_TRAINING_V1, findTrainingBenchmark, LEARNED_PRIORS_V1 } from "../lib/roof-training-v1.js";
+import { ROOF_TRAINING_V1, findTrainingBenchmarks, LEARNED_PRIORS_V1 } from "../lib/roof-training-v1.js";
 import { buildRoofTopology } from "../../assets/js/roof-topology.js";
 
 const json=(d,s=200)=>new Response(JSON.stringify(d),{status:s,headers:{"content-type":"application/json; charset=utf-8","cache-control":"no-store"}});
@@ -85,25 +85,27 @@ function refFor(t){return {
 export async function onRequestGet({env}){
  if(!env.MEASURE_PHOTOS)return json({error:"R2 binding MEASURE_PHOTOS is not configured."},500);
  const keys=await listSolarModels(env);
- const byAddress=new Map();
+ const models=[];
  for(const key of keys){
   const sm=await readJson(env,key);if(!sm?.address)continue;
-  const training=findTrainingBenchmark(sm.address);if(!training)continue;
-  const existing=byAddress.get(training.address);
-  if(!existing||String(sm.savedAt||"")>String(existing.sm.savedAt||""))byAddress.set(training.address,{key,sm,training});
+  const matches=findTrainingBenchmarks(sm.address);if(!matches.length)continue;
+  models.push({key,sm,matches});
  }
  const rows=[];
  for(const t of ROOF_TRAINING_V1){
-  const found=byAddress.get(t.address);
-  if(!found){rows.push({address:t.address,source:t.source,archetype:t.archetype,status:"not-processed",reference:refFor(t)});continue}
+  const candidates=models.filter(m=>m.matches.includes(t));
+  const found=candidates.sort((a,b)=>String(b.sm.savedAt||"").localeCompare(String(a.sm.savedAt||"")))[0];
+  if(!found){rows.push({caseId:t.caseId||null,address:t.address,scope:t.scope||"all-structures",source:t.source,archetype:t.archetype,status:"not-processed",reference:refFor(t)});continue}
   const projectId=found.key.split("/")[0],outline=await readJson(env,projectId+"/_roof_outline_accepted.json");
   const current=currentMetrics(found.sm,outline),result=score(current,refFor(t));
-  rows.push({address:t.address,source:t.source,archetype:t.archetype,status:"scored",projectId,reference:refFor(t),current,score:result});
+  const scope=t.scope||"all-structures";
+  const scopeComparable=scope==="primary-building"||scope==="all-structures";
+  rows.push({caseId:t.caseId||null,address:t.address,scope,source:t.source,archetype:t.archetype,status:scopeComparable?"scored":"scope-specific",projectId,reference:refFor(t),current,score:result});
  }
  const scored=rows.filter(r=>r.status==="scored"&&Number.isFinite(r.score?.overall));
  const av=k=>mean(scored.map(r=>r.score.errors[k]));
  const summary={
-  trainingVersion:LEARNED_PRIORS_V1.version,totalCases:rows.length,processedCases:scored.length,pendingCases:rows.length-scored.length,
+  trainingVersion:LEARNED_PRIORS_V1.version,totalCases:rows.length,processedCases:scored.length,pendingCases:rows.filter(r=>r.status==="not-processed").length,scopeSpecificCases:rows.filter(r=>r.status==="scope-specific").length,
   averageScore:mean(scored.map(r=>r.score.overall)),medianScore:median(scored.map(r=>r.score.overall)),
   averageAreaErrorPct:av("area"),averageFacetErrorPct:av("facets"),averageEdgeErrorPct:av("edges"),
   averagePitchErrorPct:av("pitch"),averageFootprintAreaErrorPct:av("footprintArea"),averageFootprintPerimeterErrorPct:av("footprintPerimeter"),
