@@ -634,26 +634,16 @@ async function getRoofMapsKey(){
  roofMapsKey=d.key;return roofMapsKey;
 }
 const roofAddressInput=document.querySelector('#roof-address');
-let roofAutocompleteReady=false;
-async function initRoofAddressAutocomplete(){
- if(roofAutocompleteReady||!roofAddressInput)return;
- try{
-  const key=await getRoofMapsKey();
-  if(!window.google?.maps?.places){
-   await new Promise((resolve,reject)=>{
-    const s=document.createElement('script');s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&libraries=places&v=weekly';
-    s.async=true;s.onload=resolve;s.onerror=()=>reject(new Error('Google Places could not load.'));document.head.appendChild(s);
-   });
-  }
-  if(window.google?.maps?.places?.Autocomplete){
-   const ac=new google.maps.places.Autocomplete(roofAddressInput,{fields:['formatted_address','geometry'],types:['address'],componentRestrictions:{country:'us'}});
-   ac.addListener('place_changed',()=>{const p=ac.getPlace();if(p?.formatted_address)roofAddressInput.value=p.formatted_address;});
-   roofAutocompleteReady=true;
-  }
- }catch(err){console.warn('Roof address autocomplete unavailable:',err);}
-}
-roofAddressInput?.addEventListener('focus',()=>{roofAddressInput.select();initRoofAddressAutocomplete();},{once:true});
-roofAddressInput?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();document.querySelector('#locate-roof')?.click();}});
+let roofAddressFirstEdit=true;
+roofAddressInput?.addEventListener('pointerdown',()=>{
+ if(roofAddressFirstEdit){
+  roofAddressFirstEdit=false;
+  setTimeout(()=>{roofAddressInput.focus();roofAddressInput.setSelectionRange(0,roofAddressInput.value.length);},0);
+ }
+},{once:true});
+roofAddressInput?.addEventListener('keydown',e=>{
+ if(e.key==='Enter'){e.preventDefault();document.querySelector('#locate-roof')?.click();}
+});
 document.querySelector('#locate-roof')?.addEventListener('click',async()=>{
  const address=document.querySelector('#roof-address')?.value.trim();if(!address){alert('Enter a property address first.');return;}
  const status=document.querySelector('#roof-location-status'),map=document.querySelector('#roof-map'),confirm=document.querySelector('#confirm-roof-property'),btn=document.querySelector('#locate-roof');
