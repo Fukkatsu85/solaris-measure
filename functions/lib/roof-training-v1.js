@@ -23,7 +23,24 @@ export const ROOF_TRAINING_V1 = [
   {address:"1902 Badger Avenue, Eau Claire, WI 54701",source:"Roofr",slopedAreaFt2:1678,facetCount:5,avgPitch12:5,eaveFt:117.9167,valleyFt:0,hipFt:0,ridgeFt:58.9167,rakeFt:116.8333,flatAreaFt2:168,facetAreasFt2:[554,543,169,215,200],pitchAreas:{"1":169,"5":1097,"6":414},archetype:"mixed-flat-multistructure"},
   {address:"1906 Hoover Avenue, Eau Claire, WI 54701",source:"Hover",slopedAreaFt2:1333,facetCount:4,avgPitch12:5,eaveFt:140.5833,valleyFt:0,ridgeHipFt:97.5,rakeFt:3.75,perimeterFt:144.3333,footprintAreaFt2:1105,footprintPerimeterFt:150.5,flatAreaFt2:0,facetAreasFt2:[],pitchAreas:{"5":1333},archetype:"hip-dominant-simple"},
   {address:"2745 Sunset Lane, Burnsville, MN 55337",source:"Hover",slopedAreaFt2:2543,facetCount:6,avgPitch12:4,eaveFt:169.0833,valleyFt:21.6667,ridgeHipFt:98.9167,rakeFt:111.3333,perimeterFt:280.5,footprintAreaFt2:2145,footprintPerimeterFt:246.75,flatAreaFt2:0,facetAreasFt2:[],pitchAreas:{"4":2114,"3":429},archetype:"compound-valley-multipitch"},
-  {address:"2470 Lydia Avenue West, Roseville, MN 55113",source:"Hover",slopedAreaFt2:3097,facetCount:6,avgPitch12:4,eaveFt:154.5833,valleyFt:78.8333,ridgeHipFt:130.5,rakeFt:121.1667,perimeterFt:275.75,footprintAreaFt2:2312,footprintPerimeterFt:253.3333,flatAreaFt2:0,facetAreasFt2:[],pitchAreas:{"4":3097},archetype:"compound-valley"}
+  {address:"2470 Lydia Avenue West, Roseville, MN 55113",source:"Hover",slopedAreaFt2:3097,facetCount:6,avgPitch12:4,eaveFt:154.5833,valleyFt:78.8333,ridgeHipFt:130.5,rakeFt:121.1667,perimeterFt:275.75,footprintAreaFt2:2312,footprintPerimeterFt:253.3333,flatAreaFt2:0,facetAreasFt2:[],pitchAreas:{"4":3097},archetype:"compound-valley"},
+
+  // Batch 3 — added from verified Roofr/Hover reports supplied 2026-10-02.
+  {caseId:"doswell-2401-roofr",address:"2401 Doswell Avenue, Saint Paul, MN",source:"Roofr",scope:"all-structures",slopedAreaFt2:1540,facetCount:44,avgPitch12:12,eaveFt:170.4167,valleyFt:69,hipFt:87.25,ridgeFt:57.25,rakeFt:97.0833,flatAreaFt2:0,pitchAreas:{"5":489,"12":1052},archetype:"steep-microfacet-complex"},
+  {caseId:"pillsbury-4242-roofr",address:"4242 Pillsbury Avenue, Minneapolis, MN",source:"Roofr",scope:"all-structures",slopedAreaFt2:1696,facetCount:7,avgPitch12:6,eaveFt:158.9167,valleyFt:21.8333,hipFt:134.0833,ridgeFt:2.1667,rakeFt:0,flatAreaFt2:0,pitchAreas:{"1":335,"6":1362},archetype:"hip-dominant-low-ridge"},
+  {caseId:"135th-4168-hover",address:"4168 135th Street, Chippewa Falls, WI 54729",source:"Hover",scope:"primary-building",slopedAreaFt2:3365,facetCount:20,avgPitch12:8,eaveFt:156.9167,valleyFt:121.5,ridgeHipFt:142.0833,rakeFt:188.5,perimeterFt:345.4167,footprintAreaFt2:2422,footprintPerimeterFt:240.3333,flatAreaFt2:0,pitchAreas:{"8":3248,"5":75,"6":26,"7":12},archetype:"complex-valley-multipitch"},
+  {caseId:"pierce-3326-garage-hover",address:"3326 Pierce Street Northeast, Minneapolis, MN 55418",source:"Hover",scope:"detached-garage",structureGroup:"3326-pierce",slopedAreaFt2:362,facetCount:2,avgPitch12:7,eaveFt:42.0833,valleyFt:0,ridgeHipFt:21.0833,rakeFt:34.5,perimeterFt:76.5833,footprintAreaFt2:300,footprintPerimeterFt:71.25,flatAreaFt2:0,pitchAreas:{"7":362},archetype:"small-simple-gable"},
+  {caseId:"46th-1029-hover",address:"1029 46th Avenue South, Moorhead, MN 56560",source:"Hover",scope:"primary-building",slopedAreaFt2:2042,facetCount:9,avgPitch12:5,eaveFt:129.5,valleyFt:17,ridgeHipFt:67.75,rakeFt:169.4167,perimeterFt:298.9167,footprintAreaFt2:1608,footprintPerimeterFt:187.5,flatAreaFt2:0,pitchAreas:{"5":1649,"3":256,"4":137},archetype:"compound-multipitch"},
+  {caseId:"ohio-698-hover",address:"698 Ohio Street, Saint Paul, MN 55107",source:"Hover",scope:"primary-building",slopedAreaFt2:2272,facetCount:38,avgPitch12:12,eaveFt:188.0833,valleyFt:158.6667,ridgeHipFt:183.5833,rakeFt:172.8333,perimeterFt:360.9167,footprintAreaFt2:1200,footprintPerimeterFt:167.75,flatAreaFt2:0,pitchAreas:{"12":1548,"4":290,"2":229,"7":88},archetype:"steep-microfacet-complex"},
+  {caseId:"fremont-15609-hover",address:"15609 Fremont Avenue South, Burnsville, MN 55306",source:"Hover",scope:"primary-building",slopedAreaFt2:2860,facetCount:12,avgPitch12:6,eaveFt:158.75,valleyFt:53.25,ridgeHipFt:83.9167,rakeFt:223.5833,perimeterFt:382.3333,footprintAreaFt2:2008,footprintPerimeterFt:199,flatAreaFt2:0,pitchAreas:{"6":2860},archetype:"compound-valley"},
+  {caseId:"156th-1204-hover",address:"1204 156th Street West, Burnsville, MN 55306",source:"Hover",scope:"primary-building",slopedAreaFt2:3055,facetCount:4,avgPitch12:4,eaveFt:157.3333,valleyFt:4.5833,ridgeHipFt:78.75,rakeFt:118.8333,perimeterFt:276.1667,footprintAreaFt2:2306,footprintPerimeterFt:216.5,flatAreaFt2:0,pitchAreas:{"4":3055},archetype:"simple-low-complexity"},
+  {caseId:"franklin-1825-main-hover",address:"1825 Franklin Avenue Southeast, Minneapolis, MN 55414",source:"Hover",scope:"primary-building",structureGroup:"1825-franklin",slopedAreaFt2:1716,facetCount:6,avgPitch12:5,eaveFt:100.1667,valleyFt:.5,ridgeHipFt:41.1667,rakeFt:141.25,perimeterFt:241.4167,footprintAreaFt2:1451,footprintPerimeterFt:174,flatAreaFt2:0,pitchAreas:{"5":1429,"3":276,"2":11},archetype:"simple-multipitch"},
+  {caseId:"franklin-1825-garage-hover",address:"1825 Franklin Avenue Southeast, Minneapolis, MN 55414",source:"Hover",scope:"detached-garage",structureGroup:"1825-franklin",slopedAreaFt2:1038,facetCount:2,avgPitch12:5,eaveFt:80.9167,valleyFt:0,ridgeHipFt:40.5,rakeFt:51.25,perimeterFt:132.1667,footprintAreaFt2:862,footprintPerimeterFt:127.5,flatAreaFt2:0,pitchAreas:{"5":1038},archetype:"small-simple-gable"},
+  {caseId:"pierce-3326-main-hover",address:"3326 Pierce Street Northeast, Minneapolis, MN 55418",source:"Hover",scope:"primary-building",structureGroup:"3326-pierce",slopedAreaFt2:1070,facetCount:8,avgPitch12:10,eaveFt:79.4167,valleyFt:23.5833,ridgeHipFt:50.1667,rakeFt:86.3333,perimeterFt:165.75,footprintAreaFt2:856,footprintPerimeterFt:139.5833,flatAreaFt2:0,pitchAreas:{"10":1070},archetype:"steep-dormer-complex"},
+  {caseId:"juniper-45-hover",address:"45 Juniper Street, Saint Paul, MN 55115",source:"Hover",scope:"primary-building",structureGroup:"45-juniper",slopedAreaFt2:2629,facetCount:8,avgPitch12:2,eaveFt:236.3333,valleyFt:0,ridgeHipFt:140.5,rakeFt:3.5,perimeterFt:239.8333,footprintAreaFt2:2013,footprintPerimeterFt:199.9167,flatAreaFt2:0,pitchAreas:{"2":2599,"7":23,"6":5,"9":2},archetype:"low-slope-hip"},
+  {caseId:"acorn-1172-hover",address:"1172 Acorn Way, Waconia, MN 55387",source:"Hover",scope:"primary-building",slopedAreaFt2:2421,facetCount:10,avgPitch12:6,eaveFt:123.25,valleyFt:76.75,ridgeHipFt:101.1667,rakeFt:152.75,perimeterFt:276,footprintAreaFt2:1930,footprintPerimeterFt:196.25,flatAreaFt2:0,pitchAreas:{"6":1285,"5":1136},archetype:"compound-valley-multipitch"},
+  {caseId:"juniper-45-roofr",address:"45 Juniper Street, Saint Paul, MN 55115",source:"Roofr",scope:"all-structures",structureGroup:"45-juniper",slopedAreaFt2:4382,facetCount:12,avgPitch12:2,eaveFt:324.5833,valleyFt:0,hipFt:104.6667,ridgeFt:79.5,rakeFt:120.3333,flatAreaFt2:2635,facetAreasFt2:[],archetype:"multi-structure-low-slope-flat"},
+  {caseId:"pond-view-626-roofr",address:"626 Pond View Drive, Mendota Heights, MN 55120",source:"Roofr",scope:"all-structures",slopedAreaFt2:3246,facetCount:20,avgPitch12:9,eaveFt:183.0833,valleyFt:66.25,hipFt:6.3333,ridgeFt:99.3333,rakeFt:231.5833,flatAreaFt2:35,pitchAreas:{"1":35,"9":3212},archetype:"steep-compound-mixed-flat"}
 ];
 
 const norm=s=>String(s||"").toLowerCase()
@@ -32,31 +49,41 @@ const norm=s=>String(s||"").toLowerCase()
   north:"n","n.":"n",n:"n",south:"s","s.":"s",s:"s",west:"w","w.":"w",w:"w",east:"e","e.":"e",e:"e"
  }[m]||m)).replace(/[^a-z0-9]+/g," ").trim();
 
-export function findTrainingBenchmark(address){
- const n=norm(address);
- if(!n)return null;
- let best=null,bestScore=0;
- for(const row of ROOF_TRAINING_V1){
-  const r=norm(row.address);
-  if(n===r)return row;
-  const a=new Set(n.split(" ")),b=new Set(r.split(" "));
-  const common=[...a].filter(x=>b.has(x)).length,score=common/Math.max(a.size,b.size);
-  if(score>bestScore){bestScore=score;best=row}
+function addressScore(a,b){
+ const n=norm(a),r=norm(b);if(!n||!r)return 0;if(n===r)return 1;
+ const aa=new Set(n.split(" ")),bb=new Set(r.split(" "));
+ return [...aa].filter(x=>bb.has(x)).length/Math.max(aa.size,bb.size);
+}
+export function findTrainingBenchmarks(address){
+ return ROOF_TRAINING_V1.map(row=>({row,score:addressScore(address,row.address)}))
+  .filter(x=>x.score>=.72).sort((a,b)=>b.score-a.score).map(x=>x.row);
+}
+export function findTrainingBenchmark(address,{scope}={}){
+ const rows=findTrainingBenchmarks(address);
+ if(!rows.length)return null;
+ if(scope){
+  const exact=rows.find(r=>(r.scope||"all-structures")===scope);if(exact)return exact;
  }
- return bestScore>=.72?best:null;
+ // Whole-property truth is safest for address-level automatic benchmarking.
+ return rows.find(r=>(r.scope||"all-structures")==="all-structures")
+   ||rows.find(r=>(r.scope||"all-structures")==="primary-building")
+   ||rows[0];
 }
 
 export const LEARNED_PRIORS_V1 = {
- version:"2026-10-02-r24",
- sampleCount:24,
+ version:"2026-10-02-r39",
+ sampleCount:39,
  summary:{
-  medianFacetCount:6,
+  medianFacetCount:7,
   complexFacetThreshold:10,
   microFacetAreaFt2:35,
   smallFacetAreaFt2:75,
   mixedFlatThresholdFt2:100,
-  includesFootprintTruth:5,
-  sources:["Roofr","Hover","EagleView"]
+  includesFootprintTruth:15,
+  scopedStructureCases:6,
+  crossProviderSameAddressCases:1,
+  sources:["Roofr","Hover","EagleView"],
+  lessons:["separate primary-building vs all-structures truth","preserve legitimate micro-facets on steep roofs","treat low-slope hip roofs separately from flat roofs","use footprint truth as an upstream geometry gate"]
  },
  profiles:{
   "simple-gable":{maxCandidateAdds:2,maxLineExtensionM:4.0,candidateConnectM:3.2,minFaceAreaM2:2.8,nodeSnapM:.44},
