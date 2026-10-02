@@ -159,7 +159,7 @@
             <h3>39-case roof regression suite</h3>
             <p class="muted">Runs the current roof solver against all verified Roofr, Hover and EagleView cases in the training corpus, including structure-scoped cases. Cases without a saved Solaris DSM model are shown as pending.</p>
           </div>
-          <div class="actions"><button id="run-roof-regression" class="primary" type="button">Run Regression</button></div>
+          <div class="actions"><button id="bootstrap-roof-training" class="secondary" type="button">Process Pending Cases</button><button id="run-roof-regression" class="primary" type="button">Run Regression</button></div>
         </div>
         <div id="roof-regression-summary" class="metrics" style="grid-template-columns:repeat(auto-fit,minmax(145px,1fr));margin-top:12px">
           <div class="metric"><span>Training cases</span><strong>39</strong></div>
@@ -169,7 +169,7 @@
           <div class="metric"><span>Facet error</span><strong>—</strong></div>
           <div class="metric"><span>Roof-line error</span><strong>—</strong></div>
         </div>
-        <div id="roof-regression-status" class="analysis-state" style="margin-top:12px">Ready to test the current learned solver against the verified training corpus.</div>
+        <div id="roof-regression-status" class="analysis-state" style="margin-top:12px">Ready to test the current learned solver against the verified training corpus. Use Process Pending Cases to automatically geocode and build Google Solar DSM training models for roofs that do not have saved geometry yet.</div>
         <div id="roof-regression-results" class="table-wrap" style="margin-top:12px"></div>
       </section>
       <div id="roof-gallery" class="photo-gallery"></div>
@@ -308,6 +308,6 @@
     </div>
   </main>
 
-  <script src="/app.js?v=20261002-training-r39b"></script>
+  <script src="/app.js?v=20261002-bootstrap-r39"></script>
 </body>
 </html>
