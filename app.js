@@ -871,3 +871,67 @@ function bindRoofOverlayEditor(){
   poly.splice(best+1,0,p);renderRoofOutline(poly,false);e.preventDefault();
  });
 }
+
+let roofLineProposals=[];
+function pipRoof(p,poly){let inside=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];const hit=((a.y>p.y)!==(b.y>p.y))&&(p.x<(b.x-a.x)*(p.y-a.y)/((b.y-a.y)||1e-9)+a.x);if(hit)inside=!inside}return inside}
+function segPolyIntersections(a,b,poly){
+ const out=[];const dx=b.x-a.x,dy=b.y-a.y;
+ for(let i=0;i<poly.length;i++){const c=poly[i],d=poly[(i+1)%poly.length],ex=d.x-c.x,ey=d.y-c.y,den=dx*ey-dy*ex;if(Math.abs(den)<1e-9)continue;
+  const t=((c.x-a.x)*ey-(c.y-a.y)*ex)/den,u=((c.x-a.x)*dy-(c.y-a.y)*dx)/den;
+  if(t>=0&&t<=1&&u>=0&&u<=1)out.push({x:a.x+t*dx,y:a.y+t*dy})
+ }
+ return out;
+}
+function renderRoofLines(){
+ const svg=document.querySelector('#roof-outline-overlay');if(!svg||!roofOutlineProposal?.polygon)return;
+ renderRoofOutline(roofOutlineProposal.polygon,roofOutlineProposal.status==='accepted-plan-view');
+ const ns='http://www.w3.org/2000/svg';
+ roofLineProposals.forEach((l,i)=>{
+  if(l.type==='ignore')return;
+  const line=document.createElementNS(ns,'line');line.setAttribute('x1',l.a.x*1000);line.setAttribute('y1',l.a.y*1000);line.setAttribute('x2',l.b.x*1000);line.setAttribute('y2',l.b.y*1000);
+  line.setAttribute('stroke',l.type==='ridge'?'#22c55e':l.type==='hip'?'#60a5fa':l.type==='valley'?'#ef4444':'#f97316');line.setAttribute('stroke-width','6');line.setAttribute('vector-effect','non-scaling-stroke');svg.appendChild(line);
+  const tx=document.createElementNS(ns,'text');tx.setAttribute('x',((l.a.x+l.b.x)/2)*1000);tx.setAttribute('y',((l.a.y+l.b.y)/2)*1000);tx.setAttribute('fill','#fff');tx.setAttribute('stroke','#111');tx.setAttribute('stroke-width','3');tx.setAttribute('paint-order','stroke');tx.setAttribute('font-size','34');tx.setAttribute('font-weight','700');tx.textContent=String(i+1);svg.appendChild(tx);
+ });
+}
+async function detectInternalRoofLines(){
+ const status=document.querySelector('#roof-line-status'),panel=document.querySelector('#roof-line-panel'),list=document.querySelector('#roof-line-list'),count=document.querySelector('#roof-line-count');
+ if(!roofOutlineProposal?.polygon){if(status)status.textContent='Accept a roof outline first.';return}
+ const img=document.querySelector('#mn-aerial-img');try{await roofImageReady(img)}catch(e){if(status)status.textContent=e.message;return}
+ if(panel)panel.hidden=false;if(status)status.textContent='Scanning aerial image for strong internal roof lines…';
+ const size=420,cv=document.createElement('canvas');cv.width=size;cv.height=size;const ctx=cv.getContext('2d',{willReadFrequently:true});ctx.drawImage(img,0,0,size,size);
+ const im=ctx.getImageData(0,0,size,size).data,gray=new Float32Array(size*size);
+ for(let i=0;i<size*size;i++)gray[i]=.2126*im[i*4]+.7152*im[i*4+1]+.0722*im[i*4+2];
+ const edges=[];for(let y=2;y<size-2;y+=2)for(let x=2;x<size-2;x+=2){const p={x:x/size,y:y/size};if(!pipRoof(p,roofOutlineProposal.polygon))continue;
+  const gx=-gray[(y-1)*size+x-1]-2*gray[y*size+x-1]-gray[(y+1)*size+x-1]+gray[(y-1)*size+x+1]+2*gray[y*size+x+1]+gray[(y+1)*size+x+1];
+  const gy=-gray[(y-1)*size+x-1]-2*gray[(y-1)*size+x]-gray[(y-1)*size+x+1]+gray[(y+1)*size+x-1]+2*gray[(y+1)*size+x]+gray[(y+1)*size+x+1];
+  const mag=Math.hypot(gx,gy);if(mag>110)edges.push({x,y,mag});
+ }
+ const thetas=[];for(let d=0;d<180;d+=3)thetas.push(d*Math.PI/180);const rhoMax=Math.ceil(Math.hypot(size,size)),acc=Array.from({length:thetas.length},()=>new Uint16Array(rhoMax*2+1));
+ for(const e of edges){for(let t=0;t<thetas.length;t++){const r=Math.round(e.x*Math.cos(thetas[t])+e.y*Math.sin(thetas[t]))+rhoMax;if(r>=0&&r<acc[t].length)acc[t][r]++}}
+ const peaks=[];for(let t=0;t<thetas.length;t++)for(let r=0;r<acc[t].length;r++){const v=acc[t][r];if(v>14)peaks.push({t,r,v})}peaks.sort((a,b)=>b.v-a.v);
+ const chosen=[];for(const p of peaks){const th=thetas[p.t],rho=p.r-rhoMax;if(chosen.some(q=>Math.abs(q.th-th)<.12&&Math.abs(q.rho-rho)<22))continue;chosen.push({th,rho,score:p.v});if(chosen.length>=10)break}
+ const poly=roofOutlineProposal.polygon,lines=[];
+ for(const q of chosen){const nx=Math.cos(q.th),ny=Math.sin(q.th),tx=-ny,ty=nx,cx=nx*q.rho/size,cy=ny*q.rho/size;
+  const a={x:cx-tx*2,y:cy-ty*2},b={x:cx+tx*2,y:cy+ty*2},ints=segPolyIntersections(a,b,poly);
+  if(ints.length<2)continue;let best=null,bd=0;for(let i=0;i<ints.length;i++)for(let j=i+1;j<ints.length;j++){const d=Math.hypot(ints[j].x-ints[i].x,ints[j].y-ints[i].y);if(d>bd){bd=d;best=[ints[i],ints[j]]}}
+  if(best&&bd>.12)lines.push({id:'line-'+(lines.length+1),type:'candidate',a:best[0],b:best[1],score:q.score});
+ }
+ roofLineProposals=lines.slice(0,8);renderRoofLines();
+ if(count)count.textContent=roofLineProposals.length+' lines';
+ if(list)list.innerHTML=roofLineProposals.map((l,i)=>'<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #e5e7eb"><strong style="min-width:54px">Line '+(i+1)+'</strong><select data-roof-line="'+i+'" style="padding:8px 10px;border-radius:8px;border:1px solid #cbd5e1"><option value="candidate">Candidate</option><option value="ridge">Ridge</option><option value="hip">Hip</option><option value="valley">Valley</option><option value="ignore">Ignore</option></select><span class="muted">edge score '+l.score+'</span></div>').join('');
+ list?.querySelectorAll('select[data-roof-line]').forEach(sel=>sel.addEventListener('change',e=>{roofLineProposals[+e.target.dataset.roofLine].type=e.target.value;renderRoofLines()}));
+ if(status)status.textContent=roofLineProposals.length?'Review the numbered lines and classify Ridge / Hip / Valley / Ignore.':'No strong internal lines found automatically. Manual roof geometry will be needed.';
+}
+document.querySelector('#detect-roof-lines')?.addEventListener('click',detectInternalRoofLines);
+document.querySelector('#save-roof-lines')?.addEventListener('click',async()=>{
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{},status=document.querySelector('#roof-line-status');
+ if(!saved?.lat||!saved?.lng){if(status)status.textContent='Property coordinates missing.';return}
+ const projectId=saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
+ const lines=roofLineProposals.filter(l=>l.type!=='ignore'),defaultPitch=Number(document.querySelector('#roof-default-pitch')?.value||4);
+ if(status)status.textContent='Saving reviewed roof geometry…';
+ try{const r=await fetch('/api/roof-geometry',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId,address:saved.address,lines,defaultPitch})}),d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Could not save roof geometry');
+  const ridge=lines.filter(l=>l.type==='ridge').length,hip=lines.filter(l=>l.type==='hip').length,valley=lines.filter(l=>l.type==='valley').length;
+  if(status)status.textContent='Roof geometry saved ✓ · '+ridge+' ridge · '+hip+' hip · '+valley+' valley · default pitch '+defaultPitch+'/12. Next: facet construction.';
+  const p=document.querySelector('#roof-pitch');if(p)p.textContent=defaultPitch+'/12 default';
+ }catch(err){if(status)status.textContent='Could not save roof geometry: '+err.message}
+});
