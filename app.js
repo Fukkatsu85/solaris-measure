@@ -1336,7 +1336,7 @@ function roofDiagramSvg(data){
    });
    topology.edges.forEach(e=>{
     const a=vById.get(e.a),b=vById.get(e.b);if(!a||!b)return;
-    const pa=pt(a),pb=pt(b),stroke=e.faces.length>1?(lc[e.type]||'#555'):'#111',width=e.faces.length>1?7:6;
+    const pa=pt(a),pb=pt(b),isPerimeter=e.type==='perimeter',stroke=isPerimeter?'#111':(lc[e.type]||'#555'),width=isPerimeter?7:7;
     s+='<line x1="'+pa.x.toFixed(1)+'" y1="'+pa.y.toFixed(1)+'" x2="'+pb.x.toFixed(1)+'" y2="'+pb.y.toFixed(1)+'" stroke="'+stroke+'" stroke-width="'+width+'"/>';
    });
   }else{
@@ -1357,7 +1357,7 @@ function roofDiagramSvg(data){
    const a=pt(e.a),b=pt(e.b),mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
    s+='<text x="'+mx.toFixed(1)+'" y="'+(my-7).toFixed(1)+'" text-anchor="middle" font-size="15" font-weight="600" fill="#111" stroke="#fff" stroke-width="5" paint-order="stroke">'+Number(e.lengthFt||0).toFixed(1)+' ft</text>';
   });
-  s+='<g transform="translate(28 935)" font-size="17" fill="#111"><text x="0" y="0">Geometry: shared roof topology graph from Google DSM</text><text x="0" y="26">Shared vertices/edges enforce one connected roof model; LiDAR remains an independent 3D validation source</text></g></svg>';
+  s+='<g transform="translate(28 935)" font-size="17" fill="#111"><text x="0" y="0">Geometry: architectural planar topology rebuilt from DSM roof lines</text><text x="0" y="26">Shared vertices/edges enforce one connected roof model; LiDAR remains an independent 3D validation source</text></g></svg>';
   return s;
  }
  const outline=data.outline,poly=outline.polygon||[],planes=(data.planes?.planes||[]).filter(p=>p.accepted),geom=(data.geometry?.lines||[]).filter(l=>l.type!=='ignore'&&l.type!=='candidate');
@@ -1399,7 +1399,7 @@ async function generateRoofReport(){
   const sm=d.solarModel||null,dm=sm?.measurements||{},dsmFacets=sm?.model?.facets||[];
   if(sm?.model?.facets?.length){
    try{
-    const topo=await import('/assets/js/roof-topology.js?v=20261002-1');
+    const topo=await import('/assets/js/roof-topology.js?v=20261002-2');
     d.topology=topo.buildRoofTopology(sm);
    }catch(err){console.warn('Roof topology engine unavailable',err)}
   }
