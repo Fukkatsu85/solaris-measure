@@ -757,6 +757,7 @@ async function openRoofGeometryWorkspace(){
   if(aerialBadge)aerialBadge.textContent='Ready';
   setTimeout(()=>findRoofLidar().catch(()=>{}),250);
   setTimeout(()=>restoreRoofReportReadyState().catch(()=>{}),350);
+  setTimeout(()=>restoreRoofSolarModel().catch(()=>{}),450);
  }catch(err){
   if(aerialWrap)aerialWrap.innerHTML='<div style="padding:28px;text-align:center"><strong>Analysis imagery unavailable</strong><p class="muted">'+err.message+'</p></div>';
   if(aerialStatus)aerialStatus.textContent='If Google reports an API error, enable Geocoding API for the Solaris Measure key.';
@@ -1294,4 +1295,76 @@ async function restoreRoofReportReadyState(){
  if(fc)fc.textContent=facets.length;if(pit)pit.textContent=avg.toFixed(1)+'/12 avg';if(sq&&sloped>0)sq.textContent=(sloped/100).toFixed(2)+' sq';
  if(area&&d.outline?.measurement?.planAreaFt2)area.textContent=Math.round(d.outline.measurement.planAreaFt2).toLocaleString()+' ft²';
  if(per&&d.outline?.measurement?.perimeterFt)per.textContent=Number(d.outline.measurement.perimeterFt).toFixed(1)+' ft';
+}
+
+let roofSolarProposal=null;
+function fmtHybridFt(v){return Number.isFinite(Number(v))?Number(v).toFixed(1)+' ft':'—'}
+function renderRoofSolarProposal(proposal){
+ const badge=document.querySelector('#roof-solar-badge'),summary=document.querySelector('#roof-solar-summary'),lines=document.querySelector('#roof-solar-lines'),accept=document.querySelector('#accept-roof-solar');
+ const m=proposal?.measurements||{},model=proposal?.model||{},facets=model.facets||[],roofLines=model.roofLines||[];
+ if(badge)badge.textContent='DSM ready';
+ if(summary)summary.innerHTML='<strong>Google DSM roof model ready</strong><br>'+
+   Math.round(Number(model.slopedAreaSqFt||0)).toLocaleString()+' ft² sloped area · '+
+   (Number(model.slopedAreaSqFt||0)/100).toFixed(2)+' squares · '+
+   facets.length+' facets · '+Number(model.rise12||0).toFixed(1)+'/12 average pitch<br>'+
+   'Perimeter '+fmtHybridFt(m.perimeterFt)+' · Eave '+fmtHybridFt(m.eaveFt)+' · Rake '+fmtHybridFt(m.rakeFt)+' · Ridge '+fmtHybridFt(m.ridgeFt)+' · Hip '+fmtHybridFt(m.hipFt)+' · Valley '+fmtHybridFt(m.valleyFt)+
+   '<br><span class="muted">Geometry mode: '+escRoof(model.geometryMode||'detailed')+' · facet coverage '+Math.round(Number(model.facetCoverage||0)*100)+'%'+(model.rgbAssisted?' · RGB edge assist':'')+'</span>';
+ if(lines){
+  const rows=roofLines.filter(l=>['ridge','hip','valley'].includes(l.type)).map((l,i)=>'<div style="display:grid;grid-template-columns:80px 1fr 90px;gap:10px;padding:7px 0;border-bottom:1px solid #e5e7eb"><strong>'+escRoof(l.type)+'</strong><span>DSM shared boundary '+(i+1)+'</span><span>'+fmtHybridFt(Number(l.length3dMeters||l.lengthMeters||0)*3.280839895)+'</span></div>').join('');
+  lines.innerHTML=rows||'<span class="muted">No confident ridge / hip / valley proposals were produced.</span>';
+ }
+ if(accept)accept.disabled=false;
+}
+async function saveRoofSolarModel(accepted=false){
+ if(!roofSolarProposal)return;
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
+ const projectId=saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
+ const r=await fetch('/api/roof-solar-model',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId,address:saved.address,accepted,model:roofSolarProposal})});
+ const d=await r.json().catch(()=>({}));if(!r.ok||!d.ok)throw new Error(d.error||'Could not save Google DSM roof model.');
+ return d.model;
+}
+document.querySelector('#run-roof-solar')?.addEventListener('click',async()=>{
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{},btn=document.querySelector('#run-roof-solar'),badge=document.querySelector('#roof-solar-badge'),summary=document.querySelector('#roof-solar-summary'),accept=document.querySelector('#accept-roof-solar');
+ const lat=Number(saved.lat),lng=Number(saved.lng);
+ if(!Number.isFinite(lat)||!Number.isFinite(lng)){if(summary)summary.textContent='Confirm the roof location first.';return}
+ if(btn)btn.disabled=true;if(accept)accept.disabled=true;if(badge)badge.textContent='Analyzing';if(summary)summary.textContent='Loading Google rooftop mask, DSM, RGB and roof-segment metadata…';
+ try{
+  const br=await fetch('/api/solar-building?lat='+encodeURIComponent(lat)+'&lng='+encodeURIComponent(lng)),building=await br.json();
+  if(!br.ok||!building.ok)throw new Error(building.error||'Google Solar Building Insights is unavailable for this roof.');
+  const engine=await import('/assets/js/solar-roof-engine.js?v=20261002-1');
+  const result=await engine.buildSolarRoofModel(lat,lng,building.roofSegments||[]);
+  const measurements=engine.buildRoofMeasurements(result.outline,result.model.facets||[],result.model.roofLines||[]);
+  roofSolarProposal={
+   source:'google-solar-dsm',
+   lat,lng,
+   imageryQuality:building.imageryQuality||result.quality||null,
+   imageryDate:building.imageryDate||null,
+   googleWholeRoofAreaFt2:Number.isFinite(Number(building.roofAreaMeters2))?Number(building.roofAreaMeters2)*10.7639104167:null,
+   outline:result.outline,
+   rawCornerCount:result.rawCornerCount,
+   model:result.model,
+   measurements
+  };
+  renderRoofSolarProposal(roofSolarProposal);
+  await saveRoofSolarModel(false);
+ }catch(err){
+  roofSolarProposal=null;if(badge)badge.textContent='Unavailable';if(summary)summary.textContent='Google DSM analysis could not run: '+err.message;
+ }finally{if(btn)btn.disabled=false}
+});
+document.querySelector('#accept-roof-solar')?.addEventListener('click',async()=>{
+ const btn=document.querySelector('#accept-roof-solar'),badge=document.querySelector('#roof-solar-badge'),summary=document.querySelector('#roof-solar-summary');
+ if(!roofSolarProposal)return;
+ if(btn)btn.disabled=true;
+ try{
+  await saveRoofSolarModel(true);if(badge)badge.textContent='Accepted ✓';
+  if(summary)summary.innerHTML+='<br><strong>DSM geometry accepted for hybrid report comparison.</strong>';
+ }catch(err){if(summary)summary.innerHTML+='<br><strong>Could not save acceptance:</strong> '+escRoof(err.message);if(btn)btn.disabled=false}
+});
+async function restoreRoofSolarModel(){
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
+ if(!Number.isFinite(Number(saved.lat))||!Number.isFinite(Number(saved.lng)))return;
+ const projectId=saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
+ const r=await fetch('/api/roof-solar-model?projectId='+encodeURIComponent(projectId));if(!r.ok)return;
+ const d=await r.json();if(!d.model)return;roofSolarProposal=d.model;renderRoofSolarProposal(roofSolarProposal);
+ const badge=document.querySelector('#roof-solar-badge');if(d.model.accepted&&badge)badge.textContent='Accepted ✓';
 }
