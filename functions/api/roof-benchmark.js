@@ -79,7 +79,38 @@ export async function onRequestGet({request,env}){
  if(!env.MEASURE_PHOTOS)return json({error:"R2 binding MEASURE_PHOTOS is not configured."},500);
  const u=new URL(request.url),id=safe(u.searchParams.get("projectId"));
  if(!id)return json({error:"projectId is required"},400);
- const b=await read(env,id+"/_benchmark.json");
+ let b=await read(env,id+"/_benchmark.json");
+ if(!b){
+  const [outline,sm,planes]=await Promise.all([
+   read(env,id+"/_roof_outline_accepted.json"),
+   read(env,id+"/_google_solar_roof_model.json"),
+   read(env,id+"/_roof_planes.json")
+  ]);
+  const address=String(outline?.address||sm?.address||"").toLowerCase();
+  if(address.includes("1324 forest circle")||address.includes("1324 forest cir")){
+   const reference={
+    source:"Roofr",
+    slopedAreaFt2:2580,
+    facetCount:15,
+    avgPitch12:8,
+    perimeterFt:292.4167,
+    ridgeFt:69.5833,
+    hipFt:20.75,
+    valleyFt:26.6667,
+    eaveFt:156.25,
+    rakeFt:136.1667,
+    facetAreasFt2:[]
+   };
+   if(sm||planes){
+    const solaris=buildSolaris(sm,planes,outline),score=scoreBenchmark(solaris,reference);
+    b={version:1,projectId:id,address:outline?.address||sm?.address||"1324 Forest Circle, Burnsville, MN 55306",createdAt:new Date().toISOString(),reference,solaris,score,seededFrom:"Roofr report supplied by user"};
+    await Promise.all([
+     env.MEASURE_PHOTOS.put(id+"/_benchmark.json",JSON.stringify(b),{httpMetadata:{contentType:"application/json"}}),
+     env.MEASURE_PHOTOS.put("benchmarks/"+id+".json",JSON.stringify(b),{httpMetadata:{contentType:"application/json"}})
+    ]);
+   }
+  }
+ }
  return json({benchmark:b});
 }
 export async function onRequestPost({request,env}){
