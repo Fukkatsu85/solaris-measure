@@ -1365,11 +1365,15 @@ function roofLineTotals(data){
  return out;
 }
 async function generateRoofReport(){
- const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{},panel=document.querySelector('#roof-report-panel'),content=document.querySelector('#roof-report-content'),state=document.querySelector('#roof-state');
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{},panel=document.querySelector('#roof-report-panel'),content=document.querySelector('#roof-report-content'),state=document.querySelector('#roof-state'),topBtn=document.querySelector('#roof-takeoff'),inlineBtn=document.querySelector('#roof-report-inline');
  const projectId=saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
  if(state)state.textContent='Building roof measurement report…';
+ const oldTop=topBtn?.textContent,oldInline=inlineBtn?.textContent;
+ if(topBtn){topBtn.disabled=true;topBtn.textContent='Building Report…'}
+ if(inlineBtn){inlineBtn.disabled=true;inlineBtn.textContent='Building Report…'}
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
  try{
-  const r=await fetch('/api/roof-report?projectId='+encodeURIComponent(projectId)),d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Report data is incomplete.');
+  const r=await fetch('/api/roof-report?projectId='+encodeURIComponent(projectId),{signal:controller.signal}),d=await r.json().catch(()=>({}));if(!r.ok||!d.ok)throw new Error(d.error||'Report data is incomplete.');
   const facets=(d.planes?.planes||[]).filter(p=>p.accepted),plan=Number(d.outline.measurement?.planAreaFt2||0),perim=Number(d.outline.measurement?.perimeterFt||0);
   const sm=d.solarModel||null,dm=sm?.measurements||{},dsmFacets=sm?.accepted?(sm.model?.facets||[]):[];
   const sloped=facets.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0),squares=sloped/100,lines=roofLineTotals(d);
@@ -1419,7 +1423,15 @@ async function generateRoofReport(){
    '<p class="roof-report-note">Accepted Google DSM geometry is the primary source for roof facet shape, pitch and roof-line classification in this report. USGS 3DEP LiDAR remains an independent 3D cross-check for elevation planes, area and geometry consistency.</p></div>';
   if(panel){panel.hidden=false;panel.scrollIntoView({behavior:'smooth',block:'start'});}
   if(state)state.textContent='Roof measurement report ready.';
- }catch(err){if(state)state.textContent='Could not build roof report: '+err.message}
+ }catch(err){
+  const msg=err?.name==='AbortError'?'Report generation timed out. The saved DSM/LiDAR data is intact; try again.':(err?.message||String(err));
+  if(state)state.textContent='Could not build roof report: '+msg;
+ }finally{
+  clearTimeout(timer);
+  if(topBtn){topBtn.disabled=false;topBtn.textContent=oldTop||'Generate Roof Measurement Report'}
+  if(inlineBtn){inlineBtn.disabled=false;inlineBtn.textContent=oldInline||'Generate Roof Measurement Report'}
+  document.body.style.cursor='';
+ }
 }
 document.querySelector('#roof-takeoff')?.addEventListener('click',generateRoofReport);
 document.querySelector('#roof-report-inline')?.addEventListener('click',generateRoofReport);
