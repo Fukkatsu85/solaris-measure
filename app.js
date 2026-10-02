@@ -725,6 +725,53 @@ function renderRoofOutline(poly,accepted=false){
  const pts=poly.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ');
  svg.innerHTML='<polygon points="'+pts+'" fill="'+(accepted?'rgba(34,197,94,.20)':'rgba(250,204,21,.22)')+'" stroke="'+(accepted?'#22c55e':'#facc15')+'" stroke-width="7" vector-effect="non-scaling-stroke"/>'+poly.map(p=>'<circle cx="'+(p.x*1000)+'" cy="'+(p.y*1000)+'" r="10" fill="#fff" stroke="#111" stroke-width="4"/>').join('');
 }
+
+function roofImageReady(img){return new Promise((resolve,reject)=>{if(img?.complete&&img.naturalWidth)return resolve();if(!img)return reject(new Error('Aerial image is not loaded.'));img.addEventListener('load',()=>resolve(),{once:true});img.addEventListener('error',()=>reject(new Error('Could not read aerial image.')),{once:true});})}
+function pointLineDistance(p,a,b){const dx=b.x-a.x,dy=b.y-a.y;if(dx===0&&dy===0)return Math.hypot(p.x-a.x,p.y-a.y);const t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/(dx*dx+dy*dy)));return Math.hypot(p.x-(a.x+t*dx),p.y-(a.y+t*dy))}
+function rdp(points,eps){
+ if(points.length<3)return points;
+ let max=0,idx=0;for(let i=1;i<points.length-1;i++){const d=pointLineDistance(points[i],points[0],points[points.length-1]);if(d>max){max=d;idx=i}}
+ if(max>eps){const a=rdp(points.slice(0,idx+1),eps),b=rdp(points.slice(idx),eps);return a.slice(0,-1).concat(b)}
+ return[points[0],points[points.length-1]];
+}
+function simplifyClosedRoofPolygon(poly,eps=.008){
+ if(poly.length<8)return poly;
+ const open=poly.concat([poly[0]]),simple=rdp(open,eps);simple.pop();
+ return simple.length>=6?simple:poly;
+}
+async function buildRoofPixelContour(box){
+ const img=document.querySelector('#mn-aerial-img');await roofImageReady(img);
+ const size=520,canvas=document.createElement('canvas');canvas.width=size;canvas.height=size;
+ const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(img,0,0,size,size);
+ const data=ctx.getImageData(0,0,size,size).data;
+ const lum=(x,y)=>{x=Math.max(0,Math.min(size-1,Math.round(x)));y=Math.max(0,Math.min(size-1,Math.round(y)));const i=(y*size+x)*4;return .2126*data[i]+.7152*data[i+1]+.0722*data[i+2]};
+ const x1=Math.max(0,box.x1*size),y1=Math.max(0,box.y1*size),x2=Math.min(size,box.x2*size),y2=Math.min(size,box.y2*size);
+ const cx=(x1+x2)/2,cy=(y1+y2)/2,bw=x2-x1,bh=y2-y1;
+ const rayCount=40,pts=[];
+ for(let i=0;i<rayCount;i++){
+  const ang=-Math.PI/2+i*(Math.PI*2/rayCount),dx=Math.cos(ang),dy=Math.sin(ang);
+  const tx=dx>0?(x2-cx)/dx:dx<0?(x1-cx)/dx:Infinity;
+  const ty=dy>0?(y2-cy)/dy:dy<0?(y1-cy)/dy:Infinity;
+  const expected=Math.min(Math.abs(tx),Math.abs(ty)),r0=Math.max(6,expected*.62),r1=Math.min(Math.hypot(bw,bh)*.72,expected*1.20);
+  let bestR=expected,bestScore=-1;
+  for(let r=r0;r<=r1;r+=1.5){
+   const inside=lum(cx+dx*(r-3),cy+dy*(r-3)),outside=lum(cx+dx*(r+3),cy+dy*(r+3));
+   const tangentX=-dy,tangentY=dx;
+   const in2=(lum(cx+dx*(r-2)+tangentX*2,cy+dy*(r-2)+tangentY*2)+lum(cx+dx*(r-2)-tangentX*2,cy+dy*(r-2)-tangentY*2))/2;
+   const out2=(lum(cx+dx*(r+2)+tangentX*2,cy+dy*(r+2)+tangentY*2)+lum(cx+dx*(r+2)-tangentX*2,cy+dy*(r+2)-tangentY*2))/2;
+   const contrast=Math.abs(outside-inside)+.6*Math.abs(out2-in2);
+   const proximity=1-Math.min(1,Math.abs(r-expected)/(expected*.42||1));
+   const score=contrast*(.72+.28*proximity);
+   if(score>bestScore){bestScore=score;bestR=r}
+  }
+  pts.push({x:(cx+dx*bestR)/size,y:(cy+dy*bestR)/size});
+ }
+ const smooth=pts.map((p,i)=>{const a=pts[(i-1+pts.length)%pts.length],b=pts[(i+1)%pts.length];return{x:(a.x+2*p.x+b.x)/4,y:(a.y+2*p.y+b.y)/4}});
+ let simple=simplifyClosedRoofPolygon(smooth,.0065);
+ if(simple.length>24)simple=simplifyClosedRoofPolygon(smooth,.011);
+ return simple.map(p=>({x:Math.max(0,Math.min(1,p.x)),y:Math.max(0,Math.min(1,p.y))}));
+}
+
 async function detectRoofAutomatically(){
  const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null'),btn=document.querySelector('#detect-roof'),status=document.querySelector('#mn-aerial-status');
  if(!saved?.lat||!saved?.lng){if(status)status.textContent='Property coordinates are not ready yet.';return}
@@ -732,9 +779,15 @@ async function detectRoofAutomatically(){
  try{
   const r=await fetch('/api/roof-detect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({lat:saved.lat,lng:saved.lng,address:saved.address,layer:saved.imageryLayer})}),d=await r.json();
   if(!r.ok||!d.ok)throw new Error(d.error||'Roof detection failed.');
-  roofOutlineProposal=d;renderRoofOutline(d.polygon,false);
+  let polygon=d.polygon;
+  try{
+   const contour=await buildRoofPixelContour(d.box);
+   if(contour?.length>=6)polygon=contour;
+  }catch(contourErr){console.warn('Roof contour refinement unavailable',contourErr)}
+  roofOutlineProposal={...d,polygon,pointCount:polygon.length,contourMethod:polygon===d.polygon?'ai-box-fallback':'pixel-edge-radial'};
+  renderRoofOutline(polygon,false);
   document.querySelector('#accept-roof-outline').disabled=false;document.querySelector('#edit-roof-outline').disabled=false;document.querySelector('#redetect-roof').disabled=false;
-  if(status)status.textContent='Roof proposal detected. Yellow outline requires review before measurements are used.';
+  if(status)status.textContent='Roof proposal detected with '+polygon.length+' reference points. Yellow outline requires review before measurements are used.';
  }catch(err){if(status)status.textContent='Automatic roof detection could not produce a usable proposal: '+err.message}
  finally{if(btn)btn.disabled=false}
 }
