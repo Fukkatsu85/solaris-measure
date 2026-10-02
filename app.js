@@ -691,10 +691,16 @@ document.querySelector('#locate-roof')?.addEventListener('click',async()=>{
  const status=document.querySelector('#roof-location-status'),confirm=document.querySelector('#confirm-roof-property'),btn=document.querySelector('#locate-roof');
  if(btn)btn.disabled=true;if(confirm)confirm.disabled=true;if(status)status.textContent='Locating '+address+'…';
  try{
-  const r=await fetch('/api/mn-aerial?address='+encodeURIComponent(address)),d=await r.json();
-  if(!r.ok)throw new Error(d.error||'Address could not be located.');
-  roofLocatedProperty={address,lat:Number(d.lat),lng:Number(d.lng),locationSource:'address-geocode'};
-  await showRoofLocator(address,Number(d.lat),Number(d.lng));
+  await loadRoofMapsJs();
+  const {Geocoder}=await google.maps.importLibrary('geocoding');
+  const geocoder=new Geocoder();
+  const result=await geocoder.geocode({address});
+  const hit=result?.results?.[0];
+  const loc=hit?.geometry?.location;
+  const lat=typeof loc?.lat==='function'?loc.lat():Number(loc?.lat),lng=typeof loc?.lng==='function'?loc.lng():Number(loc?.lng);
+  if(!Number.isFinite(lat)||!Number.isFinite(lng))throw new Error('Address could not be located.');
+  roofLocatedProperty={address,lat,lng,locationSource:'browser-geocode'};
+  await showRoofLocator(address,lat,lng);
   if(status)status.textContent='Property located. Drag the pin onto the exact roof if needed, then click Use This Location.';
   if(confirm)confirm.disabled=false;
  }catch(err){
