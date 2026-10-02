@@ -1313,8 +1313,8 @@ function roofCentroid(poly){if(!poly?.length)return{x:.5,y:.5};return{x:poly.red
 function roofDiagramSvg(data){
  const sm=data.solarModel||null;
  if(sm?.outline?.length>=3&&sm?.model?.facets?.length){
-  const outline=sm.outline,facets=sm.model.facets||[],lines=sm.model.roofLines||[],edges=sm.measurements?.exteriorEdges||[];
-  const all=[...outline,...facets.flatMap(f=>f.outline||[]),...lines.flatMap(l=>[l.a,l.b]).filter(Boolean)];
+  const topology=data.topology||null,outline=sm.outline,facets=sm.model.facets||[],lines=sm.model.roofLines||[],edges=sm.measurements?.exteriorEdges||[];
+  const all=topology?.vertices?.length?topology.vertices:[...outline,...facets.flatMap(f=>f.outline||[]),...lines.flatMap(l=>[l.a,l.b]).filter(Boolean)];
   const lats=all.map(p=>Number(p.lat)).filter(Number.isFinite),lngs=all.map(p=>Number(p.lng)).filter(Number.isFinite);
   const north=Math.max(...lats),south=Math.min(...lats),east=Math.max(...lngs),west=Math.min(...lngs);
   const midLat=(north+south)/2*Math.PI/180,cos=Math.max(.2,Math.cos(midLat));
@@ -1325,23 +1325,39 @@ function roofDiagramSvg(data){
   const fills=['#e8eef5','#dbe7f0','#e6e2f3','#e3efe7','#f2e8dc','#e0ebeb','#eee5e5','#e5e5ef','#edf0df','#e7e7e7'];
   const lc={ridge:'#198754',hip:'#2563eb',valley:'#dc2626'};
   let s='<svg viewBox="0 0 1000 1000" role="img" aria-label="Hybrid 2D roof measurement diagram"><rect width="1000" height="1000" fill="#fff"/>';
-  facets.forEach((f,i)=>{
-   const poly=f.outline||[];if(poly.length<3)return;
-   const q=poly.map(pt),cx=q.reduce((a,p)=>a+p.x,0)/q.length,cy=q.reduce((a,p)=>a+p.y,0)/q.length;
-   s+='<polygon points="'+poly.map(P).join(' ')+'" fill="'+fills[i%fills.length]+'" stroke="#444" stroke-width="3"/>';
-   s+='<text x="'+cx.toFixed(1)+'" y="'+cy.toFixed(1)+'" text-anchor="middle" font-size="24" font-weight="700" fill="#111">F'+(i+1)+'</text>';
-   s+='<text x="'+cx.toFixed(1)+'" y="'+(cy+28).toFixed(1)+'" text-anchor="middle" font-size="18" fill="#333">'+Number(f.rise12||0).toFixed(1)+'/12 · '+Math.round(Number(f.slopedAreaSqFt||0))+' ft²</text>';
-  });
-  s+='<polygon points="'+outline.map(P).join(' ')+'" fill="none" stroke="#111" stroke-width="7"/>';
-  lines.filter(l=>['ridge','hip','valley'].includes(l.type)).forEach(l=>{
-   const a=pt(l.a),b=pt(l.b);
-   s+='<line x1="'+a.x.toFixed(1)+'" y1="'+a.y.toFixed(1)+'" x2="'+b.x.toFixed(1)+'" y2="'+b.y.toFixed(1)+'" stroke="'+lc[l.type]+'" stroke-width="7"/>';
-  });
+  if(topology?.faces?.length&&topology?.vertices?.length){
+   const vById=new Map(topology.vertices.map(v=>[v.id,v]));
+   topology.faces.forEach((face,i)=>{
+    const poly=face.vertexIds.map(id=>vById.get(id)).filter(Boolean);if(poly.length<3)return;
+    const q=poly.map(pt),cx=q.reduce((a,p)=>a+p.x,0)/q.length,cy=q.reduce((a,p)=>a+p.y,0)/q.length;
+    s+='<polygon points="'+poly.map(P).join(' ')+'" fill="'+fills[i%fills.length]+'" stroke="#444" stroke-width="3"/>';
+    s+='<text x="'+cx.toFixed(1)+'" y="'+cy.toFixed(1)+'" text-anchor="middle" font-size="24" font-weight="700" fill="#111">F'+face.id+'</text>';
+    s+='<text x="'+cx.toFixed(1)+'" y="'+(cy+28).toFixed(1)+'" text-anchor="middle" font-size="18" fill="#333">'+Math.round(Number(face.rise12||0))+'/12 · '+Math.round(Number(face.slopedAreaSqFt||0))+' ft²</text>';
+   });
+   topology.edges.forEach(e=>{
+    const a=vById.get(e.a),b=vById.get(e.b);if(!a||!b)return;
+    const pa=pt(a),pb=pt(b),stroke=e.faces.length>1?(lc[e.type]||'#555'):'#111',width=e.faces.length>1?7:6;
+    s+='<line x1="'+pa.x.toFixed(1)+'" y1="'+pa.y.toFixed(1)+'" x2="'+pb.x.toFixed(1)+'" y2="'+pb.y.toFixed(1)+'" stroke="'+stroke+'" stroke-width="'+width+'"/>';
+   });
+  }else{
+   facets.forEach((f,i)=>{
+    const poly=f.outline||[];if(poly.length<3)return;
+    const q=poly.map(pt),cx=q.reduce((a,p)=>a+p.x,0)/q.length,cy=q.reduce((a,p)=>a+p.y,0)/q.length;
+    s+='<polygon points="'+poly.map(P).join(' ')+'" fill="'+fills[i%fills.length]+'" stroke="#444" stroke-width="3"/>';
+    s+='<text x="'+cx.toFixed(1)+'" y="'+cy.toFixed(1)+'" text-anchor="middle" font-size="24" font-weight="700" fill="#111">F'+(i+1)+'</text>';
+    s+='<text x="'+cx.toFixed(1)+'" y="'+(cy+28).toFixed(1)+'" text-anchor="middle" font-size="18" fill="#333">'+Math.round(Number(f.rise12||0))+'/12 · '+Math.round(Number(f.slopedAreaSqFt||0))+' ft²</text>';
+   });
+   s+='<polygon points="'+outline.map(P).join(' ')+'" fill="none" stroke="#111" stroke-width="7"/>';
+   lines.filter(l=>['ridge','hip','valley'].includes(l.type)).forEach(l=>{
+    const a=pt(l.a),b=pt(l.b);
+    s+='<line x1="'+a.x.toFixed(1)+'" y1="'+a.y.toFixed(1)+'" x2="'+b.x.toFixed(1)+'" y2="'+b.y.toFixed(1)+'" stroke="'+lc[l.type]+'" stroke-width="7"/>';
+   });
+  }
   edges.forEach(e=>{
    const a=pt(e.a),b=pt(e.b),mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
    s+='<text x="'+mx.toFixed(1)+'" y="'+(my-7).toFixed(1)+'" text-anchor="middle" font-size="15" font-weight="600" fill="#111" stroke="#fff" stroke-width="5" paint-order="stroke">'+Number(e.lengthFt||0).toFixed(1)+' ft</text>';
   });
-  s+='<g transform="translate(28 935)" font-size="17" fill="#111"><text x="0" y="0">Geometry: accepted Google DSM / rooftop mask</text><text x="0" y="26">Facet pitch and area shown from DSM; LiDAR remains an independent 3D validation source</text></g></svg>';
+  s+='<g transform="translate(28 935)" font-size="17" fill="#111"><text x="0" y="0">Geometry: shared roof topology graph from Google DSM</text><text x="0" y="26">Shared vertices/edges enforce one connected roof model; LiDAR remains an independent 3D validation source</text></g></svg>';
   return s;
  }
  const outline=data.outline,poly=outline.polygon||[],planes=(data.planes?.planes||[]).filter(p=>p.accepted),geom=(data.geometry?.lines||[]).filter(l=>l.type!=='ignore'&&l.type!=='candidate');
@@ -1381,6 +1397,12 @@ async function generateRoofReport(){
   const r=await fetch('/api/roof-report?projectId='+encodeURIComponent(projectId),{signal:controller.signal}),d=await r.json().catch(()=>({}));if(!r.ok||!d.ok)throw new Error(d.error||'Report data is incomplete.');
   const facets=(d.planes?.planes||[]).filter(p=>p.accepted),plan=Number(d.outline.measurement?.planAreaFt2||0),perim=Number(d.outline.measurement?.perimeterFt||0);
   const sm=d.solarModel||null,dm=sm?.measurements||{},dsmFacets=sm?.model?.facets||[];
+  if(sm?.model?.facets?.length){
+   try{
+    const topo=await import('/assets/js/roof-topology.js?v=20261002-1');
+    d.topology=topo.buildRoofTopology(sm);
+   }catch(err){console.warn('Roof topology engine unavailable',err)}
+  }
   const sloped=facets.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0),squares=sloped/100,lines=roofLineTotals(d);
   const wholePitch=v=>Math.round(Number(v)||0);
   const pitchWeightTotal=dsmFacets.reduce((s,f)=>s+Number(f.slopedAreaSqFt||f.flatAreaSqFt||0),0);
