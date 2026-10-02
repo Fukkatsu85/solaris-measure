@@ -1111,38 +1111,47 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
   byLabel.forEach((indices,i)=>{
     if(indices.length<minFacetPixels)return;
     const groups=connectedComponentsForLabel(indices,mask.width,mask.height);
-    const group=groups[0]||[];
-    if(group.length<minFacetPixels)return;
-
-    const groupSet=new Set(group);
-    let boundary=removeCollinearPixelPoints(traceComponentBoundary(groupSet,mask.width,mask.height));
-    if(boundary.length<3)return;
-    let outline=boundary.map(([x,y])=>rasterLatLng(mask,x,y));
-    outline=simplifyOutline(outline,14);
-
     const seg=candidates[i];
-    outline=regularizeFacetOutline(outline,seg.azimuth,6);
-    facets.push({
-      index:facets.length+1,
-      sourceIndex:seg.sourceIndex,
-      pitchDegrees:seg.pitch,
-      rise12:Math.tan(seg.pitch*Math.PI/180)*12,
-      azimuthDegrees:seg.azimuth,
-      center:seg.center,
-      z0:seg.z0,
-      gradientEast:seg.gradientEast,
-      gradientNorth:seg.gradientNorth,
-      flatAreaSqFt:group.length*maskPixelArea*SQ_METERS_TO_SQ_FEET,
-      slopedAreaSqFt:group.length*maskPixelArea/Math.max(.35,Math.cos(seg.pitch*Math.PI/180))*SQ_METERS_TO_SQ_FEET,
-      pixelCount:group.length,
-      supportRatio:group.length/Math.max(1,indices.length),
-      smallFacet:group.length<70,
-      outline
+    const meaningful=groups.filter(group=>group.length>=minFacetPixels);
+
+    meaningful.forEach((group,componentIndex)=>{
+      const groupSet=new Set(group);
+      let boundary=removeCollinearPixelPoints(traceComponentBoundary(groupSet,mask.width,mask.height));
+      if(boundary.length<3)return;
+      let outline=boundary.map(([x,y])=>rasterLatLng(mask,x,y));
+      outline=simplifyOutline(outline,14);
+      outline=regularizeFacetOutline(outline,seg.azimuth,6);
+
+      // A single Google plane can legitimately occur in several disconnected roof
+      // regions. Preserve each connected component as its own physical facet.
+      const localCenter=outline.length
+        ?{lat:outline.reduce((s,p)=>s+Number(p.lat),0)/outline.length,lng:outline.reduce((s,p)=>s+Number(p.lng),0)/outline.length}
+        :seg.center;
+
+      facets.push({
+        index:facets.length+1,
+        sourceIndex:seg.sourceIndex,
+        sourceComponentIndex:componentIndex,
+        pitchDegrees:seg.pitch,
+        rise12:Math.tan(seg.pitch*Math.PI/180)*12,
+        azimuthDegrees:seg.azimuth,
+        center:localCenter,
+        planeCenter:seg.center,
+        z0:seg.z0,
+        gradientEast:seg.gradientEast,
+        gradientNorth:seg.gradientNorth,
+        flatAreaSqFt:group.length*maskPixelArea*SQ_METERS_TO_SQ_FEET,
+        slopedAreaSqFt:group.length*maskPixelArea/Math.max(.35,Math.cos(seg.pitch*Math.PI/180))*SQ_METERS_TO_SQ_FEET,
+        pixelCount:group.length,
+        supportRatio:group.length/Math.max(1,indices.length),
+        smallFacet:group.length<70,
+        outline
+      });
     });
   });
 
   facets.sort((a,b)=>b.slopedAreaSqFt-a.slopedAreaSqFt);
-  const kept=facets.slice(0,20);
+  const kept=facets.slice(0,30);
   const coveredPixels=kept.reduce((sum,f)=>sum+(f.pixelCount||0),0);
   const roofLines=extractSharedRoofLines(mask,component,labels,candidates,dsm);
   return {
