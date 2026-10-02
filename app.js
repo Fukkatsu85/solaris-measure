@@ -601,3 +601,23 @@ async function runPixelGeometryWorker(){
  const result=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{worker.terminate();reject(new Error('background matching timed out'))},45000);worker.onmessage=e=>{const m=e.data||{};if(m.type==='progress'){if(state)state.textContent='Pixel geometry: pair '+m.current+' of '+m.total+'...';return}clearTimeout(timer);worker.terminate();m.type==='done'?resolve(m.pairs):reject(new Error(m.error||'background matching failed'))};worker.onerror=e=>{clearTimeout(timer);worker.terminate();reject(new Error(e.message||'background worker error'))};worker.postMessage({projectId:PROJECT_ID,pairs})});
  const save=await fetch('/api/pixel-matches',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID,pairs:result})}),sd=await save.json();if(!save.ok)throw new Error(sd.error||'Could not save pixel matches');if(state)state.textContent='Pixel geometry: '+sd.pixelMatches.summary.usable+' usable, '+sd.pixelMatches.summary.weak+' weak of '+sd.pixelMatches.summary.pairs+' overlap pairs.';return sd.pixelMatches;
 }
+
+function setMeasureTab(tab){
+ const siding=document.querySelector('#siding-tool'),roof=document.querySelector('#roof-tool'),sb=document.querySelector('#tab-siding'),rb=document.querySelector('#tab-roof');
+ const isRoof=tab==='roof';if(siding)siding.hidden=isRoof;if(roof)roof.hidden=!isRoof;
+ if(sb)sb.className=isRoof?'secondary':'primary';if(rb)rb.className=isRoof?'primary':'secondary';
+ localStorage.setItem('solarisMeasureTab',isRoof?'roof':'siding');window.scrollTo({top:0,behavior:'smooth'});
+}
+document.querySelector('#tab-siding')?.addEventListener('click',()=>setMeasureTab('siding'));
+document.querySelector('#tab-roof')?.addEventListener('click',()=>setMeasureTab('roof'));
+document.querySelector('#new-roof-measurement')?.addEventListener('click',()=>{
+ const name=prompt('Roof measurement name or address:','Roof '+new Date().toISOString().slice(0,10));if(!name)return;
+ localStorage.setItem('solarisRoofProject',JSON.stringify({name:name,createdAt:new Date().toISOString()}));
+ const s=document.querySelector('#roof-state');if(s)s.textContent='Roof project ready: '+name+'. Add roof/property photos to begin.';
+});
+document.querySelector('#roof-photo-input')?.addEventListener('change',e=>{
+ const files=[...(e.target.files||[])],g=document.querySelector('#roof-gallery'),s=document.querySelector('#roof-state');if(!files.length)return;
+ if(g){g.innerHTML='';files.forEach(file=>{const card=document.createElement('div');card.className='photo-card';const img=document.createElement('img');img.src=URL.createObjectURL(file);img.alt=file.name;card.appendChild(img);g.appendChild(card)})}
+ if(s)s.textContent=files.length+' roof image'+(files.length===1?'':'s')+' selected. Persistent roof uploads and geometry are the next engine.';
+});
+setMeasureTab(localStorage.getItem('solarisMeasureTab')||'siding');
