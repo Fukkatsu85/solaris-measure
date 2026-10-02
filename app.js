@@ -1372,7 +1372,7 @@ async function restoreRoofReportReadyState(){
  const d=await r.json();if(!d.ok)return;
  const facets=(d.planes?.planes||[]).filter(p=>p.accepted);
  if(!facets.length)return;
- const takeoff=document.querySelector('#roof-takeoff');if(takeoff)takeoff.disabled=false;
+ const takeoff=document.querySelector('#roof-takeoff'),reportInline=document.querySelector('#roof-report-inline');if(takeoff)takeoff.disabled=false;if(reportInline)reportInline.disabled=false;
  const fc=document.querySelector('#roof-facets'),pit=document.querySelector('#roof-pitch'),sq=document.querySelector('#roof-squares'),area=document.querySelector('#roof-area'),per=document.querySelector('#roof-perimeter');
  const sloped=facets.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0),avg=facets.reduce((s,p)=>s+Number(p.pitch12||0),0)/facets.length;
  if(fc)fc.textContent=facets.length;if(pit)pit.textContent=avg.toFixed(1)+'/12 avg';if(sq&&sloped>0)sq.textContent=(sloped/100).toFixed(2)+' sq';
