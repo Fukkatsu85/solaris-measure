@@ -1540,7 +1540,9 @@ function fillBenchmarkForm(b){
  if(!b?.reference)return;
  const r=b.reference,map={
   '#bench-source':r.source||'Roofr','#bench-area':r.slopedAreaFt2,'#bench-facets':r.facetCount,'#bench-pitch':r.avgPitch12,
-  '#bench-perimeter':r.perimeterFt,'#bench-ridge':r.ridgeFt,'#bench-hip':r.hipFt,'#bench-valley':r.valleyFt,'#bench-eave':r.eaveFt,'#bench-rake':r.rakeFt
+  '#bench-perimeter':r.perimeterFt,'#bench-ridge':r.ridgeFt,'#bench-hip':r.hipFt,'#bench-ridgehip':r.ridgeHipFt,
+  '#bench-valley':r.valleyFt,'#bench-eave':r.eaveFt,'#bench-rake':r.rakeFt,
+  '#bench-footprint-area':r.footprintAreaFt2,'#bench-footprint-perimeter':r.footprintPerimeterFt
  };
  for(const [sel,val] of Object.entries(map)){const el=document.querySelector(sel);if(el&&val!=null)el.value=val}
  const fa=document.querySelector('#bench-facet-areas');if(fa&&Array.isArray(r.facetAreasFt2))fa.value=r.facetAreasFt2.join(', ');
@@ -1552,8 +1554,8 @@ function renderBenchmarkScore(b){
  const fmt=v=>Number.isFinite(Number(v))?Number(v).toFixed(1):'—';
  if(badge)badge.textContent=s.overallScore!=null?'Score '+fmt(s.overallScore):'Scored';
  out.innerHTML='<strong>Benchmark score: '+fmt(s.overallScore)+'/100</strong><br>'+
-  'Topology '+fmt(cs.topology)+' · Roof lines '+fmt(cs.edges)+' · Pitch '+fmt(cs.pitch)+' · Facet areas '+fmt(cs.facetAreas)+' · Total area '+fmt(cs.totalArea)+
-  '<br><span class="muted">Area error '+fmt(err.totalAreaPct)+'% · Facet-count error '+fmt(err.facetCountPct)+'% · Pitch error '+fmt(err.pitchPct)+'%</span>'+
+  'Topology '+fmt(cs.topology)+' · Roof lines '+fmt(cs.edges)+' · Pitch '+fmt(cs.pitch)+' · Facet areas '+fmt(cs.facetAreas)+' · Total area '+fmt(cs.totalArea)+' · Footprint '+fmt(cs.footprint)+
+  '<br><span class="muted">Area error '+fmt(err.totalAreaPct)+'% · Facet-count error '+fmt(err.facetCountPct)+'% · Pitch error '+fmt(err.pitchPct)+'% · Footprint area error '+fmt(err.footprintAreaPct)+'%</span>'+
   (issues.length?'<div style="margin-top:8px">'+issues.map(x=>'• '+escRoof(x.message)).join('<br>')+'</div>':'<div style="margin-top:8px">No material benchmark issues were flagged by the current thresholds.</div>');
 }
 async function loadRoofBenchmark(){
@@ -1577,7 +1579,9 @@ async function extractPdfText(file){
 function applyExtractedBenchmark(x){
  const map={
   '#bench-source':x.source,'#bench-area':x.slopedAreaFt2,'#bench-facets':x.facetCount,'#bench-pitch':x.avgPitch12,
-  '#bench-perimeter':x.perimeterFt,'#bench-ridge':x.ridgeFt,'#bench-hip':x.hipFt,'#bench-valley':x.valleyFt,'#bench-eave':x.eaveFt,'#bench-rake':x.rakeFt
+  '#bench-perimeter':x.perimeterFt,'#bench-ridge':x.ridgeFt,'#bench-hip':x.hipFt,'#bench-ridgehip':x.ridgeHipFt,
+  '#bench-valley':x.valleyFt,'#bench-eave':x.eaveFt,'#bench-rake':x.rakeFt,
+  '#bench-footprint-area':x.footprintAreaFt2,'#bench-footprint-perimeter':x.footprintPerimeterFt
  };
  for(const [sel,val] of Object.entries(map)){const el=document.querySelector(sel);if(el&&val!=null&&val!=='')el.value=val}
  const fa=document.querySelector('#bench-facet-areas');
@@ -1618,7 +1622,8 @@ document.querySelector('#score-roof-benchmark')?.addEventListener('click',async(
  const payload={
   projectId,address:saved.address||'',source:String(document.querySelector('#bench-source')?.value||'Roofr').trim()||'Roofr',
   slopedAreaFt2:benchNum('#bench-area'),facetCount:benchNum('#bench-facets'),avgPitch12:benchNum('#bench-pitch'),
-  perimeterFt:benchNum('#bench-perimeter'),ridgeFt:benchNum('#bench-ridge'),hipFt:benchNum('#bench-hip'),valleyFt:benchNum('#bench-valley'),
+  perimeterFt:benchNum('#bench-perimeter'),footprintAreaFt2:benchNum('#bench-footprint-area'),footprintPerimeterFt:benchNum('#bench-footprint-perimeter'),
+  ridgeFt:benchNum('#bench-ridge'),hipFt:benchNum('#bench-hip'),ridgeHipFt:benchNum('#bench-ridgehip'),valleyFt:benchNum('#bench-valley'),
   eaveFt:benchNum('#bench-eave'),rakeFt:benchNum('#bench-rake'),facetAreasFt2:facetAreas
  };
  if(!Number.isFinite(payload.slopedAreaFt2)||!Number.isFinite(payload.facetCount)){if(out)out.textContent='Reference sloped area and facet count are required.';return}
