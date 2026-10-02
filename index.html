@@ -40,6 +40,11 @@
         <div id="roof-map" style="min-height:420px;border-radius:14px;overflow:hidden;background:#e5e7eb;display:grid;place-items:center;margin-top:12px"><span class="muted">Satellite map will appear here after an address is located.</span></div>
         <div class="actions" style="margin-top:12px"><button id="confirm-roof-property" class="primary" type="button" disabled>Use This Property</button></div>
       </div>
+      <section id="roof-selected-workspace" class="card" hidden style="margin-top:16px">
+        <div class="card-head"><div><div class="eyebrow">SELECTED PROPERTY</div><h3 id="roof-selected-address">Roof workspace</h3></div><span class="status">Selected</span></div>
+        <p class="muted">Property confirmed. Continue into the roof measurement workspace.</p>
+        <div class="actions"><button id="start-roof-geometry" class="primary" type="button">Start Roof Measurement</button><button id="change-roof-property" class="secondary" type="button">Change Property</button></div>
+      </section>
       <div class="grid" style="margin-top:16px">
         <article class="card"><div class="eyebrow">STEP 1</div><h3>Property imagery</h3><p class="muted">Upload or capture roof imagery for the property.</p><label class="secondary upload-button">Add Roof Photos<input id="roof-photo-input" type="file" accept="image/*" multiple hidden></label></article>
         <article class="card"><div class="eyebrow">STEP 2</div><h3>Roof geometry</h3><p class="muted">Map facets, ridges, hips, valleys, rakes and eaves.</p><button class="secondary" id="roof-geometry" disabled>Build Roof Geometry</button></article>
@@ -181,6 +186,6 @@
     </div>
   </main>
 
-  <script src="/app.js?v=20261002-googlemaps1"></script>
+  <script src="/app.js?v=20261002-roofselect2"></script>
 </body>
 </html>
