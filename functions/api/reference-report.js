@@ -17,6 +17,12 @@ function fallback(text){
   valleyFt:find(["(?:total\s+)?valley"]),
   eaveFt:find(["(?:total\s+)?eave"]),
   rakeFt:find(["(?:total\s+)?rake"]),
+  ridgeHipFt:find(["ridges?\s*\/\s*hips?","hips?\s*\+\s*ridges?"]),
+  footprintAreaFt2:find(["footprint\s+area"]),
+  footprintPerimeterFt:find(["footprint\s+perimeter"]),
+  flatAreaFt2:find(["flat\s+roof\s+area","total\s+flat\s+area"]),
+  scope:/detached\s+garage/i.test(t)?"detached-garage":/main\s+house/i.test(t)?"primary-building":"unknown",
+  pitchAreas:{},
   facetAreasFt2:[]
  };
 }
@@ -24,8 +30,8 @@ async function aiExtract(env,text){
  if(!env.AI)return null;
  const prompt=`Extract roof measurement benchmark values from the report text below.
 Return ONLY valid JSON with keys:
-source, address, slopedAreaFt2, facetCount, avgPitch12, perimeterFt, ridgeFt, hipFt, valleyFt, eaveFt, rakeFt, facetAreasFt2.
-Use numbers only for numeric fields, null if unavailable. avgPitch12 means the numerator of x/12. facetAreasFt2 must be an array of individual sloped facet areas if clearly listed; otherwise [].
+source, address, scope, slopedAreaFt2, facetCount, avgPitch12, perimeterFt, footprintAreaFt2, footprintPerimeterFt, ridgeFt, hipFt, ridgeHipFt, valleyFt, eaveFt, rakeFt, flatAreaFt2, pitchAreas, facetAreasFt2.
+Use numbers only for numeric fields, null if unavailable. avgPitch12 means the predominant pitch numerator of x/12. scope must be one of "primary-building", "detached-garage", "all-structures", or "unknown". For Hover, use the stated "Ridges / Hips" combined value as ridgeHipFt and do not split it. pitchAreas must be an object mapping pitch numerator strings to stated square-foot areas, for example {"5":1429,"3":276}. facetAreasFt2 must be an array of individual facet areas only when clearly listed; otherwise [].
 Do not infer or calculate missing values. Prefer the report's stated totals over sums from rounded labels.
 
 REPORT TEXT:
@@ -42,8 +48,11 @@ export async function onRequestPost({request,env}){
  if(!projectId||!text)return json({error:"projectId and extracted report text are required."},400);
  const base=fallback(text),ai=await aiExtract(env,text),merged={...base,...Object.fromEntries(Object.entries(ai||{}).filter(([,v])=>v!==null&&v!==undefined&&v!==""))};
  merged.facetAreasFt2=Array.isArray(merged.facetAreasFt2)?merged.facetAreasFt2.map(num).filter(v=>v!=null&&v>0):[];
- for(const k of ["slopedAreaFt2","facetCount","avgPitch12","perimeterFt","ridgeFt","hipFt","valleyFt","eaveFt","rakeFt"])merged[k]=num(merged[k]);
- const record={version:1,projectId,fileName,address:String(merged.address||body.address||""),createdAt:new Date().toISOString(),extracted:merged,textLength:text.length};
+ for(const k of ["slopedAreaFt2","facetCount","avgPitch12","perimeterFt","footprintAreaFt2","footprintPerimeterFt","ridgeFt","hipFt","ridgeHipFt","valleyFt","eaveFt","rakeFt","flatAreaFt2"])merged[k]=num(merged[k]);
+ merged.scope=["primary-building","detached-garage","all-structures","unknown"].includes(String(merged.scope))?String(merged.scope):"unknown";
+ if(!merged.pitchAreas||typeof merged.pitchAreas!=="object"||Array.isArray(merged.pitchAreas))merged.pitchAreas={};
+ else merged.pitchAreas=Object.fromEntries(Object.entries(merged.pitchAreas).map(([k,v])=>[String(k),num(v)]).filter(([,v])=>v!=null&&v>=0));
+ const record={version:2,projectId,fileName,address:String(merged.address||body.address||""),createdAt:new Date().toISOString(),extracted:merged,textLength:text.length};
  await Promise.all([
   env.MEASURE_PHOTOS.put(projectId+"/_reference_report.json",JSON.stringify(record),{httpMetadata:{contentType:"application/json"}}),
   env.MEASURE_PHOTOS.put("reference-reports/"+projectId+".json",JSON.stringify(record),{httpMetadata:{contentType:"application/json"}}),
