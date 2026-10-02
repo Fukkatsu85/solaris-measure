@@ -1,3 +1,4 @@
+import { chooseLearnedRoofProfile } from "./roof-learning.js";
 const EARTH=6378137;
 const rad=d=>d*Math.PI/180;
 const deg=r=>r*180/Math.PI;
@@ -207,8 +208,8 @@ function extendInternalLinesToJunctions(lines,perimeter,maxExtension=5.5){
   return out.filter(l=>dist(l.a,l.b)>.45);
 }
 
-function validFaceSet(segments,perimeter){
-  const split=splitSegments(segments),graph=buildPlanarGraph(split,.28),faces=extractFaces(graph.nodes,graph.edges,perimeter);
+function validFaceSet(segments,perimeter,nodeSnap=.28){
+  const split=splitSegments(segments),graph=buildPlanarGraph(split,nodeSnap),faces=extractFaces(graph.nodes,graph.edges,perimeter);
   const areas=faces.map(ids=>Math.abs(polygonArea(ids.map(id=>graph.nodes[id]))));
   return {split,graph,faces,areas};
 }
@@ -302,11 +303,12 @@ function facetEdgeCandidates(facets,F,perimeter,families,existing){
   }
   return paired.sort((a,b)=>(Number(b.priority||0)-Number(a.priority||0))||(dist(b.a,b.b)-dist(a.a,a.b)));
 }
-function addFaceImprovingCandidates(baseSegments,baseInternal,candidates,perimeter,maxAdds=6){
-  let accepted=[...baseInternal],segments=[...baseSegments],solved=validFaceSet(segments,perimeter),adds=0;
+function addFaceImprovingCandidates(baseSegments,baseInternal,candidates,perimeter,options={}){
+  const maxAdds=Number(options.maxCandidateAdds||6),connectM=Number(options.candidateConnectM||4.0),minFace=Number(options.minFaceAreaM2||1.8),nodeSnap=Number(options.nodeSnapM||.28);
+  let accepted=[...baseInternal],segments=[...baseSegments],solved=validFaceSet(segments,perimeter,nodeSnap),adds=0;
   for(const raw of candidates){
     if(adds>=maxAdds)break;
-    let cand=connectCandidate(raw,accepted,perimeter,4.0);
+    let cand=connectCandidate(raw,accepted,perimeter,connectM);
     if(dist(cand.a,cand.b)<.75||candidateDuplicate(cand,accepted))continue;
     let interiorCrossings=0;
     for(const e of segments){
@@ -316,9 +318,9 @@ function addFaceImprovingCandidates(baseSegments,baseInternal,candidates,perimet
       if(!nearCandEnd)interiorCrossings++;
     }
     if(interiorCrossings>0)continue;
-    const trialSegments=[...segments,cand],trial=validFaceSet(trialSegments,perimeter);
+    const trialSegments=[...segments,cand],trial=validFaceSet(trialSegments,perimeter,nodeSnap);
     if(trial.faces.length!==solved.faces.length+1)continue;
-    if(!trial.areas.length||Math.min(...trial.areas)<1.8)continue;
+    if(!trial.areas.length||Math.min(...trial.areas)<minFace)continue;
     accepted.push(cand);segments=trialSegments;solved=trial;adds++;
   }
   return {accepted,segments,solved,adds};
@@ -434,6 +436,7 @@ function nearestFacetMeta(c,facets,F){
 export function buildRoofTopology(solarModel){
   const sm=solarModel||{},facets=sm.model?.facets||[],roofLines=sm.model?.roofLines||[],outlineLL=sm.outline||[];
   if(outlineLL.length<3)return null;
+  const learned=chooseLearnedRoofProfile(sm);
   const all=[...outlineLL,...roofLines.flatMap(l=>[l.a,l.b]).filter(Boolean),...facets.flatMap(f=>f.outline||[])],F=frame(all);
   let perimeter=regularizePerimeter(outlineLL.map(F.toXY));
   if(polygonArea(perimeter)<0)perimeter.reverse();
@@ -457,13 +460,13 @@ export function buildRoofTopology(solarModel){
     });
     if(!duplicate)acceptedInternal.push({...clean,source:"dsm-line"});
   });
-  const connectedInternal=extendInternalLinesToJunctions(acceptedInternal,perimeter,5.5);
+  const connectedInternal=extendInternalLinesToJunctions(acceptedInternal,perimeter,learned.maxLineExtensionM);
   segments.push(...connectedInternal);
 
   const primitiveCandidates=projectionPrimitiveCandidates(perimeterProjections,perimeter,families,connectedInternal);
   const facetCandidates=facetEdgeCandidates(facets,F,perimeter,families,connectedInternal);
   const candidates=[...primitiveCandidates,...facetCandidates];
-  const augmented=addFaceImprovingCandidates(segments,connectedInternal,candidates,perimeter,8);
+  const augmented=addFaceImprovingCandidates(segments,connectedInternal,candidates,perimeter,learned);
   const solved=augmented.solved,split=solved.split,graph=solved.graph;
   const facesRaw=solved.faces;
   const faces=facesRaw.map((ids,i)=>{
@@ -483,8 +486,9 @@ export function buildRoofTopology(solarModel){
     lengthMeters:dist(graph.nodes[e.a],graph.nodes[e.b])
   }));
   return {
-    version:2.8,
-    source:"architectural-planar-topology-multi-component-facets",
+    version:2.9,
+    source:"architectural-planar-topology-learned-priors",
+    learnedProfile:learned,
     dominantAngle:longest.ang,
     vertices,edges,faces,
     outline:perimeter.map(F.toLL),
