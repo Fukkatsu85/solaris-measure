@@ -1374,16 +1374,6 @@ function roofDiagramSvg(data){
 }
 function roofLineTotals(data){
  const sm=data.solarModel||null,out={ridge:0,hip:0,valley:0,eave:0,rake:0};
- if(data.topology?.edges?.length){
-  for(const e of data.topology.edges){
-   if(["ridge","hip","valley"].includes(e.type))out[e.type]+=Number(e.lengthMeters||0)*3.280839895;
-  }
-  if(sm?.measurements){
-   out.eave=Number(sm.measurements.eaveFt||0);
-   out.rake=Number(sm.measurements.rakeFt||0);
-  }
-  return out;
- }
  if(sm?.measurements)return{
   ridge:Number(sm.measurements.ridgeFt||0),
   hip:Number(sm.measurements.hipFt||0),
