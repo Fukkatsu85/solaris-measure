@@ -621,3 +621,20 @@ document.querySelector('#roof-photo-input')?.addEventListener('change',e=>{
  if(s)s.textContent=files.length+' roof image'+(files.length===1?'':'s')+' selected. Persistent roof uploads and geometry are the next engine.';
 });
 setMeasureTab(localStorage.getItem('solarisMeasureTab')||'siding');
+
+let roofLocatedProperty=null;
+document.querySelector('#roof-address')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();document.querySelector('#locate-roof')?.click();}});
+document.querySelector('#locate-roof')?.addEventListener('click',()=>{
+ const address=document.querySelector('#roof-address')?.value.trim();if(!address){alert('Enter a property address first.');return;}
+ const status=document.querySelector('#roof-location-status'),map=document.querySelector('#roof-map'),confirm=document.querySelector('#confirm-roof-property');
+ roofLocatedProperty={address};
+ if(status)status.textContent='Property located for review: '+address;
+ if(map)map.innerHTML='<iframe title="Property map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" style="width:100%;height:460px;border:0" src="https://www.google.com/maps?q='+encodeURIComponent(address)+'&t=k&z=20&output=embed"></iframe>';
+ if(confirm)confirm.disabled=false;
+});
+document.querySelector('#confirm-roof-property')?.addEventListener('click',()=>{
+ if(!roofLocatedProperty)return;
+ localStorage.setItem('solarisRoofProject',JSON.stringify({name:roofLocatedProperty.address,address:roofLocatedProperty.address,createdAt:new Date().toISOString()}));
+ const state=document.querySelector('#roof-state');if(state)state.textContent='Selected property: '+roofLocatedProperty.address+'. Ready for roof geometry.';
+ const geo=document.querySelector('#roof-geometry');if(geo)geo.disabled=false;
+});
