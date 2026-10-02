@@ -36,21 +36,26 @@ function edgeTotals(topology,sm){
 function currentMetrics(sm,outline){
  let topology=null;
  try{topology=buildRoofTopology(sm)}catch{}
- const faces=(topology?.faces||[]).filter(f=>Number(f.slopedAreaSqFt||0)>0);
- const modelFacets=sm?.model?.facets||[];
- const used=faces.length?faces:modelFacets;
- const facetAreas=used.map(f=>num(f.slopedAreaSqFt)).filter(Number.isFinite);
- const slopedArea=faces.length?facetAreas.reduce((a,b)=>a+b,0):num(sm?.model?.slopedAreaSqFt);
- const w=used.map(f=>({p:num(f.rise12),a:num(f.slopedAreaSqFt)||0})).filter(x=>x.p!=null);
+ const modelFacets=(sm?.model?.facets||[]).filter(f=>Number(f.slopedAreaSqFt||0)>0);
+ // Match production reporting: Google DSM model is authoritative for area,
+ // pitch and facet count. Topology faces are derived geometry used for line
+ // solving and can overlap while the solver is still learning.
+ const facetAreas=modelFacets.map(f=>num(f.slopedAreaSqFt)).filter(Number.isFinite);
+ const modelArea=num(sm?.model?.slopedAreaSqFt);
+ const slopedArea=modelArea!=null?modelArea:facetAreas.reduce((a,b)=>a+b,0);
+ const w=modelFacets.map(f=>({p:num(f.rise12),a:num(f.slopedAreaSqFt)||0})).filter(x=>x.p!=null);
  const aw=w.reduce((s,x)=>s+x.a,0);
  const avgPitch=w.length?(aw?w.reduce((s,x)=>s+x.p*x.a,0)/aw:w.reduce((s,x)=>s+x.p,0)/w.length):null;
  const edges=edgeTotals(topology,sm);
+ const topologyFaces=(topology?.faces||[]).filter(f=>Number(f.slopedAreaSqFt||0)>0);
  return {
-  facetCount:used.length,slopedAreaFt2:slopedArea,avgPitch12:avgPitch,
+  facetCount:modelFacets.length,slopedAreaFt2:slopedArea,avgPitch12:avgPitch,
   ...edges,ridgeHipFt:Number(edges.ridgeFt||0)+Number(edges.hipFt||0),
   footprintAreaFt2:num(outline?.measurement?.planAreaFt2),
   footprintPerimeterFt:num(outline?.measurement?.perimeterFt),
   facetAreasFt2:facetAreas,
+  topologyFaceCount:topologyFaces.length,
+  googleWholeRoofAreaFt2:num(sm?.googleWholeRoofAreaFt2),
   learnedProfile:topology?.learnedProfile||null,
   topologyVersion:topology?.version||null
  };
