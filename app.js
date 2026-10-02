@@ -1399,11 +1399,14 @@ async function generateRoofReport(){
   const sm=d.solarModel||null,dm=sm?.measurements||{},dsmFacets=sm?.model?.facets||[];
   if(sm?.model?.facets?.length){
    try{
-    const topo=await import('/assets/js/roof-topology.js?v=20261002-2');
+    const topo=await import('/assets/js/roof-topology.js?v=20261002-3');
     d.topology=topo.buildRoofTopology(sm);
    }catch(err){console.warn('Roof topology engine unavailable',err)}
   }
-  const sloped=facets.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0),squares=sloped/100,lines=roofLineTotals(d);
+  const lidarSloped=facets.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0);
+  const dsmSloped=Number(sm?.model?.slopedAreaSqFt||0);
+  const sloped=dsmSloped>0?dsmSloped:lidarSloped,squares=sloped/100,lines=roofLineTotals(d);
+  const reportFacetCount=Number(d.topology?.faces?.length||dsmFacets.length||facets.length||0);
   const wholePitch=v=>Math.round(Number(v)||0);
   const pitchWeightTotal=dsmFacets.reduce((s,f)=>s+Number(f.slopedAreaSqFt||f.flatAreaSqFt||0),0);
   const avgPitch=dsmFacets.length
@@ -1425,12 +1428,12 @@ async function generateRoofReport(){
      '<tr><th>Ridge</th><td>'+fmtHybridFt(dm.ridgeFt)+'</td></tr>'+
      '<tr><th>Hip</th><td>'+fmtHybridFt(dm.hipFt)+'</td></tr>'+
      '<tr><th>Valley</th><td>'+fmtHybridFt(dm.valleyFt)+'</td></tr>'+
-     '</tbody></table><p class="roof-report-note">These linear classifications come from the accepted Google rooftop-mask/DSM model and remain independently traceable from the LiDAR-derived primary roof model.</p>')
+     '</tbody></table><p class="roof-report-note">These measurements come from the Google rooftop-mask/DSM geometry used as the primary roof model. LiDAR is retained as an independent 3D cross-check.</p>')
    :'';
   const validationBlock=v.available
    ?('<h2>Hybrid Validation</h2><table class="roof-report-table"><tbody>'+
      '<tr><th>Google Solar whole-roof area</th><td>'+(Number.isFinite(Number(v.googleWholeRoofAreaFt2))?Math.round(Number(v.googleWholeRoofAreaFt2)).toLocaleString()+' ft²':'—')+'</td></tr>'+
-     '<tr><th>Solaris LiDAR/report area</th><td>'+Math.round(sloped).toLocaleString()+' ft²</td></tr>'+
+     '<tr><th>Solaris report area</th><td>'+Math.round(sloped).toLocaleString()+' ft²</td></tr><tr><th>LiDAR cross-check area</th><td>'+Math.round(lidarSloped).toLocaleString()+' ft²</td></tr>'+
      '<tr><th>Area difference</th><td>'+(Number.isFinite(Number(v.areaDifferencePct))?Number(v.areaDifferencePct).toFixed(1)+'%':'—')+'</td></tr>'+
      '<tr><th>Google weighted pitch</th><td>'+(Number.isFinite(Number(v.googleWeightedPitchDeg))?Number(v.googleWeightedPitchDeg).toFixed(1)+'°':'—')+'</td></tr>'+
      '<tr><th>LiDAR weighted pitch</th><td>'+(Number.isFinite(Number(v.lidarWeightedPitchDeg))?Number(v.lidarWeightedPitchDeg).toFixed(1)+'°':'—')+'</td></tr>'+
