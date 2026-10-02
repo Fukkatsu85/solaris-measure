@@ -690,6 +690,22 @@ async function openRoofGeometryWorkspace(){
   if(map)map.innerHTML='<iframe title="Roof measurement satellite workspace" allowfullscreen loading="eager" referrerpolicy="no-referrer-when-downgrade" style="width:100%;height:560px;border:0" src="'+src+'"></iframe>';
  }catch(err){if(map)map.innerHTML='<div style="padding:32px">Could not load satellite workspace: '+err.message+'</div>';}
  const s=document.querySelector('#roof-state');if(s)s.textContent='Roof measurement workspace active for '+project.address;
+ const aerialWrap=document.querySelector('#mn-aerial-wrap'),aerialStatus=document.querySelector('#mn-aerial-status'),aerialBadge=document.querySelector('#mn-aerial-badge');
+ if(aerialWrap)aerialWrap.innerHTML='<span class="muted">Loading Minnesota aerial imagery…</span>';
+ if(aerialStatus)aerialStatus.textContent='Resolving property coordinates…';if(aerialBadge)aerialBadge.textContent='Loading';
+ try{
+  const ar=await fetch('/api/mn-aerial?address='+encodeURIComponent(project.address));const ad=await ar.json();
+  if(!ar.ok)throw new Error(ad.error||'Aerial imagery lookup failed.');
+  project.lat=ad.lat;project.lng=ad.lng;project.formattedAddress=ad.address;project.imagerySource=ad.source;
+  localStorage.setItem('solarisRoofProject',JSON.stringify({...JSON.parse(localStorage.getItem('solarisRoofProject')||'{}'),...project}));
+  if(aerialWrap)aerialWrap.innerHTML='<img src="'+ad.imageryUrl+'" alt="MnGeo aerial image of selected roof" style="display:block;width:100%;height:auto;max-height:720px;object-fit:contain;background:#111">';
+  if(aerialStatus)aerialStatus.textContent='Analysis imagery loaded from '+ad.source+' at '+ad.lat.toFixed(6)+', '+ad.lng.toFixed(6)+'.';
+  if(aerialBadge)aerialBadge.textContent='Ready';
+ }catch(err){
+  if(aerialWrap)aerialWrap.innerHTML='<div style="padding:28px;text-align:center"><strong>Analysis imagery unavailable</strong><p class="muted">'+err.message+'</p></div>';
+  if(aerialStatus)aerialStatus.textContent='If Google reports an API error, enable Geocoding API for the Solaris Measure key.';
+  if(aerialBadge)aerialBadge.textContent='Needs setup';
+ }
  ws?.scrollIntoView({behavior:'smooth',block:'start'});
 }
 document.querySelector('#start-roof-geometry')?.addEventListener('click',openRoofGeometryWorkspace);
