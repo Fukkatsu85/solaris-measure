@@ -542,7 +542,8 @@ async function buildHouseModel(){
    if(!r.ok)throw new Error(d.error||'Request failed');
    return d;
   }
-  const px=await runPixelGeometry();\n  const hm=(await post('/api/house-model')).houseModel;
+  const px=await runPixelGeometry();
+  const hm=(await post('/api/house-model')).houseModel;
   const sc=(await post('/api/metric-scale')).scale;
   if(!sc.feetPerNormalized){state.textContent='House model built, but automatic metric scale is still unsolved.';root.innerHTML='<div class="analysis-state">No usable automatic scale candidate was found.</div>';return;}
   const t=(await post('/api/takeoff-preview',{waste:0.10})).takeoff;
