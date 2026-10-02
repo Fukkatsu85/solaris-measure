@@ -1,4 +1,4 @@
-const PROJECT_ID = 'test-house-001';
+let PROJECT_ID = localStorage.getItem('solarisMeasureProjectId') || 'test-house-001';
 const VIEW_OPTIONS = [
   ['unassigned', 'Unassigned'],
   ['front', 'Front'],
@@ -334,8 +334,23 @@ analyze?.addEventListener('click', async () => {
   }
 });
 
-newProject?.addEventListener('click', () => {
-  photosCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+newProject?.addEventListener('click', async () => {
+  const suggested='measure-'+new Date().toISOString().slice(0,10)+'-'+Math.random().toString(36).slice(2,6);
+  const name=prompt('New measurement name or address:', suggested);
+  if(!name)return;
+  const slug=String(name).trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,60)||suggested;
+  PROJECT_ID=slug+'-'+Date.now().toString(36);
+  localStorage.setItem('solarisMeasureProjectId',PROJECT_ID);
+  projectManifest={photoViews:{}};currentPhotos=[];lastAnalysis=null;geometryData={photos:{}};
+  gallery.innerHTML='';analysisGallery.innerHTML='';
+  uploadStatus.textContent='New measurement ready: '+name+'. Upload 15–25 overlapping exterior photos.';
+  analysisState.textContent='No analysis has been run for this measurement.';
+  document.querySelector('#process-results').innerHTML='';
+  document.querySelector('#house-model-results').innerHTML='';
+  document.querySelector('#process-state').textContent='Upload and classify the new photo set, then Process Property.';
+  document.querySelector('#house-model-state').textContent='Waiting for the new property to be processed.';
+  const ps=document.querySelector('#pixel-match-state');if(ps)ps.textContent='Pixel geometry: waiting for measurement model.';
+  photosCard.scrollIntoView({behavior:'smooth',block:'start'});
 });
 
 openTestHouse?.addEventListener('click', () => {
