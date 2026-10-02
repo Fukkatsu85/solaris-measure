@@ -18,23 +18,26 @@ const COUNTY_LAYERS={
 const METRO=new Set(["Anoka County","Carver County","Dakota County","Hennepin County","Ramsey County","Scott County","Washington County"]);
 export async function onRequestGet({request,env}){
  const url=new URL(request.url),address=(url.searchParams.get("address")||"").trim();
- if(!address)return Response.json({error:"address is required"},{status:400});
+ const qLat=Number(url.searchParams.get("lat")),qLng=Number(url.searchParams.get("lng"));
+ const hasCoords=Number.isFinite(qLat)&&Number.isFinite(qLng);
+ if(!address&&!hasCoords)return Response.json({error:"address or lat/lng is required"},{status:400});
  const key=env.GOOGLE_MAPS_API_KEY;if(!key)return Response.json({error:"Google Maps key is not configured."},{status:500});
- const g=new URL("https://maps.googleapis.com/maps/api/geocode/json");g.searchParams.set("address",address);g.searchParams.set("key",key);
+ const g=new URL("https://maps.googleapis.com/maps/api/geocode/json");
+ if(hasCoords)g.searchParams.set("latlng",qLat+","+qLng);else g.searchParams.set("address",address);
+ g.searchParams.set("key",key);
  const gr=await fetch(g),geo=await gr.json(),hit=geo?.results?.[0];
- if(!gr.ok||geo.status!=="OK"||!hit?.geometry?.location)return Response.json({error:geo?.error_message||"Address could not be geocoded.",status:geo?.status},{status:422});
- const {lat,lng}=hit.geometry.location;
+ if(!gr.ok||geo.status!=="OK"||!hit)return Response.json({error:geo?.error_message||"Location could not be geocoded.",status:geo?.status},{status:422});
+ const lat=hasCoords?qLat:hit.geometry?.location?.lat,lng=hasCoords?qLng:hit.geometry?.location?.lng;
+ if(!Number.isFinite(lat)||!Number.isFinite(lng))return Response.json({error:"Geocoder did not return coordinates."},{status:422});
  const county=hit.address_components?.find(c=>c.types?.includes("administrative_area_level_2"))?.long_name||"";
  let pick=COUNTY_LAYERS[county];
  if(!pick&&METRO.has(county))pick={layer:"met25",label:"2025 Twin Cities Metro 1-foot",resolution:"1-foot"};
  if(!pick)pick={layer:"fsa2025",label:"2025 statewide NAIP ~2-foot",resolution:"~2-foot"};
  const imageryUrl="/api/mn-aerial-image?lat="+encodeURIComponent(lat)+"&lng="+encodeURIComponent(lng)+"&layer="+encodeURIComponent(pick.layer);
  return Response.json({
-   address:hit.formatted_address||address,lat,lng,county,
+   address:address||hit.formatted_address||"",formattedAddress:hit.formatted_address||address||"",lat,lng,county,
    imageryLayer:pick.layer,imageryLabel:pick.label,resolution:pick.resolution,
    source:"Minnesota Geospatial Information Office (MnGeo) — "+pick.label,
-   imageryUrl,
-   cropHalfMeters:42,
-   projection:"EPSG:3857"
+   imageryUrl,cropHalfMeters:42,projection:"EPSG:3857",locationSource:hasCoords?"corrected-pin":"address-geocode"
  });
 }
