@@ -636,7 +636,7 @@ function regularizeFacetOutline(outline,facetAzimuth,maxVertices=7){
       if(diff<bestDiff){bestDiff=diff;snapped=f;}
     });
     // Only snap when the raw edge is already reasonably consistent with a roof angle.
-    if(bestDiff>14)snapped=angle;
+    if(bestDiff>18)snapped=angle;
     const rad=snapped*Math.PI/180;
     const dir={x:Math.cos(rad),y:Math.sin(rad)};
     const mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
@@ -1115,7 +1115,7 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
     outline=simplifyOutline(outline,10);
 
     const seg=candidates[i];
-    outline=regularizeFacetOutline(outline,seg.azimuth,7);
+    outline=regularizeFacetOutline(outline,seg.azimuth,6);
     facets.push({
       index:facets.length+1,
       pitchDegrees:seg.pitch,
