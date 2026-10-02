@@ -437,7 +437,8 @@ export function buildRoofTopology(solarModel,options={}){
   const sm=solarModel||{},facets=sm.model?.facets||[],roofLines=sm.model?.roofLines||[],outlineLL=sm.outline||[];
   if(outlineLL.length<3)return null;
   const baseLearned=chooseLearnedRoofProfile(sm);
-  const learned={...baseLearned,...(options?.profileOverride||{})};
+  const mappedOverride=options?.profileOverrides?.[baseLearned.name]||null;
+  const learned={...baseLearned,...(mappedOverride||{}),...(options?.profileOverride||{})};
   const all=[...outlineLL,...roofLines.flatMap(l=>[l.a,l.b]).filter(Boolean),...facets.flatMap(f=>f.outline||[])],F=frame(all);
   let perimeter=regularizePerimeter(outlineLL.map(F.toXY));
   if(polygonArea(perimeter)<0)perimeter.reverse();
