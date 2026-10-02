@@ -630,6 +630,8 @@ let roofMapsKey=null;
 let roofLocatorMap=null;
 let roofLocatorMarker=null;
 let roofMapsScriptPromise=null;
+let roofAutoProcessPending=false;
+let roofProcessRunning=false;
 
 async function getRoofMapsKey(){
  if(roofMapsKey)return roofMapsKey;
@@ -926,6 +928,7 @@ document.querySelector('#accept-roof-outline')?.addEventListener('click',async()
   const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Could not save accepted roof outline.');
   roofOutlineProposal={...roofOutlineProposal,...d.outline,status:'accepted-plan-view'};
   if(status)status.textContent='Roof outline accepted ✓ · Plan area '+d.outline.measurement.planAreaFt2.toFixed(0)+' ft² · Perimeter '+d.outline.measurement.perimeterFt.toFixed(1)+' ft. Pitch is not applied yet.';
+  if(roofAutoProcessPending)setTimeout(()=>processRoofGuided(),50);
  }catch(err){
   if(status)status.textContent='Roof measurements calculated, but cloud save did not finish. '+(err.name==='AbortError'?'Save timed out; you can continue editing and try Accept again.':err.message);
   if(btn)btn.disabled=false;
@@ -1288,9 +1291,10 @@ document.querySelector('#accept-roof-planes')?.addEventListener('click',async()=
   if(fc)fc.textContent=accepted.length;
   if(pit)pit.textContent=displayPitch+'/12';
   if(sq)sq.textContent=squares.toFixed(2)+' sq';
-  const takeoff=document.querySelector('#roof-takeoff'),reportInline=document.querySelector('#roof-report-inline');
+  const takeoff=document.querySelector('#roof-takeoff'),reportInline=document.querySelector('#roof-report-inline'),reportMain=document.querySelector('#roof-report-main');
   if(takeoff)takeoff.disabled=false;
   if(reportInline)reportInline.disabled=false;
+  if(reportMain)reportMain.disabled=false;
   if(status)status.textContent='LiDAR facets accepted ✓ · '+accepted.length+' facets · '+Math.round(totalSloped).toLocaleString()+' ft² sloped area · '+squares.toFixed(2)+' squares. Report is ready.';
  }catch(err){
   const msg=err?.name==='AbortError'?'The save request timed out. Please try Accept Facets again.':(err?.message||String(err));
@@ -1447,7 +1451,7 @@ async function restoreRoofReportReadyState(){
  const d=await r.json();if(!d.ok)return;
  const facets=(d.planes?.planes||[]).filter(p=>p.accepted);
  if(!facets.length)return;
- const takeoff=document.querySelector('#roof-takeoff'),reportInline=document.querySelector('#roof-report-inline');if(takeoff)takeoff.disabled=false;if(reportInline)reportInline.disabled=false;
+ const takeoff=document.querySelector('#roof-takeoff'),reportInline=document.querySelector('#roof-report-inline'),reportMain=document.querySelector('#roof-report-main');if(takeoff)takeoff.disabled=false;if(reportInline)reportInline.disabled=false;if(reportMain)reportMain.disabled=false;
  const fc=document.querySelector('#roof-facets'),pit=document.querySelector('#roof-pitch'),sq=document.querySelector('#roof-squares'),area=document.querySelector('#roof-area'),per=document.querySelector('#roof-perimeter');
  const sloped=facets.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0),avg=facets.reduce((s,p)=>s+Number(p.pitch12||0),0)/facets.length;
  let displayPitch=Math.round(avg);
@@ -1540,6 +1544,105 @@ document.querySelector('#accept-roof-solar')?.addEventListener('click',async()=>
   document.body.style.cursor='';
  }
 });
+function waitForRoofCondition(test,timeout=20000,interval=200){
+ return new Promise((resolve,reject)=>{
+  const started=Date.now(),tick=()=>{
+   try{if(test())return resolve(true)}catch{}
+   if(Date.now()-started>=timeout)return reject(new Error('Timed out waiting for the roof analysis step to finish.'));
+   setTimeout(tick,interval);
+  };tick();
+ });
+}
+async function hasAcceptedRoofOutline(){
+ if(roofOutlineProposal?.status==='accepted-plan-view'&&roofOutlineProposal?.polygon?.length>=3)return true;
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
+ if(!Number.isFinite(Number(saved.lat))||!Number.isFinite(Number(saved.lng)))return false;
+ const projectId=saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
+ try{
+  const r=await fetch('/api/roof-outline?projectId='+encodeURIComponent(projectId)),d=await r.json();
+  return Boolean(r.ok&&d.outline?.polygon?.length>=3);
+ }catch{return false}
+}
+async function processRoofGuided(){
+ if(roofProcessRunning)return;
+ const btn=document.querySelector('#process-roof-all'),badge=document.querySelector('#roof-process-badge'),status=document.querySelector('#roof-process-status'),approve=document.querySelector('#approve-roof-analysis');
+ if(!(await hasAcceptedRoofOutline())){
+  roofAutoProcessPending=true;
+  if(badge)badge.textContent='Outline review';
+  if(status)status.textContent='Detecting the roof outline… Review the yellow outline, adjust points if needed, then click Confirm Roof Outline. Solaris will continue automatically.';
+  await detectRoofAutomatically();
+  return;
+ }
+ roofAutoProcessPending=false;roofProcessRunning=true;
+ if(btn){btn.disabled=true;btn.textContent='Processing Roof…'}
+ if(approve)approve.disabled=true;
+ try{
+  if(badge)badge.textContent='DSM';
+  if(status)status.textContent='Step 1 of 4 · Running Google DSM roof analysis…';
+  await runRoofSolarAnalysis();
+
+  if(badge)badge.textContent='LiDAR';
+  if(status)status.textContent='Step 2 of 4 · Finding and extracting USGS LiDAR…';
+  await findRoofLidar();
+  let saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
+  if(!saved.lidarSource)throw new Error('No usable LiDAR coverage was found for this property.');
+  await extractRoofLidar();
+  saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
+  if(!saved.lidarEpt?.url||!saved.lidarSubset?.nodes?.length)throw new Error('LiDAR coverage was found, but the roof point-cloud subset could not be prepared.');
+
+  if(badge)badge.textContent='3D points';
+  if(status)status.textContent='Step 3 of 4 · Decoding roof LiDAR points…';
+  await decodeRoofLidar();
+  if(!roofLidarDecoded?.surfacePoints?.length)throw new Error('Roof LiDAR points could not be decoded.');
+
+  if(badge)badge.textContent='Facets';
+  if(status)status.textContent='Step 4 of 4 · Fitting roof planes…';
+  fitRoofPlanes();
+  if(!roofPlaneProposals?.length)throw new Error('No stable LiDAR roof planes were produced.');
+
+  if(approve)approve.disabled=false;
+  if(badge)badge.textContent='Review';
+  if(status)status.textContent='Roof analysis ready ✓ · DSM geometry and LiDAR facets are prepared. Review the roof image/results if desired, then click Approve Measurements.';
+ }catch(err){
+  if(badge)badge.textContent='Needs review';
+  if(status)status.textContent='Automatic processing stopped: '+(err?.message||String(err))+' Open Advanced / Troubleshooting for the individual step controls.';
+ }finally{
+  roofProcessRunning=false;
+  if(btn){btn.disabled=false;btn.textContent='Process Roof'}
+ }
+}
+document.querySelector('#process-roof-all')?.addEventListener('click',processRoofGuided);
+
+document.querySelector('#approve-roof-analysis')?.addEventListener('click',async()=>{
+ const btn=document.querySelector('#approve-roof-analysis'),badge=document.querySelector('#roof-process-badge'),status=document.querySelector('#roof-process-status'),reportMain=document.querySelector('#roof-report-main');
+ if(btn){btn.disabled=true;btn.textContent='Approving…'}
+ try{
+  if(roofSolarProposal){
+   const solarBadge=document.querySelector('#roof-solar-badge');
+   if(solarBadge?.textContent!=='Accepted ✓'){
+    document.querySelector('#accept-roof-solar')?.click();
+    await waitForRoofCondition(()=>document.querySelector('#roof-solar-badge')?.textContent==='Accepted ✓',15000);
+   }
+  }
+  if(roofPlaneProposals?.length){
+   const planeStatus=document.querySelector('#roof-plane-status');
+   if(!String(planeStatus?.textContent||'').includes('facets accepted ✓')){
+    document.querySelector('#accept-roof-planes')?.click();
+    await waitForRoofCondition(()=>String(document.querySelector('#roof-plane-status')?.textContent||'').includes('facets accepted ✓'),18000);
+   }
+  }
+  if(reportMain)reportMain.disabled=false;
+  if(badge)badge.textContent='Approved ✓';
+  if(status)status.textContent='Measurements approved ✓ · Generate the roof measurement report when ready.';
+  if(btn)btn.textContent='Measurements Approved ✓';
+ }catch(err){
+  if(badge)badge.textContent='Approval issue';
+  if(status)status.textContent='Could not finish approval: '+(err?.message||String(err))+'. Open Advanced / Troubleshooting to see which source needs attention.';
+  if(btn){btn.disabled=false;btn.textContent='Approve Measurements'}
+ }
+});
+document.querySelector('#roof-report-main')?.addEventListener('click',generateRoofReport);
+
 async function restoreRoofSolarModel(){
  const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
  if(!Number.isFinite(Number(saved.lat))||!Number.isFinite(Number(saved.lng)))return;
