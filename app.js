@@ -1399,7 +1399,7 @@ async function generateRoofReport(){
   const sm=d.solarModel||null,dm=sm?.measurements||{},dsmFacets=sm?.model?.facets||[];
   if(sm?.model?.facets?.length){
    try{
-    const topo=await import('/assets/js/roof-topology.js?v=20261002-5');
+    const topo=await import('/assets/js/roof-topology.js?v=20261002-6');
     d.topology=topo.buildRoofTopology(sm);
    }catch(err){console.warn('Roof topology engine unavailable',err)}
   }
