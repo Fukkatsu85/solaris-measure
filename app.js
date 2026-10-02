@@ -1459,6 +1459,7 @@ async function generateRoofReport(){
    '<p class="roof-report-note">Accepted Google DSM geometry is the primary source for roof facet shape, pitch and roof-line classification in this report. USGS 3DEP LiDAR remains an independent 3D cross-check for elevation planes, area and geometry consistency.</p></div>';
   if(panel){panel.hidden=false;panel.scrollIntoView({behavior:'smooth',block:'start'});}
   if(state)state.textContent='Roof measurement report ready.';
+  loadRoofBenchmark();
  }catch(err){
   const msg=err?.name==='AbortError'?'Report generation timed out. The saved DSM/LiDAR data is intact; try again.':(err?.message||String(err));
   if(state)state.textContent='Could not build roof report: '+msg;
@@ -1473,6 +1474,62 @@ document.querySelector('#roof-takeoff')?.addEventListener('click',generateRoofRe
 document.querySelector('#roof-report-inline')?.addEventListener('click',generateRoofReport);
 document.querySelector('#print-roof-report')?.addEventListener('click',()=>window.print());
 document.querySelector('#close-roof-report')?.addEventListener('click',()=>{const p=document.querySelector('#roof-report-panel');if(p)p.hidden=true});
+
+function benchNum(id){
+ const v=document.querySelector(id)?.value;
+ return v===''||v==null?null:Number(v);
+}
+function benchmarkProjectId(){
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
+ return saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
+}
+function fillBenchmarkForm(b){
+ if(!b?.reference)return;
+ const r=b.reference,map={
+  '#bench-source':r.source||'Roofr','#bench-area':r.slopedAreaFt2,'#bench-facets':r.facetCount,'#bench-pitch':r.avgPitch12,
+  '#bench-perimeter':r.perimeterFt,'#bench-ridge':r.ridgeFt,'#bench-hip':r.hipFt,'#bench-valley':r.valleyFt,'#bench-eave':r.eaveFt,'#bench-rake':r.rakeFt
+ };
+ for(const [sel,val] of Object.entries(map)){const el=document.querySelector(sel);if(el&&val!=null)el.value=val}
+ const fa=document.querySelector('#bench-facet-areas');if(fa&&Array.isArray(r.facetAreasFt2))fa.value=r.facetAreasFt2.join(', ');
+}
+function renderBenchmarkScore(b){
+ const out=document.querySelector('#roof-benchmark-result'),badge=document.querySelector('#roof-benchmark-badge');
+ if(!out||!b?.score)return;
+ const s=b.score,cs=s.componentScores||{},err=s.errors||{},issues=s.issues||[];
+ const fmt=v=>Number.isFinite(Number(v))?Number(v).toFixed(1):'—';
+ if(badge)badge.textContent=s.overallScore!=null?'Score '+fmt(s.overallScore):'Scored';
+ out.innerHTML='<strong>Benchmark score: '+fmt(s.overallScore)+'/100</strong><br>'+
+  'Topology '+fmt(cs.topology)+' · Roof lines '+fmt(cs.edges)+' · Pitch '+fmt(cs.pitch)+' · Facet areas '+fmt(cs.facetAreas)+' · Total area '+fmt(cs.totalArea)+
+  '<br><span class="muted">Area error '+fmt(err.totalAreaPct)+'% · Facet-count error '+fmt(err.facetCountPct)+'% · Pitch error '+fmt(err.pitchPct)+'%</span>'+
+  (issues.length?'<div style="margin-top:8px">'+issues.map(x=>'• '+escRoof(x.message)).join('<br>')+'</div>':'<div style="margin-top:8px">No material benchmark issues were flagged by the current thresholds.</div>');
+}
+async function loadRoofBenchmark(){
+ const id=benchmarkProjectId();if(!id||id.includes('NaN'))return;
+ try{
+  const r=await fetch('/api/roof-benchmark?projectId='+encodeURIComponent(id)),d=await r.json().catch(()=>({}));
+  if(r.ok&&d.benchmark){fillBenchmarkForm(d.benchmark);renderBenchmarkScore(d.benchmark)}
+ }catch{}
+}
+document.querySelector('#score-roof-benchmark')?.addEventListener('click',async()=>{
+ const btn=document.querySelector('#score-roof-benchmark'),out=document.querySelector('#roof-benchmark-result'),badge=document.querySelector('#roof-benchmark-badge');
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{},projectId=benchmarkProjectId();
+ const facetAreas=String(document.querySelector('#bench-facet-areas')?.value||'').split(',').map(v=>Number(v.trim())).filter(v=>Number.isFinite(v)&&v>0);
+ const payload={
+  projectId,address:saved.address||'',source:String(document.querySelector('#bench-source')?.value||'Roofr').trim()||'Roofr',
+  slopedAreaFt2:benchNum('#bench-area'),facetCount:benchNum('#bench-facets'),avgPitch12:benchNum('#bench-pitch'),
+  perimeterFt:benchNum('#bench-perimeter'),ridgeFt:benchNum('#bench-ridge'),hipFt:benchNum('#bench-hip'),valleyFt:benchNum('#bench-valley'),
+  eaveFt:benchNum('#bench-eave'),rakeFt:benchNum('#bench-rake'),facetAreasFt2:facetAreas
+ };
+ if(!Number.isFinite(payload.slopedAreaFt2)||!Number.isFinite(payload.facetCount)){if(out)out.textContent='Reference sloped area and facet count are required.';return}
+ const old=btn?.textContent;if(btn){btn.disabled=true;btn.textContent='Scoring…'}if(badge)badge.textContent='Scoring';
+ try{
+  const r=await fetch('/api/roof-benchmark',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}),d=await r.json().catch(()=>({}));
+  if(!r.ok||!d.ok)throw new Error(d.error||'Could not score benchmark.');
+  renderBenchmarkScore(d.benchmark);
+  if(out)out.scrollIntoView({behavior:'smooth',block:'nearest'});
+ }catch(err){if(badge)badge.textContent='Needs review';if(out)out.textContent='Benchmark scoring failed: '+(err?.message||String(err))}
+ finally{if(btn){btn.disabled=false;btn.textContent=old||'Save Reference & Score Solaris'}}
+});
 
 async function restoreRoofReportReadyState(){
  const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
@@ -1495,6 +1552,7 @@ async function restoreRoofReportReadyState(){
  if(fc)fc.textContent=facets.length;if(pit)pit.textContent=displayPitch+'/12';if(sq&&sloped>0)sq.textContent=(sloped/100).toFixed(2)+' sq';
  if(area&&d.outline?.measurement?.planAreaFt2)area.textContent=Math.round(d.outline.measurement.planAreaFt2).toLocaleString()+' ft²';
  if(per&&d.outline?.measurement?.perimeterFt)per.textContent=Number(d.outline.measurement.perimeterFt).toFixed(1)+' ft';
+ loadRoofBenchmark();
 }
 
 let roofSolarProposal=null;
