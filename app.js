@@ -758,10 +758,27 @@ async function openRoofGeometryWorkspace(){
  if(title)title.textContent=project.address;
  if(ws)ws.hidden=false;
  try{
-  const key=await getRoofMapsKey();
-  const q=Number.isFinite(Number(project.lat))&&Number.isFinite(Number(project.lng))?(Number(project.lat)+','+Number(project.lng)):project.address;
-  const src='https://www.google.com/maps/embed/v1/place?key='+encodeURIComponent(key)+'&q='+encodeURIComponent(q)+'&maptype=satellite&zoom=19';
-  if(map)map.innerHTML='<iframe title="Roof measurement satellite workspace" allowfullscreen loading="eager" referrerpolicy="no-referrer-when-downgrade" style="width:100%;height:560px;border:0" src="'+src+'"></iframe>';
+  await loadRoofMapsJs();
+  const lat=Number(project.lat),lng=Number(project.lng);
+  if(!Number.isFinite(lat)||!Number.isFinite(lng))throw new Error('Roof coordinates are missing.');
+  const {Map}=await google.maps.importLibrary('maps');
+  const {AdvancedMarkerElement}=await google.maps.importLibrary('marker');
+  if(map){
+   map.innerHTML='';
+   map.style.height='560px';
+   const workspaceMap=new Map(map,{
+    center:{lat,lng},
+    zoom:20,
+    mapTypeId:'satellite',
+    tilt:0,
+    mapId:'DEMO_MAP_ID',
+    streetViewControl:true,
+    fullscreenControl:true,
+    mapTypeControl:true,
+    zoomControl:true
+   });
+   new AdvancedMarkerElement({map:workspaceMap,position:{lat,lng},title:'Selected roof location'});
+  }
  }catch(err){if(map)map.innerHTML='<div style="padding:32px">Could not load satellite workspace: '+err.message+'</div>';}
  const s=document.querySelector('#roof-state');if(s)s.textContent='Roof measurement workspace active for '+project.address;
  const aerialWrap=document.querySelector('#mn-aerial-wrap'),aerialStatus=document.querySelector('#mn-aerial-status'),aerialBadge=document.querySelector('#mn-aerial-badge');
