@@ -1016,7 +1016,7 @@ async function decodeRoofLidar(){
   const nodes=[...saved.lidarSubset.nodes].sort((a,b)=>(b.depth||0)-(a.depth||0));let selected=[],budget=0;
   for(const n of nodes){if(selected.length>=36)break;if(budget+n.count>550000&&selected.length>=4)continue;selected.push(n);budget+=Number(n.count)||0}
   if(!selected.length)throw new Error('No EPT nodes are available to decode.');
-  const worker=new Worker('/lidar-decode-worker.js?v=2'),result=await new Promise((resolve,reject)=>{
+  const worker=new Worker('/lidar-decode-worker.js?v=3'),result=await new Promise((resolve,reject)=>{
    const timer=setTimeout(()=>{worker.terminate();reject(new Error('LiDAR decoding timed out.'))},90000);
    worker.onmessage=e=>{const m=e.data||{};if(m.type==='progress'){if(status)status.textContent='Decoding LiDAR node '+m.current+' of '+m.total+' · '+Number(m.inside||0).toLocaleString()+' roof points found…';return}
     clearTimeout(timer);worker.terminate();m.type==='done'?resolve(m):reject(new Error(m.error||'LiDAR decoder failed.'))};
