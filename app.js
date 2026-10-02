@@ -621,6 +621,9 @@ document.querySelector('#roof-photo-input')?.addEventListener('change',e=>{
  if(s)s.textContent=files.length+' roof image'+(files.length===1?'':'s')+' selected. Persistent roof uploads and geometry are the next engine.';
 });
 setMeasureTab(localStorage.getItem('solarisMeasureTab')||'siding');
+if((localStorage.getItem('solarisMeasureTab')||'siding')==='roof'){
+ setTimeout(()=>document.querySelector('#locate-roof')?.click(),150);
+}
 
 let roofLocatedProperty=null;
 let roofMapsKey=null;
