@@ -187,34 +187,62 @@ function connectCandidate(seg,existing,perimeter,maxExtension=4.0){
   return out;
 }
 function facetEdgeCandidates(facets,F,perimeter,families,existing){
-  const out=[];
-  for(const facet of facets){
+  const raw=[];
+  facets.forEach((facet,fi)=>{
     const poly=(facet.outline||[]).map(F.toXY);
     for(let i=0;i<poly.length;i++){
-      let a=poly[i],b=poly[(i+1)%poly.length];
-      if(dist(a,b)<.8)continue;
+      const a=poly[i],b=poly[(i+1)%poly.length];
+      if(dist(a,b)<.9)continue;
       const mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
       if(!pointInPoly(mid,perimeter))continue;
-      if(nearestPointOnPerimeter(mid,perimeter).distance<.7)continue;
-      const snap=snapAngle(angle180(a,b),families,16),clean=infiniteLineThroughMid(a,b,snap.angle);
-      a=pointSegDistance(a,clean.a,clean.b).point;
-      b=pointSegDistance(b,clean.a,clean.b).point;
-      let seg={a,b,type:"internal",source:"facet-edge-candidate"};
-      if(candidateDuplicate(seg,existing)||candidateDuplicate(seg,out))continue;
-      out.push(seg);
+      if(nearestPointOnPerimeter(mid,perimeter).distance<.75)continue;
+      raw.push({facet:fi,a,b,angle:angle180(a,b)});
     }
+  });
+
+  const paired=[];
+  for(let i=0;i<raw.length;i++)for(let j=i+1;j<raw.length;j++){
+    const A=raw[i],B=raw[j];
+    if(A.facet===B.facet||angleDiff(A.angle,B.angle)>12)continue;
+
+    const r=rad(A.angle),ux=Math.cos(r),uy=Math.sin(r),nx=-uy,ny=ux;
+    const proj=p=>p.x*ux+p.y*uy,nproj=p=>p.x*nx+p.y*ny;
+    const a0=Math.min(proj(A.a),proj(A.b)),a1=Math.max(proj(A.a),proj(A.b));
+    const b0=Math.min(proj(B.a),proj(B.b)),b1=Math.max(proj(B.a),proj(B.b));
+    const lo=Math.max(a0,b0),hi=Math.min(a1,b1),overlap=hi-lo;
+    if(overlap<1.15)continue;
+
+    const na=(nproj(A.a)+nproj(A.b))/2,nb=(nproj(B.a)+nproj(B.b))/2;
+    if(Math.abs(na-nb)>.85)continue;
+
+    const n=(na+nb)/2;
+    let a={x:ux*lo+nx*n,y:uy*lo+ny*n},b={x:ux*hi+nx*n,y:uy*hi+ny*n};
+    const snap=snapAngle(angle180(a,b),families,14),clean=infiniteLineThroughMid(a,b,snap.angle);
+    a=pointSegDistance(a,clean.a,clean.b).point;
+    b=pointSegDistance(b,clean.a,clean.b).point;
+    const seg={a,b,type:"internal",source:"paired-facet-boundary",support:2,facets:[A.facet,B.facet]};
+    if(candidateDuplicate(seg,existing)||candidateDuplicate(seg,paired))continue;
+    paired.push(seg);
   }
-  return out.sort((a,b)=>dist(b.a,b.b)-dist(a.a,a.b));
+  return paired.sort((a,b)=>dist(b.a,b.b)-dist(a.a,a.b));
 }
-function addFaceImprovingCandidates(baseSegments,baseInternal,candidates,perimeter,maxAdds=8){
+function addFaceImprovingCandidates(baseSegments,baseInternal,candidates,perimeter,maxAdds=6){
   let accepted=[...baseInternal],segments=[...baseSegments],solved=validFaceSet(segments,perimeter),adds=0;
   for(const raw of candidates){
     if(adds>=maxAdds)break;
     let cand=connectCandidate(raw,accepted,perimeter,4.0);
     if(dist(cand.a,cand.b)<.75||candidateDuplicate(cand,accepted))continue;
+    let interiorCrossings=0;
+    for(const e of segments){
+      const h=segmentIntersection(cand.a,cand.b,e.a,e.b);
+      if(!h)continue;
+      const nearCandEnd=h.t<.03||h.t>.97;
+      if(!nearCandEnd)interiorCrossings++;
+    }
+    if(interiorCrossings>0)continue;
     const trialSegments=[...segments,cand],trial=validFaceSet(trialSegments,perimeter);
     if(trial.faces.length!==solved.faces.length+1)continue;
-    if(!trial.areas.length||Math.min(...trial.areas)<1.0)continue;
+    if(!trial.areas.length||Math.min(...trial.areas)<1.8)continue;
     accepted.push(cand);segments=trialSegments;solved=trial;adds++;
   }
   return {accepted,segments,solved,adds};
@@ -369,8 +397,8 @@ export function buildRoofTopology(solarModel){
     lengthMeters:dist(graph.nodes[e.a],graph.nodes[e.b])
   }));
   return {
-    version:2.3,
-    source:"architectural-planar-topology-scored-candidates",
+    version:2.4,
+    source:"architectural-planar-topology-paired-candidates",
     dominantAngle:longest.ang,
     vertices,edges,faces,
     outline:perimeter.map(F.toLL),
