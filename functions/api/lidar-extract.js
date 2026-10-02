@@ -5,9 +5,28 @@ function uniq(a){return[...new Set(a.filter(Boolean))]}
 function cleanCandidates(src={}){
  const out=[],url=String(src.downloadUrl||""),m=url.match(/\/Projects\/([^/]+)\//i);if(m)out.push(m[1]);
  const title=String(src.title||"").trim();
- if(title){out.push(title,title.replace(/\s+/g,"_"),title.replace(/^USGS[_\s-]*LPC[_\s-]*/i,"").replace(/\s+/g,"_"),title.replace(/^USGS[_\s-]*LPC[_\s-]*/i,"").replace(/_D\d+.*$/i,"").replace(/\s+/g,"_"))}
+ if(title){
+  out.push(title,title.replace(/\s+/g,"_"));
+  const stripped=title
+   .replace(/^USGS\s+Lidar\s+Point\s+Cloud\s+/i,"")
+   .replace(/^USGS[_\s-]*LPC[_\s-]*/i,"")
+   .trim();
+  out.push(stripped,stripped.replace(/\s+/g,"_"));
+  // TNM tile titles often end with tile coordinates such as "476_4951".
+  const noTile=stripped.replace(/[ _-]+\d{2,4}_\d{3,5}$/,"").trim();
+  out.push(noTile,noTile.replace(/\s+/g,"_"));
+  const noD=noTile.replace(/_D\d+.*$/i,"");out.push(noD,noD.replace(/\s+/g,"_"));
+ }
  const sid=String(src.sourceId||"").trim();if(sid)out.push(sid);
- return uniq(out.map(s=>s.replace(/\.laz$/i,"").replace(/[^A-Za-z0-9._-]/g,"_")));
+ const base=uniq(out.map(s=>s.replace(/\.laz$/i,"").replace(/[^A-Za-z0-9._-]/g,"_").replace(/_+/g,"_").replace(/^_|_$/g,"")));
+ const expanded=[...base];
+ // Some USGS projects are partitioned into numbered EPT collections:
+ // Example MN_CentralMissRiver_B22 -> MN_CentralMissRiver_1_B22 ... _6_B22.
+ for(const name of base){
+  const m2=name.match(/^(.*)(_B\d{2})$/i);
+  if(m2)for(let i=1;i<=12;i++)expanded.push(m2[1]+"_"+i+m2[2]);
+ }
+ return uniq(expanded);
 }
 async function probe(name){
  const url=EPT_ROOT+encodeURIComponent(name).replace(/%2F/g,"/")+"/ept.json",r=await fetch(url,{headers:{"User-Agent":"Solaris-Measure/1.0"}});
@@ -42,8 +61,22 @@ export async function onRequestPost({request}){
  const b=await request.json().catch(()=>({})),lat=Number(b.lat),lng=Number(b.lng);
  if(!Number.isFinite(lat)||!Number.isFinite(lng))return json({error:"lat/lng required"},400);
  const candidates=cleanCandidates(b.source||{});let ept=null;
- for(const name of candidates){ept=await probe(name);if(ept)break}
+ const {x:mx,y:my}=mercator(lat,lng);
+ for(const name of candidates){
+  const p=await probe(name);if(!p)continue;
+  const bb=p.meta?.bounds||[];
+  const contains=bb.length>=6&&mx>=bb[0]&&mx<=bb[3]&&my>=bb[1]&&my<=bb[4];
+  if(contains){ept=p;break}
+  if(!ept)ept=p;
+ }
  if(!ept)return json({ok:false,error:"USGS coverage exists, but the matching public EPT resource could not be resolved automatically yet.",candidates},422);
  const subset=await collectNodes(ept,lat,lng,Number(b.halfMeters||28),18);
+ if(!subset.nodeCount&&candidates.length){
+  for(const name of candidates){
+   const p=await probe(name);if(!p||p.url===ept.url)continue;
+   const s=await collectNodes(p,lat,lng,Number(b.halfMeters||28),18);
+   if(s.nodeCount){ept=p;Object.assign(subset,s);break}
+  }
+ }
  return json({ok:true,ept:{name:ept.name,url:ept.url,dataType:ept.meta.dataType,points:ept.meta.points,bounds:ept.meta.bounds,srs:ept.meta.srs||null,schema:ept.meta.schema||[],span:ept.meta.span||null},subset:{halfMeters:Number(b.halfMeters||28),queryBounds:subset.queryBounds,nodeCount:subset.nodes.length,estimatedPoints:subset.estimatedPoints,hierarchyPages:subset.hierarchyPages,nodes:subset.nodes.slice(0,220)}});
 }
