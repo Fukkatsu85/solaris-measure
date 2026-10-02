@@ -1276,8 +1276,9 @@ document.querySelector('#accept-roof-planes')?.addEventListener('click',async()=
   if(fc)fc.textContent=accepted.length;
   if(pit)pit.textContent=avgPitch.toFixed(1)+'/12 avg';
   if(sq)sq.textContent=squares.toFixed(2)+' sq';
-  const takeoff=document.querySelector('#roof-takeoff');
+  const takeoff=document.querySelector('#roof-takeoff'),reportInline=document.querySelector('#roof-report-inline');
   if(takeoff)takeoff.disabled=false;
+  if(reportInline)reportInline.disabled=false;
   if(status)status.textContent='LiDAR facets accepted ✓ · '+accepted.length+' facets · '+Math.round(totalSloped).toLocaleString()+' ft² sloped area · '+squares.toFixed(2)+' squares. Report is ready.';
  }catch(err){
   const msg=err?.name==='AbortError'?'The save request timed out. Please try Accept Facets again.':(err?.message||String(err));
