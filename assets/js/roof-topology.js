@@ -18,118 +18,247 @@ function frame(points){
   };
 }
 function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
-function angle180(a,b){
-  let d=deg(Math.atan2(b.y-a.y,b.x-a.x))%180;
-  if(d<0)d+=180;
-  return d;
-}
+function angle180(a,b){let d=deg(Math.atan2(b.y-a.y,b.x-a.x))%180;if(d<0)d+=180;return d}
 function angleDiff(a,b){let d=Math.abs(a-b)%180;return Math.min(d,180-d)}
-function pointSegDist(p,a,b){
+function polygonArea(poly){let a=0;for(let i=0;i<poly.length;i++){const p=poly[i],q=poly[(i+1)%poly.length];a+=p.x*q.y-q.x*p.y}return a/2}
+function pointInPoly(p,poly){
+  let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const a=poly[i],b=poly[j];
+    const hit=((a.y>p.y)!=(b.y>p.y))&&(p.x<(b.x-a.x)*(p.y-a.y)/(b.y-a.y||1e-12)+a.x);
+    if(hit)inside=!inside;
+  }
+  return inside;
+}
+function pointSegDistance(p,a,b){
   const dx=b.x-a.x,dy=b.y-a.y,l2=dx*dx+dy*dy||1;
   const t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/l2));
-  return Math.hypot(p.x-(a.x+t*dx),p.y-(a.y+t*dy));
+  return {distance:Math.hypot(p.x-(a.x+t*dx),p.y-(a.y+t*dy)),t,point:{x:a.x+t*dx,y:a.y+t*dy}};
 }
-function simplifyIds(ids){
-  const out=[...ids];
-  let changed=true;
+function lineIntersection(a,b,c,d){
+  const rx=b.x-a.x,ry=b.y-a.y,sx=d.x-c.x,sy=d.y-c.y;
+  const den=rx*sy-ry*sx;if(Math.abs(den)<1e-9)return null;
+  const qx=c.x-a.x,qy=c.y-a.y;
+  const t=(qx*sy-qy*sx)/den,u=(qx*ry-qy*rx)/den;
+  return {x:a.x+t*rx,y:a.y+t*ry,t,u};
+}
+function simplifyPoly(poly,minEdge=.45,collinear=.18){
+  let out=[...poly],changed=true;
   while(changed&&out.length>3){
     changed=false;
     for(let i=0;i<out.length;i++){
       const a=out[(i-1+out.length)%out.length],b=out[i],c=out[(i+1)%out.length];
-      if(a===b||b===c){out.splice(i,1);changed=true;break}
+      const ab=dist(a,b),bc=dist(b,c),ac=dist(a,c);
+      const dev=pointSegDistance(b,a,c).distance;
+      if(ab<minEdge||bc<minEdge||(dev<collinear&&ac>Math.max(ab,bc))){
+        out.splice(i,1);changed=true;break;
+      }
     }
   }
   return out;
 }
-function canonicalEdge(a,b){return a<b?a+"|"+b:b+"|"+a}
-
-export function buildRoofTopology(solarModel,{snapMeters=.9,lineSnapMeters=1.2}={}){
-  const sm=solarModel||{};
-  const facets=sm.model?.facets||[];
-  const roofLines=sm.model?.roofLines||[];
-  const outline=sm.outline||[];
-  const all=[...outline,...facets.flatMap(f=>f.outline||[]),...roofLines.flatMap(l=>[l.a,l.b]).filter(Boolean)];
-  if(outline.length<3||!facets.length)return null;
-  const F=frame(all);
+function snapAngle(raw,families,limit=18){
+  let best=raw,diff=999;
+  for(const f of families){const d=angleDiff(raw,f);if(d<diff){diff=d;best=f}}
+  return {angle:diff<=limit?best:raw,snapped:diff<=limit,diff};
+}
+function infiniteLineThroughMid(a,b,angle){
+  const m={x:(a.x+b.x)/2,y:(a.y+b.y)/2},r=rad(angle),dx=Math.cos(r),dy=Math.sin(r);
+  return {a:{x:m.x-dx*1000,y:m.y-dy*1000},b:{x:m.x+dx*1000,y:m.y+dy*1000}};
+}
+function regularizePerimeter(poly){
+  let pts=simplifyPoly(poly,.65,.22);
+  if(pts.length<3)return pts;
+  let longest={len:0,ang:0};
+  for(let i=0;i<pts.length;i++){
+    const a=pts[i],b=pts[(i+1)%pts.length],len=dist(a,b);
+    if(len>longest.len)longest={len,ang:angle180(a,b)};
+  }
+  const base=longest.ang,families=[base,(base+90)%180,(base+45)%180,(base+135)%180];
+  const lines=[];
+  for(let i=0;i<pts.length;i++){
+    const a=pts[i],b=pts[(i+1)%pts.length],snap=snapAngle(angle180(a,b),families,16);
+    lines.push(infiniteLineThroughMid(a,b,snap.angle));
+  }
+  const rebuilt=[];
+  for(let i=0;i<lines.length;i++){
+    const prev=lines[(i-1+lines.length)%lines.length],cur=lines[i],hit=lineIntersection(prev.a,prev.b,cur.a,cur.b),ref=pts[i];
+    rebuilt.push(hit&&dist(hit,ref)<4?{x:hit.x,y:hit.y}:ref);
+  }
+  return simplifyPoly(rebuilt,.7,.16);
+}
+function nearestPointOnPerimeter(p,poly){
+  let best={distance:Infinity,point:null,edge:-1};
+  for(let i=0;i<poly.length;i++){
+    const r=pointSegDistance(p,poly[i],poly[(i+1)%poly.length]);
+    if(r.distance<best.distance)best={...r,edge:i};
+  }
+  return best;
+}
+function trimOrSnapInternalLine(line,poly,families){
+  let a={...line.a},b={...line.b};
+  const snap=snapAngle(angle180(a,b),families,20);
+  const clean=infiniteLineThroughMid(a,b,snap.angle);
+  // Project original endpoints onto snapped line.
+  const pa=pointSegDistance(a,clean.a,clean.b).point,pb=pointSegDistance(b,clean.a,clean.b).point;
+  a=pa;b=pb;
+  // Snap endpoints to perimeter when already reasonably close.
+  const na=nearestPointOnPerimeter(a,poly),nb=nearestPointOnPerimeter(b,poly);
+  if(na.distance<=1.8)a=na.point;
+  if(nb.distance<=1.8)b=nb.point;
+  return {...line,a,b,architecturalAngle:snap.angle};
+}
+function segmentIntersection(a,b,c,d){
+  const h=lineIntersection(a,b,c,d);
+  if(!h||h.t<-1e-7||h.t>1+1e-7||h.u<-1e-7||h.u>1+1e-7)return null;
+  return h;
+}
+function splitSegments(segments){
+  const cuts=segments.map(()=>[0,1]);
+  for(let i=0;i<segments.length;i++)for(let j=i+1;j<segments.length;j++){
+    const h=segmentIntersection(segments[i].a,segments[i].b,segments[j].a,segments[j].b);
+    if(!h)continue;
+    if(h.t>1e-5&&h.t<1-1e-5)cuts[i].push(h.t);
+    if(h.u>1e-5&&h.u<1-1e-5)cuts[j].push(h.u);
+  }
+  const out=[];
+  segments.forEach((s,i)=>{
+    const ts=[...new Set(cuts[i].map(v=>Math.round(v*1e6)/1e6))].sort((a,b)=>a-b);
+    for(let k=0;k<ts.length-1;k++){
+      const t0=ts[k],t1=ts[k+1];
+      if(t1-t0<1e-5)continue;
+      const a={x:s.a.x+(s.b.x-s.a.x)*t0,y:s.a.y+(s.b.y-s.a.y)*t0};
+      const b={x:s.a.x+(s.b.x-s.a.x)*t1,y:s.a.y+(s.b.y-s.a.y)*t1};
+      if(dist(a,b)>.18)out.push({...s,a,b});
+    }
+  });
+  return out;
+}
+function buildPlanarGraph(segments,nodeSnap=.35){
   const nodes=[];
-
-  function nodeFor(ll){
-    const p=F.toXY(ll);
+  function nodeFor(p){
     let best=-1,bestD=Infinity;
-    for(let i=0;i<nodes.length;i++){
-      const d=dist(p,nodes[i]);
-      if(d<bestD){bestD=d;best=i}
+    for(let i=0;i<nodes.length;i++){const d=dist(p,nodes[i]);if(d<bestD){bestD=d;best=i}}
+    if(best>=0&&bestD<=nodeSnap){
+      const n=nodes[best],k=n.samples+1;n.x=(n.x*n.samples+p.x)/k;n.y=(n.y*n.samples+p.y)/k;n.samples=k;return best;
     }
-    if(best>=0&&bestD<=snapMeters){
-      const n=nodes[best],k=n.samples+1;
-      n.x=(n.x*n.samples+p.x)/k;n.y=(n.y*n.samples+p.y)/k;n.samples=k;
-      return best;
-    }
-    nodes.push({x:p.x,y:p.y,samples:1});
-    return nodes.length-1;
+    nodes.push({x:p.x,y:p.y,samples:1});return nodes.length-1;
   }
-
-  const facetFaces=facets.map((f,fi)=>{
-    const ids=simplifyIds((f.outline||[]).map(nodeFor));
-    return {id:fi+1,vertexIds:ids,rise12:Number(f.rise12||0),pitchDegrees:Number(f.pitchDegrees||0),flatAreaSqFt:Number(f.flatAreaSqFt||0),slopedAreaSqFt:Number(f.slopedAreaSqFt||0)};
-  }).filter(f=>f.vertexIds.length>=3);
-
-  const edgeMap=new Map();
-  facetFaces.forEach(face=>{
-    const ids=face.vertexIds;
-    for(let i=0;i<ids.length;i++){
-      const a=ids[i],b=ids[(i+1)%ids.length];
-      if(a===b)continue;
-      const key=canonicalEdge(a,b);
-      if(!edgeMap.has(key))edgeMap.set(key,{a,b,faces:[]});
-      edgeMap.get(key).faces.push(face.id);
-    }
-  });
-
-  const rl=roofLines.map(l=>({...l,aXY:F.toXY(l.a),bXY:F.toXY(l.b)}));
-  const edges=[...edgeMap.values()].map((e,idx)=>{
-    const a=nodes[e.a],b=nodes[e.b],mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
-    let type=e.faces.length>1?"internal":"perimeter",best=lineSnapMeters;
-    for(const l of rl){
-      const d=pointSegDist(mid,l.aXY,l.bXY);
-      if(d<best&&angleDiff(angle180(a,b),angle180(l.aXY,l.bXY))<18){best=d;type=l.type||type}
-    }
-    return {id:idx+1,a:e.a,b:e.b,faces:e.faces,type,lengthMeters:dist(a,b)};
-  });
-
-  const perimeterEdges=edges.filter(e=>e.faces.length===1);
-  // Dominant architectural direction from longest perimeter edge.
-  let dominant=0;
-  if(perimeterEdges.length){
-    const e=[...perimeterEdges].sort((x,y)=>y.lengthMeters-x.lengthMeters)[0];
-    dominant=angle180(nodes[e.a],nodes[e.b]);
+  const map=new Map();
+  for(const s of segments){
+    const a=nodeFor(s.a),b=nodeFor(s.b);if(a===b)continue;
+    const key=a<b?a+"|"+b:b+"|"+a;
+    if(!map.has(key))map.set(key,{a,b,type:s.type||"internal",source:s.source||"unknown"});
+    else if(["ridge","hip","valley"].includes(s.type))map.get(key).type=s.type;
   }
-  const families=[dominant,(dominant+90)%180,(dominant+45)%180,(dominant+135)%180];
+  return {nodes,edges:[...map.values()]};
+}
+function extractFaces(nodes,edges,outerPoly){
+  const adj=Array.from({length:nodes.length},()=>[]);
+  edges.forEach((e,ei)=>{
+    adj[e.a].push({to:e.b,edge:ei});
+    adj[e.b].push({to:e.a,edge:ei});
+  });
+  adj.forEach((arr,vi)=>arr.sort((x,y)=>{
+    const a=Math.atan2(nodes[x.to].y-nodes[vi].y,nodes[x.to].x-nodes[vi].x);
+    const b=Math.atan2(nodes[y.to].y-nodes[vi].y,nodes[y.to].x-nodes[vi].x);
+    return a-b;
+  }));
+  const used=new Set(),faces=[];
+  const hkey=(a,b)=>a+">"+b;
+  for(let a=0;a<nodes.length;a++)for(const first of adj[a]){
+    if(used.has(hkey(a,first.to)))continue;
+    const cycle=[];let u=a,v=first.to,guard=0;
+    while(guard++<edges.length*4+20){
+      const key=hkey(u,v);if(used.has(key))break;
+      used.add(key);cycle.push(u);
+      const around=adj[v],idx=around.findIndex(x=>x.to===u);
+      if(idx<0)break;
+      // Take the previous edge in angular order: keeps bounded face on the left.
+      const next=around[(idx-1+around.length)%around.length].to;
+      u=v;v=next;
+      if(u===a&&v===first.to)break;
+    }
+    if(cycle.length<3)continue;
+    const poly=cycle.map(id=>nodes[id]),area=polygonArea(poly);
+    if(Math.abs(area)<.8)continue;
+    const centroid={x:poly.reduce((s,p)=>s+p.x,0)/poly.length,y:poly.reduce((s,p)=>s+p.y,0)/poly.length};
+    if(!pointInPoly(centroid,outerPoly))continue;
+    // Keep only bounded, counterclockwise faces; reverse if traversal is clockwise.
+    const ids=area>0?cycle:[...cycle].reverse();
+    faces.push(ids);
+  }
+  const unique=new Map();
+  for(const ids of faces){
+    const min=Math.min(...ids),i=ids.indexOf(min),rot=ids.slice(i).concat(ids.slice(0,i));
+    const rev=[...rot].reverse(),k1=rot.join("-"),k2=rev.join("-"),key=k1<k2?k1:k2;
+    unique.set(key,rot);
+  }
+  return [...unique.values()];
+}
+function faceCentroid(face,nodes){
+  const poly=face.map(id=>nodes[id]);
+  return {x:poly.reduce((s,p)=>s+p.x,0)/poly.length,y:poly.reduce((s,p)=>s+p.y,0)/poly.length};
+}
+function nearestFacetMeta(c,facets,F){
+  let best=null,bestD=Infinity;
+  for(const f of facets){
+    const ll=f.center;if(!ll)continue;const p=F.toXY(ll),d=dist(c,p);
+    if(d<bestD){bestD=d;best=f}
+  }
+  return best;
+}
 
-  // Snap only high-confidence two-vertex directions for display metadata.
-  edges.forEach(e=>{
-    const raw=angle180(nodes[e.a],nodes[e.b]);
-    let best=raw,diff=999;
-    for(const f of families){const d=angleDiff(raw,f);if(d<diff){diff=d;best=f}}
-    e.architecturalAngle=diff<=16?best:raw;
-    e.angleSnapApplied=diff<=16;
+export function buildRoofTopology(solarModel){
+  const sm=solarModel||{},facets=sm.model?.facets||[],roofLines=sm.model?.roofLines||[],outlineLL=sm.outline||[];
+  if(outlineLL.length<3)return null;
+  const all=[...outlineLL,...roofLines.flatMap(l=>[l.a,l.b]).filter(Boolean),...facets.flatMap(f=>f.outline||[])],F=frame(all);
+  let perimeter=regularizePerimeter(outlineLL.map(F.toXY));
+  if(polygonArea(perimeter)<0)perimeter.reverse();
+
+  let longest={len:0,ang:0};
+  for(let i=0;i<perimeter.length;i++){const a=perimeter[i],b=perimeter[(i+1)%perimeter.length],len=dist(a,b);if(len>longest.len)longest={len,ang:angle180(a,b)}}
+  const families=[longest.ang,(longest.ang+90)%180,(longest.ang+45)%180,(longest.ang+135)%180];
+
+  const segments=[];
+  for(let i=0;i<perimeter.length;i++)segments.push({a:perimeter[i],b:perimeter[(i+1)%perimeter.length],type:"perimeter",source:"perimeter"});
+  roofLines.filter(l=>["ridge","hip","valley"].includes(l.type)&&l.a&&l.b).forEach(l=>{
+    const clean=trimOrSnapInternalLine({...l,a:F.toXY(l.a),b:F.toXY(l.b)},perimeter,families);
+    // Only keep lines whose midpoint lies inside the roof footprint.
+    const mid={x:(clean.a.x+clean.b.x)/2,y:(clean.a.y+clean.b.y)/2};
+    if(pointInPoly(mid,perimeter))segments.push({...clean,source:"dsm-line"});
   });
 
-  const vertices=nodes.map((n,i)=>({id:i,xy:{x:n.x,y:n.y},...F.toLL(n)}));
+  const split=splitSegments(segments),graph=buildPlanarGraph(split,.3);
+  const facesRaw=extractFaces(graph.nodes,graph.edges,perimeter);
+  const faces=facesRaw.map((ids,i)=>{
+    const c=faceCentroid(ids,graph.nodes),meta=nearestFacetMeta(c,facets,F)||{};
+    return {
+      id:i+1,vertexIds:ids,
+      rise12:Number(meta.rise12||0),
+      pitchDegrees:Number(meta.pitchDegrees||0),
+      flatAreaSqFt:Number(meta.flatAreaSqFt||0),
+      slopedAreaSqFt:Number(meta.slopedAreaSqFt||0)
+    };
+  });
+
+  const vertices=graph.nodes.map((n,i)=>({id:i,xy:{x:n.x,y:n.y},...F.toLL(n)}));
+  const edges=graph.edges.map((e,i)=>({
+    id:i+1,a:e.a,b:e.b,type:e.type||"internal",source:e.source||"unknown",
+    lengthMeters:dist(graph.nodes[e.a],graph.nodes[e.b])
+  }));
   return {
-    version:1,
-    source:"google-dsm-topology",
-    dominantAngle:dominant,
-    vertices,
-    edges,
-    faces:facetFaces,
-    outline,
+    version:2,
+    source:"architectural-planar-topology",
+    dominantAngle:longest.ang,
+    vertices,edges,faces,
+    outline:perimeter.map(F.toLL),
     stats:{
-      vertices:vertices.length,
-      edges:edges.length,
-      faces:facetFaces.length,
-      sharedEdges:edges.filter(e=>e.faces.length>1).length,
-      perimeterEdges:perimeterEdges.length
+      vertices:vertices.length,edges:edges.length,faces:faces.length,
+      perimeterEdges:edges.filter(e=>e.type==="perimeter").length,
+      ridgeEdges:edges.filter(e=>e.type==="ridge").length,
+      hipEdges:edges.filter(e=>e.type==="hip").length,
+      valleyEdges:edges.filter(e=>e.type==="valley").length
     }
   };
 }
