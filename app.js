@@ -1357,7 +1357,7 @@ function roofDiagramSvg(data){
    const a=pt(e.a),b=pt(e.b),mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
    s+='<text x="'+mx.toFixed(1)+'" y="'+(my-7).toFixed(1)+'" text-anchor="middle" font-size="15" font-weight="600" fill="#111" stroke="#fff" stroke-width="5" paint-order="stroke">'+Number(e.lengthFt||0).toFixed(1)+' ft</text>';
   });
-  s+='<g transform="translate(28 935)" font-size="17" fill="#111"><text x="0" y="0">Geometry: architectural planar topology rebuilt from DSM roof lines</text><text x="0" y="26">Shared vertices/edges enforce one connected roof model; LiDAR remains an independent 3D validation source</text></g></svg>';
+  s+='<g transform="translate(28 935)" font-size="17" fill="#111"><text x="0" y="0">Geometry: stabilized planar topology from DSM roof lines</text><text x="0" y="26">Shared vertices/edges enforce one connected roof model; LiDAR remains an independent 3D validation source</text></g></svg>';
   return s;
  }
  const outline=data.outline,poly=outline.polygon||[],planes=(data.planes?.planes||[]).filter(p=>p.accepted),geom=(data.geometry?.lines||[]).filter(l=>l.type!=='ignore'&&l.type!=='candidate');
@@ -1409,14 +1409,14 @@ async function generateRoofReport(){
   const sm=d.solarModel||null,dm=sm?.measurements||{},dsmFacets=sm?.model?.facets||[];
   if(sm?.model?.facets?.length){
    try{
-    const topo=await import('/assets/js/roof-topology.js?v=20261002-3');
+    const topo=await import('/assets/js/roof-topology.js?v=20261002-4');
     d.topology=topo.buildRoofTopology(sm);
    }catch(err){console.warn('Roof topology engine unavailable',err)}
   }
   const lidarSloped=facets.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0);
   const dsmSloped=Number(sm?.model?.slopedAreaSqFt||0);
   const sloped=dsmSloped>0?dsmSloped:lidarSloped,squares=sloped/100,lines=roofLineTotals(d);
-  const reportFacetCount=Number(d.topology?.faces?.length||dsmFacets.length||facets.length||0);
+  const reportFacetCount=Number(dsmFacets.length||d.topology?.faces?.length||facets.length||0);
   const wholePitch=v=>Math.round(Number(v)||0);
   const pitchWeightTotal=dsmFacets.reduce((s,f)=>s+Number(f.slopedAreaSqFt||f.flatAreaSqFt||0),0);
   const avgPitch=dsmFacets.length
