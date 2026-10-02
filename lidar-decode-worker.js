@@ -1,6 +1,12 @@
+importScripts('/vendor/laz-perf.js','/vendor/laz-perf-wasm.js');
 let lazModulePromise=null;
+function decodeB64(s){const bin=atob(s),out=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)out[i]=bin.charCodeAt(i);return out}
 async function getLaz(){
- if(!lazModulePromise)lazModulePromise=import('https://esm.sh/laz-perf@0.0.7?bundle&target=es2020').then(m=>m.createLazPerf());
+ if(!lazModulePromise){
+  const wasmBinary=decodeB64(self.LAZPERF_WASM_B64||'');
+  if(!wasmBinary.length)throw new Error('Local LAZperf WASM payload is missing.');
+  lazModulePromise=createLazPerf({wasmBinary});
+ }
  return lazModulePromise;
 }
 function parseHeader(buf){
