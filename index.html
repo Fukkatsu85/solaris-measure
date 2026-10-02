@@ -72,6 +72,12 @@
             <canvas id="roof-lidar-canvas" width="720" height="520" style="width:100%;max-height:520px;border-radius:12px;background:#111"></canvas>
             <p class="muted" id="roof-lidar-visual-status"></p>
           </div>
+          <div id="roof-plane-panel" class="card" hidden style="margin-top:12px">
+            <div class="card-head"><div><div class="eyebrow">LIDAR ROOF PLANES</div><h3>Facet proposals</h3><p class="muted">Fit planar roof surfaces from the decoded 3D points, then review before using them for pitch or takeoff.</p></div><span id="roof-plane-count" class="status">0 facets</span></div>
+            <div class="actions"><button id="fit-roof-planes" class="primary" type="button">Fit Roof Planes</button><button id="accept-roof-planes" class="secondary" type="button" disabled>Accept Facets</button></div>
+            <div id="roof-plane-list" style="margin-top:10px"></div>
+            <p class="muted" id="roof-plane-status">Decode roof points first.</p>
+          </div>
         </div>
         <div id="roof-line-panel" class="card" hidden style="margin-top:12px">
           <div class="card-head"><div><div class="eyebrow">ROOF GEOMETRY</div><h3>Internal line proposals</h3><p class="muted">Solaris proposes strong roof lines from the aerial image. Review each line before it is used.</p></div><span id="roof-line-count" class="status">0 lines</span></div>
@@ -223,6 +229,6 @@
     </div>
   </main>
 
-  <script src="/app.js?v=20261002-lidardecode1"></script>
+  <script src="/app.js?v=20261002-planefit1"></script>
 </body>
 </html>
