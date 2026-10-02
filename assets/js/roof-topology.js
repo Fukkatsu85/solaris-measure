@@ -156,6 +156,69 @@ function validFaceSet(segments,perimeter){
   const areas=faces.map(ids=>Math.abs(polygonArea(ids.map(id=>graph.nodes[id]))));
   return {split,graph,faces,areas};
 }
+function candidateDuplicate(seg,existing){
+  const mid={x:(seg.a.x+seg.b.x)/2,y:(seg.a.y+seg.b.y)/2},ang=angle180(seg.a,seg.b);
+  return existing.some(e=>{
+    const em={x:(e.a.x+e.b.x)/2,y:(e.a.y+e.b.y)/2};
+    return dist(mid,em)<1.0&&angleDiff(ang,angle180(e.a,e.b))<10;
+  });
+}
+function connectCandidate(seg,existing,perimeter,maxExtension=4.0){
+  const out={...seg,a:{...seg.a},b:{...seg.b}};
+  const supports=[
+    ...existing.map(e=>({a:e.a,b:e.b})),
+    ...perimeter.map((a,i)=>({a,b:perimeter[(i+1)%perimeter.length]}))
+  ];
+  for(const key of ["a","b"]){
+    const p=out[key],q=out[key==="a"?"b":"a"],vx=p.x-q.x,vy=p.y-q.y,vl=Math.hypot(vx,vy)||1,ux=vx/vl,uy=vy/vl;
+    const infA={x:p.x-ux*1000,y:p.y-uy*1000},infB={x:p.x+ux*1000,y:p.y+uy*1000};
+    let best=null,bestD=maxExtension;
+    for(const s of supports){
+      const h=lineIntersection(infA,infB,s.a,s.b);if(!h)continue;
+      const pt={x:h.x,y:h.y},along=(pt.x-p.x)*ux+(pt.y-p.y)*uy;
+      if(along<-.1||along>maxExtension)continue;
+      const chk=pointSegDistance(pt,s.a,s.b);
+      if(chk.distance>.12)continue;
+      const d=Math.max(0,along);
+      if(d<bestD){bestD=d;best=pt}
+    }
+    if(best)out[key]=best;
+  }
+  return out;
+}
+function facetEdgeCandidates(facets,F,perimeter,families,existing){
+  const out=[];
+  for(const facet of facets){
+    const poly=(facet.outline||[]).map(F.toXY);
+    for(let i=0;i<poly.length;i++){
+      let a=poly[i],b=poly[(i+1)%poly.length];
+      if(dist(a,b)<.8)continue;
+      const mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+      if(!pointInPoly(mid,perimeter))continue;
+      if(nearestPointOnPerimeter(mid,perimeter).distance<.7)continue;
+      const snap=snapAngle(angle180(a,b),families,16),clean=infiniteLineThroughMid(a,b,snap.angle);
+      a=pointSegDistance(a,clean.a,clean.b).point;
+      b=pointSegDistance(b,clean.a,clean.b).point;
+      let seg={a,b,type:"internal",source:"facet-edge-candidate"};
+      if(candidateDuplicate(seg,existing)||candidateDuplicate(seg,out))continue;
+      out.push(seg);
+    }
+  }
+  return out.sort((a,b)=>dist(b.a,b.b)-dist(a.a,a.b));
+}
+function addFaceImprovingCandidates(baseSegments,baseInternal,candidates,perimeter,maxAdds=8){
+  let accepted=[...baseInternal],segments=[...baseSegments],solved=validFaceSet(segments,perimeter),adds=0;
+  for(const raw of candidates){
+    if(adds>=maxAdds)break;
+    let cand=connectCandidate(raw,accepted,perimeter,4.0);
+    if(dist(cand.a,cand.b)<.75||candidateDuplicate(cand,accepted))continue;
+    const trialSegments=[...segments,cand],trial=validFaceSet(trialSegments,perimeter);
+    if(trial.faces.length!==solved.faces.length+1)continue;
+    if(!trial.areas.length||Math.min(...trial.areas)<1.0)continue;
+    accepted.push(cand);segments=trialSegments;solved=trial;adds++;
+  }
+  return {accepted,segments,solved,adds};
+}
 function segmentIntersection(a,b,c,d){
   const h=lineIntersection(a,b,c,d);
   if(!h||h.t<-1e-7||h.t>1+1e-7||h.u<-1e-7||h.u>1+1e-7)return null;
@@ -285,7 +348,9 @@ export function buildRoofTopology(solarModel){
   const connectedInternal=extendInternalLinesToJunctions(acceptedInternal,perimeter,5.5);
   segments.push(...connectedInternal);
 
-  const solved=validFaceSet(segments,perimeter),split=solved.split,graph=solved.graph;
+  const candidates=facetEdgeCandidates(facets,F,perimeter,families,connectedInternal);
+  const augmented=addFaceImprovingCandidates(segments,connectedInternal,candidates,perimeter,8);
+  const solved=augmented.solved,split=solved.split,graph=solved.graph;
   const facesRaw=solved.faces;
   const faces=facesRaw.map((ids,i)=>{
     const c=faceCentroid(ids,graph.nodes),meta=nearestFacetMeta(c,facets,F)||{};
@@ -304,8 +369,8 @@ export function buildRoofTopology(solarModel){
     lengthMeters:dist(graph.nodes[e.a],graph.nodes[e.b])
   }));
   return {
-    version:2.2,
-    source:"architectural-planar-topology-junctions",
+    version:2.3,
+    source:"architectural-planar-topology-scored-candidates",
     dominantAngle:longest.ang,
     vertices,edges,faces,
     outline:perimeter.map(F.toLL),
@@ -315,7 +380,8 @@ export function buildRoofTopology(solarModel){
       ridgeEdges:edges.filter(e=>e.type==="ridge").length,
       hipEdges:edges.filter(e=>e.type==="hip").length,
       valleyEdges:edges.filter(e=>e.type==="valley").length,
-      closedFaces:faces.length
+      closedFaces:faces.length,
+      acceptedCandidateEdges:augmented.adds
     }
   };
 }
