@@ -17,6 +17,27 @@
   </header>
 
   <main class="shell">
+    <nav class="measure-tabs" style="display:flex;gap:10px;margin:0 0 18px;flex-wrap:wrap">
+      <button id="tab-siding" class="primary" type="button">Siding / Exterior</button>
+      <button id="tab-roof" class="secondary" type="button">Roof Measurement</button>
+    </nav>
+    <section id="roof-tool" class="card" hidden>
+      <div class="card-head"><div><div class="eyebrow">ROOF MEASUREMENT</div><h3>Solaris Roof Measure</h3><p class="muted">Dedicated roof workflow for aerial/property imagery, roof facets, pitch, ridges, hips, valleys, rakes and eaves.</p></div><button id="new-roof-measurement" class="primary">New Roof Measurement</button></div>
+      <div class="metrics">
+        <div class="metric"><span>Roof area</span><strong id="roof-area">—</strong></div>
+        <div class="metric"><span>Facets</span><strong id="roof-facets">—</strong></div>
+        <div class="metric"><span>Pitch</span><strong id="roof-pitch">—</strong></div>
+        <div class="metric"><span>Squares</span><strong id="roof-squares">—</strong></div>
+      </div>
+      <div class="analysis-state" id="roof-state">Start a roof measurement. Next build: imagery capture, roof outline/facet editor, pitch and line measurements, then material takeoff.</div>
+      <div class="grid" style="margin-top:16px">
+        <article class="card"><div class="eyebrow">STEP 1</div><h3>Property imagery</h3><p class="muted">Upload or capture roof imagery for the property.</p><label class="secondary upload-button">Add Roof Photos<input id="roof-photo-input" type="file" accept="image/*" multiple hidden></label></article>
+        <article class="card"><div class="eyebrow">STEP 2</div><h3>Roof geometry</h3><p class="muted">Map facets, ridges, hips, valleys, rakes and eaves.</p><button class="secondary" id="roof-geometry" disabled>Build Roof Geometry</button></article>
+        <article class="card"><div class="eyebrow">STEP 3</div><h3>Roof takeoff</h3><p class="muted">Calculate roof area, squares, waste and linear materials.</p><button class="secondary" id="roof-takeoff" disabled>Generate Roof Takeoff</button></article>
+      </div>
+      <div id="roof-gallery" class="photo-gallery"></div>
+    </section>
+    <div id="siding-tool">
     <section class="hero">
       <div>
         <div class="eyebrow">EXTERIOR MEASUREMENT PLATFORM</div>
@@ -147,8 +168,9 @@
     </section>
     <section class="card" id="auto-measure-card"><div class="card-head"><div><div class="eyebrow">PHASE 4</div><h3>Auto Reconstruction</h3><p class="muted">Build a house-level reconstruction workspace from the overlapping views, verified objects and traced wall geometry. Manual scale tools are no longer the primary workflow.</p></div><button id="auto-measure" class="primary">Build Auto Reconstruction</button></div><div id="auto-measure-state" class="analysis-state">Ready to reconstruct from the saved five-view dataset. No additional tracing required.</div><div id="auto-measure-results" class="table-wrap"></div></section>
 
+    </div>
   </main>
 
-  <script src="/app.js?v=20261002-newproject1"></script>
+  <script src="/app.js?v=20261002-rooftab1"></script>
 </body>
 </html>
