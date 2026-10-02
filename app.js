@@ -527,12 +527,29 @@ async function processProperty(){
 }
 document.querySelector('#process-property')?.addEventListener('click',e=>{e.preventDefault();processProperty();});
 
+
 async function buildHouseModel(){
- const btn=document.querySelector('#build-house-model'),state=document.querySelector('#house-model-state'),root=document.querySelector('#house-model-results');if(!btn||!state||!root)return;
- btn.disabled=true;btn.textContent='Building…';state.textContent='Merging verified walls, openings, gables and edge geometry into one house model…';
- try{const r=await fetch('/api/house-model',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID})});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'House model failed.');const x=d.houseModel,names=['front','right','rear','left'];
- root.innerHTML='<div class="metrics"><div class="metric"><span>Model confidence</span><strong>'+x.confidence+'%</strong></div><div class="metric"><span>Wall planes</span><strong>'+x.totals.wallPlanes+'</strong></div><div class="metric"><span>Visible openings</span><strong>'+x.totals.openings+'</strong></div><div class="metric"><span>Metric scale</span><strong>'+(x.metricReady?'Solved':'Unsolved')+'</strong></div></div><table><thead><tr><th>Elevation</th><th>Status</th><th>Source</th><th>Walls</th><th>Openings</th><th>Gables</th></tr></thead><tbody>'+names.map(n=>{const e=x.elevations[n]||{};return '<tr><td>'+n[0].toUpperCase()+n.slice(1)+'</td><td>'+e.status+'</td><td>'+(e.sourceView||'—')+'</td><td>'+(e.wallPlanes||0)+'</td><td>'+(e.openings||0)+'</td><td>'+(e.gables||0)+'</td></tr>'}).join('')+'</tbody></table><div class="analysis-state">'+x.scale.message+'</div>';
- state.textContent='Shared house geometry built. Next: solve trustworthy real-world scale, then calculate siding quantities.';
- }catch(e){state.textContent='House model error: '+(e?.message||String(e));}finally{btn.disabled=false;btn.textContent='Build House Model';}
+ const btn=document.querySelector('#build-house-model');
+ const state=document.querySelector('#house-model-state');
+ const root=document.querySelector('#house-model-results');
+ if(!btn||!state||!root)return;
+ btn.disabled=true; btn.textContent='Building...';
+ state.textContent='Building house model, estimating scale, and calculating siding preview...';
+ try{
+  async function post(url,extra){
+   const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.assign({projectId:PROJECT_ID},extra||{}))});
+   const d=await r.json().catch(()=>({}));
+   if(!r.ok)throw new Error(d.error||'Request failed');
+   return d;
+  }
+  const hm=(await post('/api/house-model')).houseModel;
+  const sc=(await post('/api/metric-scale')).scale;
+  if(!sc.feetPerNormalized){state.textContent='House model built, but automatic metric scale is still unsolved.';root.innerHTML='<div class="analysis-state">No usable automatic scale candidate was found.</div>';return;}
+  const t=(await post('/api/takeoff-preview',{waste:0.10})).takeoff;
+  const names=['front','right','rear','left'];
+  root.innerHTML='<div class="metrics"><div class="metric"><span>Model confidence</span><strong>'+hm.confidence+'%</strong></div><div class="metric"><span>Scale confidence</span><strong>'+sc.confidence+'%</strong></div><div class="metric"><span>Net siding preview</span><strong>'+t.totals.netFt2+' ft²</strong></div><div class="metric"><span>+10% preview</span><strong>'+t.totals.orderFt2+' ft²</strong></div></div><table><thead><tr><th>Elevation</th><th>Gross ft²</th><th>Openings ft²</th><th>Net ft²</th><th>+10%</th></tr></thead><tbody>'+names.map(function(n){var e=t.elevations[n]||{};return '<tr><td>'+n.charAt(0).toUpperCase()+n.slice(1)+'</td><td>'+(e.grossFt2==null?'—':e.grossFt2)+'</td><td>'+(e.openingsFt2==null?'—':e.openingsFt2)+'</td><td>'+(e.netFt2==null?'—':e.netFt2)+'</td><td>'+(e.orderFt2==null?'—':e.orderFt2)+'</td></tr>';}).join('')+'</tbody></table><div class="analysis-state"><strong>Preview only.</strong> '+t.warning+'</div>';
+  state.textContent='Automatic measurement preview complete: '+t.totals.squares+' siding squares with 10% waste.';
+ }catch(e){state.textContent='Measurement model error: '+(e.message||String(e));root.innerHTML='<div class="analysis-state">'+(e.message||String(e))+'</div>';}
+ finally{btn.disabled=false;btn.textContent='Build Measurement Model';}
 }
-document.querySelector('#build-house-model')?.addEventListener('click',e=>{e.preventDefault();buildHouseModel();});
+document.querySelector('#build-house-model')?.addEventListener('click',function(e){e.preventDefault();buildHouseModel();});
