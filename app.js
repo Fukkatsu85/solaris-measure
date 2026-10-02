@@ -1456,7 +1456,7 @@ async function generateRoofReport(){
   const sm=d.solarModel||null,dm=sm?.measurements||{},dsmFacets=sm?.model?.facets||[];
   if(sm?.model?.facets?.length){
    try{
-    const topo=await import('/assets/js/roof-topology.js?v=20261002-11');
+    const topo=await import('/assets/js/roof-topology.js?v=20261002-r24');
     d.topology=topo.buildRoofTopology(sm);
    }catch(err){console.warn('Roof topology engine unavailable',err)}
   }
@@ -1630,6 +1630,59 @@ document.querySelector('#score-roof-benchmark')?.addEventListener('click',async(
   if(out)out.scrollIntoView({behavior:'smooth',block:'nearest'});
  }catch(err){if(badge)badge.textContent='Needs review';if(out)out.textContent='Benchmark scoring failed: '+(err?.message||String(err))}
  finally{if(btn){btn.disabled=false;btn.textContent=old||'Save Reference & Score Solaris'}}
+});
+
+function fmtRegression(v,suffix=''){
+ const n=Number(v);return Number.isFinite(n)?n.toFixed(1)+suffix:'—';
+}
+function renderRoofRegression(data){
+ const s=data?.summary||{},rows=data?.rows||[],summary=document.querySelector('#roof-regression-summary'),status=document.querySelector('#roof-regression-status'),results=document.querySelector('#roof-regression-results');
+ if(summary){
+  const cards=[
+   ['Training cases',s.totalCases??rows.length],
+   ['Processed',s.processedCases??0],
+   ['Average score',fmtRegression(s.averageScore,' /100')],
+   ['Area error',fmtRegression(s.averageAreaErrorPct,'%')],
+   ['Facet error',fmtRegression(s.averageFacetErrorPct,'%')],
+   ['Roof-line error',fmtRegression(s.averageEdgeErrorPct,'%')]
+  ];
+  summary.innerHTML=cards.map(([a,b])=>'<div class="metric"><span>'+escRoof(a)+'</span><strong>'+escRoof(b)+'</strong></div>').join('');
+ }
+ const scored=rows.filter(r=>r.status==='scored').sort((a,b)=>(a.score?.overall??999)-(b.score?.overall??999));
+ const failures=scored.filter(r=>r.gatePass===false);
+ if(status){
+  status.innerHTML='<strong>Regression complete.</strong> '+Number(s.processedCases||0)+' of '+Number(s.totalCases||rows.length)+' cases currently have saved Solaris geometry. '+
+   (failures.length?'<strong>'+failures.length+' processed case'+(failures.length===1?'':'s')+' fail the regression gate.</strong>':'All processed cases pass the current gate.')+
+   (Number(s.pendingCases||0)?' '+Number(s.pendingCases)+' case'+(Number(s.pendingCases)===1?'':'s')+' still need an initial Solaris process run.':'');
+ }
+ if(!results)return;
+ const ordered=[...scored,...rows.filter(r=>r.status!=='scored')];
+ results.innerHTML='<table><thead><tr><th>Roof</th><th>Type</th><th>Ref facets</th><th>Solaris</th><th>Area err</th><th>Facet err</th><th>Lines err</th><th>Score</th><th>Gate</th></tr></thead><tbody>'+
+  ordered.map(r=>{
+   const e=r.score?.errors||{},cur=r.current||{},pending=r.status!=='scored';
+   const gate=pending?'Pending':(r.gatePass?'Pass':'Review');
+   return '<tr>'+
+    '<td><strong>'+escRoof(r.address)+'</strong><br><span class="muted">'+escRoof(r.source||'')+'</span></td>'+
+    '<td>'+escRoof(r.archetype||'—')+'</td>'+
+    '<td>'+escRoof(r.reference?.facetCount??'—')+'</td>'+
+    '<td>'+(pending?'—':escRoof(cur.facetCount??'—'))+'</td>'+
+    '<td>'+fmtRegression(e.area,'%')+'</td>'+
+    '<td>'+fmtRegression(e.facets,'%')+'</td>'+
+    '<td>'+fmtRegression(e.edges,'%')+'</td>'+
+    '<td>'+(pending?'—':fmtRegression(r.score?.overall,' /100'))+'</td>'+
+    '<td><strong>'+gate+'</strong></td>'+
+   '</tr>';
+  }).join('')+'</tbody></table>';
+}
+document.querySelector('#run-roof-regression')?.addEventListener('click',async()=>{
+ const btn=document.querySelector('#run-roof-regression'),status=document.querySelector('#roof-regression-status');
+ const old=btn?.textContent;if(btn){btn.disabled=true;btn.textContent='Running 24 roofs…'}if(status)status.textContent='Running the current solver against the verified training corpus…';
+ try{
+  const r=await fetch('/api/training-regression',{cache:'no-store'}),d=await r.json().catch(()=>({}));
+  if(!r.ok||!d.ok)throw new Error(d.error||'Regression runner failed.');
+  renderRoofRegression(d);
+ }catch(err){if(status)status.textContent='Regression failed: '+(err?.message||String(err))}
+ finally{if(btn){btn.disabled=false;btn.textContent=old||'Run Regression'}}
 });
 
 async function restoreRoofReportReadyState(){
