@@ -627,12 +627,53 @@ if((localStorage.getItem('solarisMeasureTab')||'siding')==='roof'){
 
 let roofLocatedProperty=null;
 let roofMapsKey=null;
+let roofLocatorMap=null;
+let roofLocatorMarker=null;
+let roofMapsScriptPromise=null;
+
 async function getRoofMapsKey(){
  if(roofMapsKey)return roofMapsKey;
  const r=await fetch('/api/maps-config');const d=await r.json().catch(()=>({}));
  if(!r.ok||!d.key)throw new Error(d.error||'Google Maps key is not configured.');
  roofMapsKey=d.key;return roofMapsKey;
 }
+async function loadRoofMapsJs(){
+ if(window.google?.maps?.importLibrary)return window.google.maps;
+ if(roofMapsScriptPromise)return roofMapsScriptPromise;
+ roofMapsScriptPromise=(async()=>{
+  const key=await getRoofMapsKey();
+  await new Promise((resolve,reject)=>{
+   const s=document.createElement('script');
+   s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&v=weekly&libraries=marker';
+   s.async=true;s.defer=true;s.onload=resolve;s.onerror=()=>reject(new Error('Maps JavaScript API failed to load.'));
+   document.head.appendChild(s);
+  });
+  return window.google.maps;
+ })();
+ return roofMapsScriptPromise;
+}
+async function showRoofLocator(address,lat,lng){
+ await loadRoofMapsJs();
+ const mapEl=document.querySelector('#roof-map');
+ if(!mapEl)throw new Error('Roof map container is missing.');
+ mapEl.innerHTML='';
+ const {Map}=await google.maps.importLibrary('maps');
+ const {AdvancedMarkerElement}=await google.maps.importLibrary('marker');
+ roofLocatorMap=new Map(mapEl,{center:{lat,lng},zoom:20,mapTypeId:'satellite',mapId:'DEMO_MAP_ID',streetViewControl:false,mapTypeControl:true,fullscreenControl:true});
+ roofLocatorMarker=new AdvancedMarkerElement({map:roofLocatorMap,position:{lat,lng},title:'Drag onto the exact roof',gmpDraggable:true});
+ const update=()=>{
+  const p=roofLocatorMarker.position;
+  const plat=typeof p?.lat==='function'?p.lat():Number(p?.lat),plng=typeof p?.lng==='function'?p.lng():Number(p?.lng);
+  if(Number.isFinite(plat)&&Number.isFinite(plng)){
+   roofLocatedProperty={address,lat:plat,lng:plng,locationSource:'corrected-pin'};
+   const status=document.querySelector('#roof-location-status');
+   if(status)status.textContent='Pin location: '+plat.toFixed(6)+', '+plng.toFixed(6)+' · drag the pin onto the center of the exact roof, then Use This Location.';
+  }
+ };
+ roofLocatorMarker.addEventListener('gmp-dragend',update);
+ update();
+}
+
 const roofAddressInput=document.querySelector('#roof-address');
 let roofAddressFirstEdit=true;
 roofAddressInput?.addEventListener('pointerdown',()=>{
@@ -644,49 +685,59 @@ roofAddressInput?.addEventListener('pointerdown',()=>{
 roofAddressInput?.addEventListener('keydown',e=>{
  if(e.key==='Enter'){e.preventDefault();document.querySelector('#locate-roof')?.click();}
 });
+
 document.querySelector('#locate-roof')?.addEventListener('click',async()=>{
  const address=document.querySelector('#roof-address')?.value.trim();if(!address){alert('Enter a property address first.');return;}
- const status=document.querySelector('#roof-location-status'),map=document.querySelector('#roof-map'),confirm=document.querySelector('#confirm-roof-property'),btn=document.querySelector('#locate-roof');
- if(btn)btn.disabled=true;if(status)status.textContent='Locating '+address+'…';
+ const status=document.querySelector('#roof-location-status'),confirm=document.querySelector('#confirm-roof-property'),btn=document.querySelector('#locate-roof');
+ if(btn)btn.disabled=true;if(confirm)confirm.disabled=true;if(status)status.textContent='Locating '+address+'…';
  try{
-  const key=await getRoofMapsKey();
-  roofLocatedProperty={address};
-  const src='https://www.google.com/maps/embed/v1/place?key='+encodeURIComponent(key)+'&q='+encodeURIComponent(address)+'&maptype=satellite&zoom=15';
-  if(map)map.innerHTML='<iframe title="Satellite property map" allowfullscreen loading="lazy" referrerpolicy="no-referrer-when-downgrade" style="width:100%;height:460px;border:0" src="'+src+'"></iframe>';
-  if(status)status.textContent='Satellite property located. Pan/zoom to verify the correct roof, then select it.';
+  const r=await fetch('/api/mn-aerial?address='+encodeURIComponent(address)),d=await r.json();
+  if(!r.ok)throw new Error(d.error||'Address could not be located.');
+  roofLocatedProperty={address,lat:Number(d.lat),lng:Number(d.lng),locationSource:'address-geocode'};
+  await showRoofLocator(address,Number(d.lat),Number(d.lng));
+  if(status)status.textContent='Property located. Drag the pin onto the exact roof if needed, then click Use This Location.';
   if(confirm)confirm.disabled=false;
  }catch(err){
   roofLocatedProperty=null;if(confirm)confirm.disabled=true;
-  if(status)status.textContent='Could not load Google satellite imagery: '+err.message;
-  if(map)map.innerHTML='<div style="padding:32px;text-align:center"><strong>Satellite map unavailable</strong><p class="muted">'+err.message+'</p></div>';
- }finally{if(btn)btn.disabled=false;}
+  if(status)status.textContent='Could not load interactive satellite map: '+err.message;
+  const map=document.querySelector('#roof-map');if(map)map.innerHTML='<div style="padding:32px;text-align:center"><strong>Interactive map unavailable</strong><p class="muted">'+err.message+'</p></div>';
+ }finally{if(btn)btn.disabled=false}
 });
+
 document.querySelector('#confirm-roof-property')?.addEventListener('click',()=>{
- if(!roofLocatedProperty)return;
- localStorage.setItem('solarisRoofProject',JSON.stringify({name:roofLocatedProperty.address,address:roofLocatedProperty.address,createdAt:new Date().toISOString()}));
- const state=document.querySelector('#roof-state');if(state)state.textContent='Property selected: '+roofLocatedProperty.address;
+ if(!roofLocatedProperty||!Number.isFinite(Number(roofLocatedProperty.lat))||!Number.isFinite(Number(roofLocatedProperty.lng)))return;
+ const previous=JSON.parse(localStorage.getItem('solarisRoofProject')||'{}');
+ const project={
+  ...previous,
+  name:roofLocatedProperty.address,
+  address:roofLocatedProperty.address,
+  lat:Number(roofLocatedProperty.lat),
+  lng:Number(roofLocatedProperty.lng),
+  locationSource:'corrected-pin',
+  locationConfirmedAt:new Date().toISOString(),
+  createdAt:previous.createdAt||new Date().toISOString()
+ };
+ // Correcting the pin invalidates location-derived imagery/LiDAR from an older center.
+ delete project.lidarSource;delete project.lidarDataset;delete project.lidarEpt;delete project.lidarSubset;delete project.lidarDecodedSummary;
+ localStorage.setItem('solarisRoofProject',JSON.stringify(project));
+ const state=document.querySelector('#roof-state');if(state)state.textContent='Roof location confirmed: '+project.address+' · '+project.lat.toFixed(6)+', '+project.lng.toFixed(6);
  const geo=document.querySelector('#roof-geometry');if(geo)geo.disabled=false;
  const ws=document.querySelector('#roof-selected-workspace'),title=document.querySelector('#roof-selected-address');
- if(title)title.textContent=roofLocatedProperty.address;if(ws){ws.hidden=false;ws.scrollIntoView({behavior:'smooth',block:'start'});}
- const confirm=document.querySelector('#confirm-roof-property');if(confirm){confirm.textContent='Property Selected ✓';confirm.disabled=true;}
-});
-document.querySelector('#confirm-roof-property')?.addEventListener('click',()=>{
- if(!roofLocatedProperty)return;
- localStorage.setItem('solarisRoofProject',JSON.stringify({name:roofLocatedProperty.address,address:roofLocatedProperty.address,createdAt:new Date().toISOString()}));
- const state=document.querySelector('#roof-state');if(state)state.textContent='Selected property: '+roofLocatedProperty.address+'. Ready for roof geometry.';
- const geo=document.querySelector('#roof-geometry');if(geo)geo.disabled=false;
+ if(title)title.textContent=project.address;
+ if(ws){ws.hidden=false;ws.scrollIntoView({behavior:'smooth',block:'start'});}
+ const confirm=document.querySelector('#confirm-roof-property');if(confirm){confirm.textContent='Location Selected ✓';confirm.disabled=true;}
 });
 
 async function openRoofGeometryWorkspace(){
  const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null');
- const selectedAddress=document.querySelector('#roof-selected-address')?.textContent?.trim();
- const project=(selectedAddress&&selectedAddress!=='Roof workspace'?{address:selectedAddress}:saved)||roofLocatedProperty;if(!project?.address)return;
+ const project=saved||roofLocatedProperty;if(!project?.address)return;
  const ws=document.querySelector('#roof-geometry-workspace'),map=document.querySelector('#roof-workspace-map'),title=document.querySelector('#roof-workspace-address');
  if(title)title.textContent=project.address;
  if(ws)ws.hidden=false;
  try{
   const key=await getRoofMapsKey();
-  const src='https://www.google.com/maps/embed/v1/place?key='+encodeURIComponent(key)+'&q='+encodeURIComponent(project.address)+'&maptype=satellite&zoom=19';
+  const q=Number.isFinite(Number(project.lat))&&Number.isFinite(Number(project.lng))?(Number(project.lat)+','+Number(project.lng)):project.address;
+  const src='https://www.google.com/maps/embed/v1/place?key='+encodeURIComponent(key)+'&q='+encodeURIComponent(q)+'&maptype=satellite&zoom=19';
   if(map)map.innerHTML='<iframe title="Roof measurement satellite workspace" allowfullscreen loading="eager" referrerpolicy="no-referrer-when-downgrade" style="width:100%;height:560px;border:0" src="'+src+'"></iframe>';
  }catch(err){if(map)map.innerHTML='<div style="padding:32px">Could not load satellite workspace: '+err.message+'</div>';}
  const s=document.querySelector('#roof-state');if(s)s.textContent='Roof measurement workspace active for '+project.address;
@@ -694,7 +745,10 @@ async function openRoofGeometryWorkspace(){
  if(aerialWrap)aerialWrap.innerHTML='<span class="muted">Loading Minnesota aerial imagery…</span>';
  if(aerialStatus)aerialStatus.textContent='Resolving property coordinates…';if(aerialBadge)aerialBadge.textContent='Loading';
  try{
-  const ar=await fetch('/api/mn-aerial?address='+encodeURIComponent(project.address));const ad=await ar.json();
+  const aerialQuery=Number.isFinite(Number(project.lat))&&Number.isFinite(Number(project.lng))
+   ?('/api/mn-aerial?lat='+encodeURIComponent(project.lat)+'&lng='+encodeURIComponent(project.lng)+'&address='+encodeURIComponent(project.address))
+   :('/api/mn-aerial?address='+encodeURIComponent(project.address));
+  const ar=await fetch(aerialQuery);const ad=await ar.json();
   if(!ar.ok)throw new Error(ad.error||'Aerial imagery lookup failed.');
   project.lat=ad.lat;project.lng=ad.lng;project.formattedAddress=ad.address;project.imagerySource=ad.source;project.imageryLayer=ad.imageryLayer;project.imageryLabel=ad.imageryLabel;project.imageryResolution=ad.resolution;project.imageryProjection=ad.projection;project.imageryCropHalfMeters=ad.cropHalfMeters;
   localStorage.setItem('solarisRoofProject',JSON.stringify({...JSON.parse(localStorage.getItem('solarisRoofProject')||'{}'),...project}));
