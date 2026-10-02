@@ -1272,9 +1272,20 @@ document.querySelector('#accept-roof-planes')?.addEventListener('click',async()=
   const avgPitch=accepted.reduce((s,p)=>s+Number(p.pitch12||0),0)/accepted.length;
   const totalSloped=accepted.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0);
   const squares=totalSloped/100;
+  let displayPitch=Math.round(avgPitch);
+  try{
+   const sr=await fetch('/api/roof-solar-model?projectId='+encodeURIComponent(projectId));
+   const sd=await sr.json();
+   if(sr.ok&&sd.model?.accepted){
+    const sf=sd.model.model?.facets||[];
+    const wt=sf.reduce((s,p)=>s+Number(p.slopedAreaSqFt||p.flatAreaSqFt||0),0);
+    const dsmPitch=sf.length?(wt>0?sf.reduce((s,p)=>s+Number(p.rise12||0)*Number(p.slopedAreaSqFt||p.flatAreaSqFt||0),0)/wt:sf.reduce((s,p)=>s+Number(p.rise12||0),0)/sf.length):Number(sd.model.model?.rise12||0);
+    if(Number.isFinite(dsmPitch)&&dsmPitch>0)displayPitch=Math.round(dsmPitch);
+   }
+  }catch{}
   const fc=document.querySelector('#roof-facets'),pit=document.querySelector('#roof-pitch'),sq=document.querySelector('#roof-squares');
   if(fc)fc.textContent=accepted.length;
-  if(pit)pit.textContent=avgPitch.toFixed(1)+'/12 avg';
+  if(pit)pit.textContent=displayPitch+'/12';
   if(sq)sq.textContent=squares.toFixed(2)+' sq';
   const takeoff=document.querySelector('#roof-takeoff'),reportInline=document.querySelector('#roof-report-inline');
   if(takeoff)takeoff.disabled=false;
@@ -1426,7 +1437,14 @@ async function restoreRoofReportReadyState(){
  const takeoff=document.querySelector('#roof-takeoff'),reportInline=document.querySelector('#roof-report-inline');if(takeoff)takeoff.disabled=false;if(reportInline)reportInline.disabled=false;
  const fc=document.querySelector('#roof-facets'),pit=document.querySelector('#roof-pitch'),sq=document.querySelector('#roof-squares'),area=document.querySelector('#roof-area'),per=document.querySelector('#roof-perimeter');
  const sloped=facets.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0),avg=facets.reduce((s,p)=>s+Number(p.pitch12||0),0)/facets.length;
- if(fc)fc.textContent=facets.length;if(pit)pit.textContent=avg.toFixed(1)+'/12 avg';if(sq&&sloped>0)sq.textContent=(sloped/100).toFixed(2)+' sq';
+ let displayPitch=Math.round(avg);
+ const sm=d.solarModel;
+ if(sm?.accepted){
+  const sf=sm.model?.facets||[],wt=sf.reduce((s,p)=>s+Number(p.slopedAreaSqFt||p.flatAreaSqFt||0),0);
+  const dsmPitch=sf.length?(wt>0?sf.reduce((s,p)=>s+Number(p.rise12||0)*Number(p.slopedAreaSqFt||p.flatAreaSqFt||0),0)/wt:sf.reduce((s,p)=>s+Number(p.rise12||0),0)/sf.length):Number(sm.model?.rise12||0);
+  if(Number.isFinite(dsmPitch)&&dsmPitch>0)displayPitch=Math.round(dsmPitch);
+ }
+ if(fc)fc.textContent=facets.length;if(pit)pit.textContent=displayPitch+'/12';if(sq&&sloped>0)sq.textContent=(sloped/100).toFixed(2)+' sq';
  if(area&&d.outline?.measurement?.planAreaFt2)area.textContent=Math.round(d.outline.measurement.planAreaFt2).toLocaleString()+' ft²';
  if(per&&d.outline?.measurement?.perimeterFt)per.textContent=Number(d.outline.measurement.perimeterFt).toFixed(1)+' ft';
 }
