@@ -21,12 +21,15 @@ export async function onRequestGet({request,env}){
  const qLat=Number(url.searchParams.get("lat")),qLng=Number(url.searchParams.get("lng"));
  const hasCoords=Number.isFinite(qLat)&&Number.isFinite(qLng);
  if(!address&&!hasCoords)return Response.json({error:"address or lat/lng is required"},{status:400});
- const key=env.GOOGLE_MAPS_API_KEY;if(!key)return Response.json({error:"Google Maps key is not configured."},{status:500});
+ const key=env.GOOGLE_MAPS_BACKEND_KEY||env.GOOGLE_MAPS_API_KEY;if(!key)return Response.json({error:"Google backend/geocoding key is not configured."},{status:500});
  const g=new URL("https://maps.googleapis.com/maps/api/geocode/json");
  if(hasCoords)g.searchParams.set("latlng",qLat+","+qLng);else g.searchParams.set("address",address);
  g.searchParams.set("key",key);
  const gr=await fetch(g),geo=await gr.json(),hit=geo?.results?.[0];
- if(!gr.ok||geo.status!=="OK"||!hit)return Response.json({error:geo?.error_message||"Location could not be geocoded.",status:geo?.status},{status:422});
+ if(!gr.ok||geo.status!=="OK"||!hit){
+  const msg=geo?.error_message||("Location could not be geocoded"+(geo?.status?" ("+geo.status+")":"")+".");
+  return Response.json({error:msg,status:geo?.status},{status:422});
+ }
  const lat=hasCoords?qLat:hit.geometry?.location?.lat,lng=hasCoords?qLng:hit.geometry?.location?.lng;
  if(!Number.isFinite(lat)||!Number.isFinite(lng))return Response.json({error:"Geocoder did not return coordinates."},{status:422});
  const county=hit.address_components?.find(c=>c.types?.includes("administrative_area_level_2"))?.long_name||"";
