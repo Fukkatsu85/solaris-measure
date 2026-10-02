@@ -37,9 +37,9 @@
           <input id="roof-address" type="text" value="75 Rev Dr Martin Luther King Jr Blvd, Saint Paul, MN 55155" placeholder="Enter full property address" autocomplete="street-address" style="flex:1;min-width:260px;padding:12px 14px;border-radius:10px;border:1px solid #cbd5e1;font:inherit">
           <button id="locate-roof" class="primary" type="button">Locate Property</button>
         </div>
-        <p class="muted" id="roof-location-status">We'll locate the address first, then you can confirm the correct property.</p>
+        <p class="muted" id="roof-location-status">We'll locate the address, then drag the pin onto the exact roof if needed.</p>
         <div id="roof-map" style="min-height:420px;border-radius:14px;overflow:hidden;background:#e5e7eb;display:grid;place-items:center;margin-top:12px"><span class="muted">Satellite map will appear here after an address is located.</span></div>
-        <div class="actions" style="margin-top:12px"><button id="confirm-roof-property" class="primary" type="button" disabled>Use This Property</button></div>
+        <div class="actions" style="margin-top:12px"><button id="confirm-roof-property" class="primary" type="button" disabled>Use This Location</button></div>
       </div>
       <section id="roof-selected-workspace" class="card" hidden style="margin-top:16px">
         <div class="card-head"><div><div class="eyebrow">SELECTED PROPERTY</div><h3 id="roof-selected-address">Roof workspace</h3></div><span class="status">Selected</span></div>
@@ -229,6 +229,6 @@
     </div>
   </main>
 
-  <script src="/app.js?v=20261002-planefit1"></script>
+  <script src="/app.js?v=20261002-draggablepin1"></script>
 </body>
 </html>
