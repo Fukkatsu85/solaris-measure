@@ -1313,7 +1313,7 @@ function roofCentroid(poly){if(!poly?.length)return{x:.5,y:.5};return{x:poly.red
 function roofDiagramSvg(data){
  const sm=data.solarModel||null;
  if(sm?.outline?.length>=3&&sm?.model?.facets?.length){
-  const topology=data.topology||null,outline=sm.outline,facets=sm.model.facets||[],lines=sm.model.roofLines||[],edges=sm.measurements?.exteriorEdges||[];
+  const topology=data.topology||null,outline=sm.outline,facets=sm.model.facets||[],lines=sm.model.roofLines||[],rawExteriorEdges=sm.measurements?.exteriorEdges||[];
   const all=topology?.vertices?.length?topology.vertices:[...outline,...facets.flatMap(f=>f.outline||[]),...lines.flatMap(l=>[l.a,l.b]).filter(Boolean)];
   const lats=all.map(p=>Number(p.lat)).filter(Number.isFinite),lngs=all.map(p=>Number(p.lng)).filter(Number.isFinite);
   const north=Math.max(...lats),south=Math.min(...lats),east=Math.max(...lngs),west=Math.min(...lngs);
@@ -1336,8 +1336,12 @@ function roofDiagramSvg(data){
    });
    topology.edges.forEach(e=>{
     const a=vById.get(e.a),b=vById.get(e.b);if(!a||!b)return;
-    const pa=pt(a),pb=pt(b),isPerimeter=e.type==='perimeter',stroke=isPerimeter?'#111':(lc[e.type]||'#555'),width=isPerimeter?7:7;
+    const pa=pt(a),pb=pt(b),isPerimeter=e.type==='perimeter',stroke=isPerimeter?'#111':(lc[e.type]||'#555'),width=7;
     s+='<line x1="'+pa.x.toFixed(1)+'" y1="'+pa.y.toFixed(1)+'" x2="'+pb.x.toFixed(1)+'" y2="'+pb.y.toFixed(1)+'" stroke="'+stroke+'" stroke-width="'+width+'"/>';
+    if(isPerimeter&&Number(e.lengthMeters||0)>0){
+      const mx=(pa.x+pb.x)/2,my=(pa.y+pb.y)/2,lenFt=Number(e.lengthMeters)*3.280839895;
+      s+='<text x="'+mx.toFixed(1)+'" y="'+(my-8).toFixed(1)+'" text-anchor="middle" font-size="15" font-weight="600" fill="#111" stroke="#fff" stroke-width="5" paint-order="stroke">'+lenFt.toFixed(1)+' ft</text>';
+    }
    });
   }else{
    facets.forEach((f,i)=>{
@@ -1353,7 +1357,7 @@ function roofDiagramSvg(data){
     s+='<line x1="'+a.x.toFixed(1)+'" y1="'+a.y.toFixed(1)+'" x2="'+b.x.toFixed(1)+'" y2="'+b.y.toFixed(1)+'" stroke="'+lc[l.type]+'" stroke-width="7"/>';
    });
   }
-  edges.forEach(e=>{
+  if(!topology?.edges?.length)rawExteriorEdges.forEach(e=>{
    const a=pt(e.a),b=pt(e.b),mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
    s+='<text x="'+mx.toFixed(1)+'" y="'+(my-7).toFixed(1)+'" text-anchor="middle" font-size="15" font-weight="600" fill="#111" stroke="#fff" stroke-width="5" paint-order="stroke">'+Number(e.lengthFt||0).toFixed(1)+' ft</text>';
   });
@@ -1395,7 +1399,7 @@ async function generateRoofReport(){
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
  try{
   const r=await fetch('/api/roof-report?projectId='+encodeURIComponent(projectId),{signal:controller.signal}),d=await r.json().catch(()=>({}));if(!r.ok||!d.ok)throw new Error(d.error||'Report data is incomplete.');
-  const facets=(d.planes?.planes||[]).filter(p=>p.accepted),plan=Number(d.outline.measurement?.planAreaFt2||0),perim=Number(d.outline.measurement?.perimeterFt||0);
+  const facets=(d.planes?.planes||[]).filter(p=>p.accepted),plan=Number(d.outline.measurement?.planAreaFt2||0),basePerim=Number(d.outline.measurement?.perimeterFt||0);
   const sm=d.solarModel||null,dm=sm?.measurements||{},dsmFacets=sm?.model?.facets||[];
   if(sm?.model?.facets?.length){
    try{
@@ -1403,6 +1407,8 @@ async function generateRoofReport(){
     d.topology=topo.buildRoofTopology(sm);
    }catch(err){console.warn('Roof topology engine unavailable',err)}
   }
+  const topologyPerimFt=(d.topology?.edges||[]).filter(e=>e.type==='perimeter').reduce((s,e)=>s+Number(e.lengthMeters||0)*3.280839895,0);
+  const perim=topologyPerimFt>0?topologyPerimFt:basePerim;
   const lidarSloped=facets.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0);
   const dsmSloped=Number(sm?.model?.slopedAreaSqFt||0);
   const sloped=dsmSloped>0?dsmSloped:lidarSloped,squares=sloped/100,lines=roofLineTotals(d);
