@@ -793,32 +793,44 @@ async function detectRoofAutomatically(){
 }
 document.querySelector('#detect-roof')?.addEventListener('click',detectRoofAutomatically);
 document.querySelector('#redetect-roof')?.addEventListener('click',detectRoofAutomatically);
+function localRoofPlanMetrics(poly,lat,cropHalfMeters=42){
+ const size=Number(cropHalfMeters)*2,k=Math.cos(Number(lat)*Math.PI/180);
+ const pts=poly.map(p=>({x:Number(p.x)*size*k,y:Number(p.y)*size*k}));
+ let a2=0,perim=0;
+ for(let i=0;i<pts.length;i++){const a=pts[i],b=pts[(i+1)%pts.length];a2+=a.x*b.y-b.x*a.y;perim+=Math.hypot(b.x-a.x,b.y-a.y)}
+ const areaM2=Math.abs(a2)/2,areaFt2=areaM2*10.763910417;
+ return{planAreaFt2:areaFt2,planSquares:areaFt2/100,perimeterFt:perim*3.280839895};
+}
 document.querySelector('#accept-roof-outline')?.addEventListener('click',async()=>{
  if(!roofOutlineProposal)return;
  const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
  const status=document.querySelector('#mn-aerial-status'),btn=document.querySelector('#accept-roof-outline');
- if(btn)btn.disabled=true;if(status)status.textContent='Saving accepted roof outline and calculating plan measurements…';
+ const lat=Number(saved.lat),lng=Number(saved.lng);
+ if(!Number.isFinite(lat)||!Number.isFinite(lng)){if(status)status.textContent='Could not measure outline: property coordinates are missing.';return}
+ const localM=localRoofPlanMetrics(roofOutlineProposal.polygon,lat,saved.imageryCropHalfMeters||42);
+ renderRoofOutline(roofOutlineProposal.polygon,true);
+ const area=document.querySelector('#roof-area'),per=document.querySelector('#roof-perimeter'),sq=document.querySelector('#roof-squares');
+ if(area)area.textContent=localM.planAreaFt2.toLocaleString(undefined,{maximumFractionDigits:0})+' ft²';
+ if(per)per.textContent=localM.perimeterFt.toLocaleString(undefined,{maximumFractionDigits:1})+' ft';
+ if(sq)sq.textContent=localM.planSquares.toFixed(2)+' plan sq';
+ if(status)status.textContent='Roof outline accepted ✓ · Plan area '+localM.planAreaFt2.toFixed(0)+' ft² · Perimeter '+localM.perimeterFt.toFixed(1)+' ft. Saving…';
+ if(btn)btn.disabled=true;
  try{
-  const projectId=saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
-  const r=await fetch('/api/roof-outline',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
-    projectId,address:saved.address,lat:saved.lat,lng:saved.lng,
+  const projectId=saved.projectId||('roof-'+lat.toFixed(6)+'-'+lng.toFixed(6));
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),8000);
+  const r=await fetch('/api/roof-outline',{method:'POST',signal:controller.signal,headers:{'content-type':'application/json'},body:JSON.stringify({
+    projectId,address:saved.address,lat,lng,
     imageryLayer:saved.imageryLayer,imageryLabel:saved.imageryLabel,
     projection:saved.imageryProjection||'EPSG:3857',
     cropHalfMeters:saved.imageryCropHalfMeters||42,
     polygon:roofOutlineProposal.polygon
   })});
+  clearTimeout(timer);
   const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Could not save accepted roof outline.');
   roofOutlineProposal={...roofOutlineProposal,...d.outline,status:'accepted-plan-view'};
-  renderRoofOutline(d.outline.polygon,true);
-  const m=d.outline.measurement;
-  const area=document.querySelector('#roof-area'),per=document.querySelector('#roof-perimeter'),sq=document.querySelector('#roof-squares');
-  if(area)area.textContent=m.planAreaFt2.toLocaleString(undefined,{maximumFractionDigits:0})+' ft²';
-  if(per)per.textContent=m.perimeterFt.toLocaleString(undefined,{maximumFractionDigits:1})+' ft';
-  if(sq)sq.textContent=m.planSquares.toFixed(2)+' plan sq';
-  if(status)status.textContent='Roof outline accepted ✓ · Plan area '+m.planAreaFt2.toFixed(0)+' ft² · Perimeter '+m.perimeterFt.toFixed(1)+' ft. Pitch is not applied yet.';
-  const takeoff=document.querySelector('#roof-takeoff');if(takeoff)takeoff.disabled=true;
+  if(status)status.textContent='Roof outline accepted ✓ · Plan area '+d.outline.measurement.planAreaFt2.toFixed(0)+' ft² · Perimeter '+d.outline.measurement.perimeterFt.toFixed(1)+' ft. Pitch is not applied yet.';
  }catch(err){
-  if(status)status.textContent='Could not save/measure accepted outline: '+err.message;
+  if(status)status.textContent='Roof measurements calculated, but cloud save did not finish. '+(err.name==='AbortError'?'Save timed out; you can continue editing and try Accept again.':err.message);
   if(btn)btn.disabled=false;
  }
 });
