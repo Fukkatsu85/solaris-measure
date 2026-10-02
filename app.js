@@ -628,9 +628,9 @@ document.querySelector('#locate-roof')?.addEventListener('click',()=>{
  const address=document.querySelector('#roof-address')?.value.trim();if(!address){alert('Enter a property address first.');return;}
  const status=document.querySelector('#roof-location-status'),map=document.querySelector('#roof-map'),confirm=document.querySelector('#confirm-roof-property');
  roofLocatedProperty={address};
- if(status)status.textContent='Property located for review: '+address;
- if(map)map.innerHTML='<iframe title="Property map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" style="width:100%;height:460px;border:0" src="https://www.google.com/maps?q='+encodeURIComponent(address)+'&t=k&z=20&output=embed"></iframe>';
- if(confirm)confirm.disabled=false;
+ if(status)status.textContent='Address entered: '+address+'. Google satellite connection needs the Maps Embed API key.';
+ if(map)map.innerHTML='<div style="padding:32px;text-align:center"><strong>Google satellite connection required</strong><p class="muted">The property address is ready. Enable the Maps Embed API and connect the site API key to load the satellite roof view here.</p><a class="secondary" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(address)+'">Verify address in Google Maps</a></div>';
+ if(confirm)confirm.disabled=true;
 });
 document.querySelector('#confirm-roof-property')?.addEventListener('click',()=>{
  if(!roofLocatedProperty)return;
