@@ -287,6 +287,8 @@ function segmentUnionOutline(segments=[]){
   return simplified.length>=3?simplified:outline;
 }
 
+let rasterModulesPromise=null;
+
 async function loadRasterModules(){
   if(!rasterModulesPromise){
     rasterModulesPromise=Promise.all([
