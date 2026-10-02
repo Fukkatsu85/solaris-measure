@@ -93,6 +93,13 @@
           <p class="muted" id="roof-line-status">No internal geometry detected yet.</p>
         </div>
       </section>
+      <section id="roof-report-panel" class="card roof-report" hidden style="margin-top:16px">
+        <div class="card-head no-print">
+          <div><div class="eyebrow">MEASUREMENT REPORT</div><h3>Solaris Roof Measurement Report</h3><p class="muted">Vector roof diagram, facet measurements, pitch-adjusted area and material summary.</p></div>
+          <div class="actions"><button id="print-roof-report" class="primary" type="button">Print / Save PDF</button><button id="close-roof-report" class="secondary" type="button">Close Report</button></div>
+        </div>
+        <div id="roof-report-content"></div>
+      </section>
       <div id="roof-gallery" class="photo-gallery"></div>
     </section>
     <div id="siding-tool">
@@ -229,6 +236,6 @@
     </div>
   </main>
 
-  <script src="/app.js?v=20261002-draggablepin1"></script>
+  <script src="/app.js?v=20261002-report1"></script>
 </body>
 </html>
