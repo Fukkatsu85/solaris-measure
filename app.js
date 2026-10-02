@@ -696,10 +696,10 @@ async function openRoofGeometryWorkspace(){
  try{
   const ar=await fetch('/api/mn-aerial?address='+encodeURIComponent(project.address));const ad=await ar.json();
   if(!ar.ok)throw new Error(ad.error||'Aerial imagery lookup failed.');
-  project.lat=ad.lat;project.lng=ad.lng;project.formattedAddress=ad.address;project.imagerySource=ad.source;
+  project.lat=ad.lat;project.lng=ad.lng;project.formattedAddress=ad.address;project.imagerySource=ad.source;project.imageryLayer=ad.imageryLayer;project.imageryLabel=ad.imageryLabel;project.imageryResolution=ad.resolution;project.imageryProjection=ad.projection;project.imageryCropHalfMeters=ad.cropHalfMeters;
   localStorage.setItem('solarisRoofProject',JSON.stringify({...JSON.parse(localStorage.getItem('solarisRoofProject')||'{}'),...project}));
   if(aerialWrap)aerialWrap.innerHTML='<img id="mn-aerial-img" src="'+ad.imageryUrl+'" alt="MnGeo aerial image of selected roof" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#111"><svg id="roof-outline-overlay" viewBox="0 0 1000 1000" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></svg>';
-  if(aerialStatus)aerialStatus.textContent='Analysis imagery loaded from '+ad.source+' at '+ad.lat.toFixed(6)+', '+ad.lng.toFixed(6)+'.';
+  if(aerialStatus)aerialStatus.textContent='Analysis imagery loaded: '+ad.imageryLabel+' ('+ad.resolution+') · '+ad.county+' · '+ad.lat.toFixed(6)+', '+ad.lng.toFixed(6)+'.';
   if(aerialBadge)aerialBadge.textContent='Ready';
  }catch(err){
   if(aerialWrap)aerialWrap.innerHTML='<div style="padding:28px;text-align:center"><strong>Analysis imagery unavailable</strong><p class="muted">'+err.message+'</p></div>';
@@ -730,7 +730,7 @@ async function detectRoofAutomatically(){
  if(!saved?.lat||!saved?.lng){if(status)status.textContent='Property coordinates are not ready yet.';return}
  if(btn)btn.disabled=true;if(status)status.textContent='AI is detecting the roof on the MnGeo aerial image…';
  try{
-  const r=await fetch('/api/roof-detect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({lat:saved.lat,lng:saved.lng,address:saved.address})}),d=await r.json();
+  const r=await fetch('/api/roof-detect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({lat:saved.lat,lng:saved.lng,address:saved.address,layer:saved.imageryLayer})}),d=await r.json();
   if(!r.ok||!d.ok)throw new Error(d.error||'Roof detection failed.');
   roofOutlineProposal=d;renderRoofOutline(d.polygon,false);
   document.querySelector('#accept-roof-outline').disabled=false;document.querySelector('#edit-roof-outline').disabled=false;document.querySelector('#redetect-roof').disabled=false;
