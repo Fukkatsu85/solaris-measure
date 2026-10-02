@@ -1456,7 +1456,7 @@ async function generateRoofReport(){
   const sm=d.solarModel||null,dm=sm?.measurements||{},dsmFacets=sm?.model?.facets||[];
   if(sm?.model?.facets?.length){
    try{
-    const topo=await import('/assets/js/roof-topology.js?v=20261002-r24');
+    const topo=await import('/assets/js/roof-topology.js?v=20261002-r39');
     d.topology=topo.buildRoofTopology(sm);
    }catch(err){console.warn('Roof topology engine unavailable',err)}
   }
@@ -1676,7 +1676,7 @@ function renderRoofRegression(data){
 }
 document.querySelector('#run-roof-regression')?.addEventListener('click',async()=>{
  const btn=document.querySelector('#run-roof-regression'),status=document.querySelector('#roof-regression-status');
- const old=btn?.textContent;if(btn){btn.disabled=true;btn.textContent='Running 24 roofs…'}if(status)status.textContent='Running the current solver against the verified training corpus…';
+ const old=btn?.textContent;if(btn){btn.disabled=true;btn.textContent='Running 39 cases…'}if(status)status.textContent='Running the current solver against the verified training corpus…';
  try{
   const r=await fetch('/api/training-regression',{cache:'no-store'}),d=await r.json().catch(()=>({}));
   if(!r.ok||!d.ok)throw new Error(d.error||'Regression runner failed.');
