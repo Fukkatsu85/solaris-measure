@@ -108,6 +108,77 @@ function trimOrSnapInternalLine(line,poly,families){
   if(nb.distance<=1.8)b=nb.point;
   return {...line,a,b,architecturalAngle:snap.angle};
 }
+function classifyCandidateLine(seg,roofLinesXY){
+  const mid={x:(seg.a.x+seg.b.x)/2,y:(seg.a.y+seg.b.y)/2},ang=angle180(seg.a,seg.b);
+  let best=null,bestScore=Infinity;
+  for(const l of roofLinesXY){
+    const d=pointSegDistance(mid,l.a,l.b).distance,ad=angleDiff(ang,angle180(l.a,l.b));
+    const score=d+ad*.06;
+    if(d<=1.8&&ad<=18&&score<bestScore){bestScore=score;best=l}
+  }
+  return best?.type||"internal";
+}
+function deriveFacetAdjacencyLines(facets,F,perimeter,families,roofLinesXY){
+  const raw=[];
+  facets.forEach((facet,fi)=>{
+    const poly=(facet.outline||[]).map(F.toXY);
+    for(let i=0;i<poly.length;i++){
+      const a=poly[i],b=poly[(i+1)%poly.length],len=dist(a,b);
+      if(len<.8)continue;
+      const mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+      if(!pointInPoly(mid,perimeter))continue;
+      if(nearestPointOnPerimeter(mid,perimeter).distance<.65)continue;
+      raw.push({facet:fi,a,b,len,angle:angle180(a,b)});
+    }
+  });
+  const inferred=[];
+  for(let i=0;i<raw.length;i++)for(let j=i+1;j<raw.length;j++){
+    const A=raw[i],B=raw[j];if(A.facet===B.facet)continue;
+    if(angleDiff(A.angle,B.angle)>14)continue;
+    const radA=rad(A.angle),ux=Math.cos(radA),uy=Math.sin(radA),nx=-uy,ny=ux;
+    const proj=p=>p.x*ux+p.y*uy,nproj=p=>p.x*nx+p.y*ny;
+    const a0=Math.min(proj(A.a),proj(A.b)),a1=Math.max(proj(A.a),proj(A.b));
+    const b0=Math.min(proj(B.a),proj(B.b)),b1=Math.max(proj(B.a),proj(B.b));
+    const lo=Math.max(a0,b0),hi=Math.min(a1,b1),overlap=hi-lo;
+    if(overlap<1.0)continue;
+    const na=(nproj(A.a)+nproj(A.b))/2,nb=(nproj(B.a)+nproj(B.b))/2;
+    if(Math.abs(na-nb)>1.15)continue;
+    const n=(na+nb)/2;
+    const p1={x:ux*lo+nx*n,y:uy*lo+ny*n},p2={x:ux*hi+nx*n,y:uy*hi+ny*n};
+    const snap=snapAngle(angle180(p1,p2),families,18),line=infiniteLineThroughMid(p1,p2,snap.angle);
+    const q1=pointSegDistance(p1,line.a,line.b).point,q2=pointSegDistance(p2,line.a,line.b).point;
+    inferred.push({a:q1,b:q2,type:classifyCandidateLine({a:q1,b:q2},roofLinesXY),source:"facet-adjacency",support:2});
+  }
+  const dedup=[];
+  for(const s of inferred.sort((a,b)=>dist(b.a,b.b)-dist(a.a,a.b))){
+    const m={x:(s.a.x+s.b.x)/2,y:(s.a.y+s.b.y)/2},ang=angle180(s.a,s.b);
+    const dup=dedup.some(d=>{
+      const dm={x:(d.a.x+d.b.x)/2,y:(d.a.y+d.b.y)/2};
+      return dist(m,dm)<1.0&&angleDiff(ang,angle180(d.a,d.b))<10;
+    });
+    if(!dup)dedup.push(s);
+  }
+  return dedup;
+}
+function snapInternalEndpoints(lines,perimeter,maxSnap=3.2){
+  const out=lines.map(l=>({...l,a:{...l.a},b:{...l.b}}));
+  const perimeterSegs=perimeter.map((a,i)=>({a,b:perimeter[(i+1)%perimeter.length]}));
+  for(let i=0;i<out.length;i++){
+    for(const key of ["a","b"]){
+      const p=out[i][key],other=out[i][key==="a"?"b":"a"],base=infiniteLineThroughMid(p,other,angle180(p,other));
+      let best=null,bestD=maxSnap;
+      const consider=(c,d)=>{
+        const h=lineIntersection(base.a,base.b,c,d);if(!h)return;
+        const q={x:h.x,y:h.y},dd=dist(p,q);
+        if(dd>.12&&dd<bestD){best=q;bestD=dd}
+      };
+      perimeterSegs.forEach(s=>consider(s.a,s.b));
+      for(let j=0;j<out.length;j++)if(j!==i)consider(out[j].a,out[j].b);
+      if(best)out[i][key]=best;
+    }
+  }
+  return out.filter(l=>dist(l.a,l.b)>.45);
+}
 function segmentIntersection(a,b,c,d){
   const h=lineIntersection(a,b,c,d);
   if(!h||h.t<-1e-7||h.t>1+1e-7||h.u<-1e-7||h.u>1+1e-7)return null;
@@ -222,14 +293,17 @@ export function buildRoofTopology(solarModel){
 
   const segments=[];
   for(let i=0;i<perimeter.length;i++)segments.push({a:perimeter[i],b:perimeter[(i+1)%perimeter.length],type:"perimeter",source:"perimeter"});
-  roofLines.filter(l=>["ridge","hip","valley"].includes(l.type)&&l.a&&l.b).forEach(l=>{
-    const clean=trimOrSnapInternalLine({...l,a:F.toXY(l.a),b:F.toXY(l.b)},perimeter,families);
-    // Only keep lines whose midpoint lies inside the roof footprint.
-    const mid={x:(clean.a.x+clean.b.x)/2,y:(clean.a.y+clean.b.y)/2};
-    if(pointInPoly(mid,perimeter))segments.push({...clean,source:"dsm-line"});
-  });
+  const roofLinesXY=roofLines.filter(l=>["ridge","hip","valley"].includes(l.type)&&l.a&&l.b).map(l=>({...l,a:F.toXY(l.a),b:F.toXY(l.b)}));
+  let internal=roofLinesXY.map(l=>trimOrSnapInternalLine(l,perimeter,families)).filter(l=>{
+    const mid={x:(l.a.x+l.b.x)/2,y:(l.a.y+l.b.y)/2};
+    return pointInPoly(mid,perimeter);
+  }).map(l=>({...l,source:"dsm-line"}));
+  const inferred=deriveFacetAdjacencyLines(facets,F,perimeter,families,roofLinesXY);
+  internal=internal.concat(inferred);
+  internal=snapInternalEndpoints(internal,perimeter,3.2);
+  segments.push(...internal);
 
-  const split=splitSegments(segments),graph=buildPlanarGraph(split,.3);
+  const split=splitSegments(segments),graph=buildPlanarGraph(split,.28);
   const facesRaw=extractFaces(graph.nodes,graph.edges,perimeter);
   const faces=facesRaw.map((ids,i)=>{
     const c=faceCentroid(ids,graph.nodes),meta=nearestFacetMeta(c,facets,F)||{};
@@ -248,8 +322,8 @@ export function buildRoofTopology(solarModel){
     lengthMeters:dist(graph.nodes[e.a],graph.nodes[e.b])
   }));
   return {
-    version:2,
-    source:"architectural-planar-topology",
+    version:3,
+    source:"architectural-planar-topology-v3",
     dominantAngle:longest.ang,
     vertices,edges,faces,
     outline:perimeter.map(F.toLL),
@@ -258,7 +332,8 @@ export function buildRoofTopology(solarModel){
       perimeterEdges:edges.filter(e=>e.type==="perimeter").length,
       ridgeEdges:edges.filter(e=>e.type==="ridge").length,
       hipEdges:edges.filter(e=>e.type==="hip").length,
-      valleyEdges:edges.filter(e=>e.type==="valley").length
+      valleyEdges:edges.filter(e=>e.type==="valley").length,
+      inferredInternalEdges:edges.filter(e=>e.source==="facet-adjacency").length
     }
   };
 }
