@@ -1118,7 +1118,7 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
     let boundary=removeCollinearPixelPoints(traceComponentBoundary(groupSet,mask.width,mask.height));
     if(boundary.length<3)return;
     let outline=boundary.map(([x,y])=>rasterLatLng(mask,x,y));
-    outline=simplifyOutline(outline,10);
+    outline=simplifyOutline(outline,14);
 
     const seg=candidates[i];
     outline=regularizeFacetOutline(outline,seg.azimuth,6);
@@ -1227,7 +1227,7 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
   const model=analyzeDsmRoof(mask,component,dsm);
   const facetResult=detectRoofFacets(mask,component,dsm,solarSegments,rgb);
 
-  let outline=simplifyOutline(rawOutline,12);
+  let outline=simplifyOutline(rawOutline,24);
   let finalFacets=facetResult.facets;
   let finalRoofLines=facetResult.roofLines||[];
   let geometryMode="detailed";
