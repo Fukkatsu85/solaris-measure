@@ -623,14 +623,36 @@ document.querySelector('#roof-photo-input')?.addEventListener('change',e=>{
 setMeasureTab(localStorage.getItem('solarisMeasureTab')||'siding');
 
 let roofLocatedProperty=null;
+let roofMapsKey=null;
+async function getRoofMapsKey(){
+ if(roofMapsKey)return roofMapsKey;
+ const r=await fetch('/api/maps-config');const d=await r.json().catch(()=>({}));
+ if(!r.ok||!d.key)throw new Error(d.error||'Google Maps key is not configured.');
+ roofMapsKey=d.key;return roofMapsKey;
+}
 document.querySelector('#roof-address')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();document.querySelector('#locate-roof')?.click();}});
-document.querySelector('#locate-roof')?.addEventListener('click',()=>{
+document.querySelector('#locate-roof')?.addEventListener('click',async()=>{
  const address=document.querySelector('#roof-address')?.value.trim();if(!address){alert('Enter a property address first.');return;}
- const status=document.querySelector('#roof-location-status'),map=document.querySelector('#roof-map'),confirm=document.querySelector('#confirm-roof-property');
- roofLocatedProperty={address};
- if(status)status.textContent='Address entered: '+address+'. Google satellite connection needs the Maps Embed API key.';
- if(map)map.innerHTML='<div style="padding:32px;text-align:center"><strong>Google satellite connection required</strong><p class="muted">The property address is ready. Enable the Maps Embed API and connect the site API key to load the satellite roof view here.</p><a class="secondary" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(address)+'">Verify address in Google Maps</a></div>';
- if(confirm)confirm.disabled=true;
+ const status=document.querySelector('#roof-location-status'),map=document.querySelector('#roof-map'),confirm=document.querySelector('#confirm-roof-property'),btn=document.querySelector('#locate-roof');
+ if(btn)btn.disabled=true;if(status)status.textContent='Locating '+address+'…';
+ try{
+  const key=await getRoofMapsKey();
+  roofLocatedProperty={address};
+  const src='https://www.google.com/maps/embed/v1/place?key='+encodeURIComponent(key)+'&q='+encodeURIComponent(address)+'&maptype=satellite&zoom=20';
+  if(map)map.innerHTML='<iframe title="Satellite property map" allowfullscreen loading="lazy" referrerpolicy="no-referrer-when-downgrade" style="width:100%;height:460px;border:0" src="'+src+'"></iframe>';
+  if(status)status.textContent='Satellite property located. Pan/zoom to verify the correct roof, then select it.';
+  if(confirm)confirm.disabled=false;
+ }catch(err){
+  roofLocatedProperty=null;if(confirm)confirm.disabled=true;
+  if(status)status.textContent='Could not load Google satellite imagery: '+err.message;
+  if(map)map.innerHTML='<div style="padding:32px;text-align:center"><strong>Satellite map unavailable</strong><p class="muted">'+err.message+'</p></div>';
+ }finally{if(btn)btn.disabled=false;}
+});
+document.querySelector('#confirm-roof-property')?.addEventListener('click',()=>{
+ if(!roofLocatedProperty)return;
+ localStorage.setItem('solarisRoofProject',JSON.stringify({name:roofLocatedProperty.address,address:roofLocatedProperty.address,createdAt:new Date().toISOString()}));
+ const state=document.querySelector('#roof-state');if(state)state.textContent='Selected property: '+roofLocatedProperty.address+'. Ready for roof geometry.';
+ const geo=document.querySelector('#roof-geometry');if(geo)geo.disabled=false;
 });
 document.querySelector('#confirm-roof-property')?.addEventListener('click',()=>{
  if(!roofLocatedProperty)return;
