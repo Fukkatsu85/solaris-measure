@@ -1199,7 +1199,7 @@ function renderRoofPlaneList(){
  list.innerHTML=roofPlaneProposals.map((p,i)=>'<div style="display:grid;grid-template-columns:minmax(90px,1fr) repeat(4,minmax(70px,auto));gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid #e5e7eb"><label><input type="checkbox" data-plane-accept="'+i+'" '+(p.accepted?'checked':'')+'> <strong>Facet '+(i+1)+'</strong></label><span>'+p.pointCount+' pts</span><span>'+p.pitch12.toFixed(1)+'/12</span><span>'+p.slopeDeg.toFixed(1)+'°</span><span>RMSE '+p.rmse.toFixed(2)+'m</span></div>').join('');
  list.querySelectorAll('input[data-plane-accept]').forEach(el=>el.addEventListener('change',e=>{roofPlaneProposals[+e.target.dataset.planeAccept].accepted=e.target.checked}));
 }
-document.querySelector('#fit-roof-planes')?.addEventListener('click',()=>{
+function fitRoofPlanes(){
  const status=document.querySelector('#roof-plane-status'),accept=document.querySelector('#accept-roof-planes');
  if(!roofLidarDecoded?.surfacePoints?.length){if(status)status.textContent='Decode roof points first.';return}
  if(status)status.textContent='Fitting planar roof surfaces from LiDAR…';
@@ -1212,7 +1212,8 @@ document.querySelector('#fit-roof-planes')?.addEventListener('click',()=>{
   if(accept)accept.disabled=false;
   if(status)status.textContent='Found '+roofPlaneProposals.length+' LiDAR plane proposal'+(roofPlaneProposals.length===1?'':'s')+'. Review pitch/RMSE, uncheck bad facets, then Accept Facets.';
  }catch(err){if(status)status.textContent='Plane fitting failed: '+err.message}
-});
+}
+document.querySelector('#fit-roof-planes')?.addEventListener('click',fitRoofPlanes);
 function convexHullRoof(points){
  const pts=[...points].sort((a,b)=>a.x-b.x||a.y-b.y);if(pts.length<=3)return pts;
  const cross=(o,a,b)=>(a.x-o.x)*(b.y-o.y)-(a.y-o.y)*(b.x-o.x);
@@ -1491,7 +1492,7 @@ async function saveRoofSolarModel(accepted=false){
   return d.model;
  }finally{clearTimeout(timer)}
 }
-document.querySelector('#run-roof-solar')?.addEventListener('click',async()=>{
+async function runRoofSolarAnalysis(){
  const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{},btn=document.querySelector('#run-roof-solar'),badge=document.querySelector('#roof-solar-badge'),summary=document.querySelector('#roof-solar-summary'),accept=document.querySelector('#accept-roof-solar');
  const lat=Number(saved.lat),lng=Number(saved.lng);
  if(!Number.isFinite(lat)||!Number.isFinite(lng)){if(summary)summary.textContent='Confirm the roof location first.';return}
@@ -1518,7 +1519,8 @@ document.querySelector('#run-roof-solar')?.addEventListener('click',async()=>{
  }catch(err){
   roofSolarProposal=null;if(badge)badge.textContent='Unavailable';if(summary)summary.textContent='Google DSM analysis could not run: '+err.message;
  }finally{if(btn)btn.disabled=false}
-});
+}
+document.querySelector('#run-roof-solar')?.addEventListener('click',runRoofSolarAnalysis);
 document.querySelector('#accept-roof-solar')?.addEventListener('click',async()=>{
  const btn=document.querySelector('#accept-roof-solar'),badge=document.querySelector('#roof-solar-badge'),summary=document.querySelector('#roof-solar-summary');
  if(!roofSolarProposal)return;
