@@ -701,6 +701,7 @@ async function openRoofGeometryWorkspace(){
   if(aerialWrap){aerialWrap.innerHTML='<img id="mn-aerial-img" src="'+ad.imageryUrl+'" alt="MnGeo aerial image of selected roof" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#111"><svg id="roof-outline-overlay" viewBox="0 0 1000 1000" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;touch-action:none;cursor:crosshair"></svg>';bindRoofOverlayEditor();}
   if(aerialStatus)aerialStatus.textContent='Analysis imagery loaded: '+ad.imageryLabel+' ('+ad.resolution+') · '+ad.county+' · '+ad.lat.toFixed(6)+', '+ad.lng.toFixed(6)+'.';
   if(aerialBadge)aerialBadge.textContent='Ready';
+  setTimeout(()=>findRoofLidar().catch(()=>{}),250);
  }catch(err){
   if(aerialWrap)aerialWrap.innerHTML='<div style="padding:28px;text-align:center"><strong>Analysis imagery unavailable</strong><p class="muted">'+err.message+'</p></div>';
   if(aerialStatus)aerialStatus.textContent='If Google reports an API error, enable Geocoding API for the Solaris Measure key.';
