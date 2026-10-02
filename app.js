@@ -1295,11 +1295,44 @@ function roofNormLengthFt(a,b,outline){
 }
 function roofCentroid(poly){if(!poly?.length)return{x:.5,y:.5};return{x:poly.reduce((s,p)=>s+p.x,0)/poly.length,y:poly.reduce((s,p)=>s+p.y,0)/poly.length}}
 function roofDiagramSvg(data){
+ const sm=data.solarModel?.accepted?data.solarModel:null;
+ if(sm?.outline?.length>=3&&sm?.model?.facets?.length){
+  const outline=sm.outline,facets=sm.model.facets||[],lines=sm.model.roofLines||[],edges=sm.measurements?.exteriorEdges||[];
+  const all=[...outline,...facets.flatMap(f=>f.outline||[]),...lines.flatMap(l=>[l.a,l.b]).filter(Boolean)];
+  const lats=all.map(p=>Number(p.lat)).filter(Number.isFinite),lngs=all.map(p=>Number(p.lng)).filter(Number.isFinite);
+  const north=Math.max(...lats),south=Math.min(...lats),east=Math.max(...lngs),west=Math.min(...lngs);
+  const midLat=(north+south)/2*Math.PI/180,cos=Math.max(.2,Math.cos(midLat));
+  const width=Math.max(1e-9,(east-west)*cos),height=Math.max(1e-9,north-south),scale=820/Math.max(width,height);
+  const drawW=width*scale,drawH=height*scale,ox=(1000-drawW)/2,oy=(1000-drawH)/2;
+  const pt=p=>({x:ox+((Number(p.lng)-west)*cos)*scale,y:oy+(north-Number(p.lat))*scale});
+  const P=p=>{const q=pt(p);return q.x.toFixed(1)+','+q.y.toFixed(1)};
+  const fills=['#e8eef5','#dbe7f0','#e6e2f3','#e3efe7','#f2e8dc','#e0ebeb','#eee5e5','#e5e5ef','#edf0df','#e7e7e7'];
+  const lc={ridge:'#198754',hip:'#2563eb',valley:'#dc2626'};
+  let s='<svg viewBox="0 0 1000 1000" role="img" aria-label="Hybrid 2D roof measurement diagram"><rect width="1000" height="1000" fill="#fff"/>';
+  facets.forEach((f,i)=>{
+   const poly=f.outline||[];if(poly.length<3)return;
+   const q=poly.map(pt),cx=q.reduce((a,p)=>a+p.x,0)/q.length,cy=q.reduce((a,p)=>a+p.y,0)/q.length;
+   s+='<polygon points="'+poly.map(P).join(' ')+'" fill="'+fills[i%fills.length]+'" stroke="#444" stroke-width="3"/>';
+   s+='<text x="'+cx.toFixed(1)+'" y="'+cy.toFixed(1)+'" text-anchor="middle" font-size="24" font-weight="700" fill="#111">F'+(i+1)+'</text>';
+   s+='<text x="'+cx.toFixed(1)+'" y="'+(cy+28).toFixed(1)+'" text-anchor="middle" font-size="18" fill="#333">'+Number(f.rise12||0).toFixed(1)+'/12 · '+Math.round(Number(f.slopedAreaSqFt||0))+' ft²</text>';
+  });
+  s+='<polygon points="'+outline.map(P).join(' ')+'" fill="none" stroke="#111" stroke-width="7"/>';
+  lines.filter(l=>['ridge','hip','valley'].includes(l.type)).forEach(l=>{
+   const a=pt(l.a),b=pt(l.b);
+   s+='<line x1="'+a.x.toFixed(1)+'" y1="'+a.y.toFixed(1)+'" x2="'+b.x.toFixed(1)+'" y2="'+b.y.toFixed(1)+'" stroke="'+lc[l.type]+'" stroke-width="7"/>';
+  });
+  edges.forEach(e=>{
+   const a=pt(e.a),b=pt(e.b),mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
+   s+='<text x="'+mx.toFixed(1)+'" y="'+(my-7).toFixed(1)+'" text-anchor="middle" font-size="15" font-weight="600" fill="#111" stroke="#fff" stroke-width="5" paint-order="stroke">'+Number(e.lengthFt||0).toFixed(1)+' ft</text>';
+  });
+  s+='<g transform="translate(28 935)" font-size="17" fill="#111"><text x="0" y="0">Geometry: accepted Google DSM / rooftop mask</text><text x="0" y="26">Facet pitch and area shown from DSM; LiDAR remains an independent 3D validation source</text></g></svg>';
+  return s;
+ }
  const outline=data.outline,poly=outline.polygon||[],planes=(data.planes?.planes||[]).filter(p=>p.accepted),geom=(data.geometry?.lines||[]).filter(l=>l.type!=='ignore'&&l.type!=='candidate');
  const P=p=>(Number(p.x)*1000).toFixed(1)+','+(Number(p.y)*1000).toFixed(1);
  const fills=['#e8eef5','#dbe7f0','#e6e2f3','#e3efe7','#f2e8dc','#e0ebeb','#eee5e5','#e5e5ef','#edf0df','#e7e7e7'];
  let s='<svg viewBox="0 0 1000 1000" role="img" aria-label="2D roof measurement diagram"><rect width="1000" height="1000" fill="#fff"/>';
- planes.forEach((f,i)=>{if(!f.polygon?.length)return;const c=roofCentroid(f.polygon);s+='<polygon points="'+f.polygon.map(P).join(' ')+'" fill="'+fills[i%fills.length]+'" stroke="#444" stroke-width="3"/>';s+='<text x="'+(c.x*1000).toFixed(1)+'" y="'+(c.y*1000).toFixed(1)+'" text-anchor="middle" font-size="24" font-weight="700" fill="#111">F'+(i+1)+'</text><text x="'+(c.x*1000).toFixed(1)+'" y="'+(c.y*1000+28).toFixed(1)+'" text-anchor="middle" font-size="18" fill="#333">'+Number(f.pitch12).toFixed(1)+'/12 · '+Math.round(f.slopedAreaFt2||0)+' ft²</text>'});
+ planes.forEach((f,i)=>{if(!f.polygon?.length)return;const cc=roofCentroid(f.polygon);s+='<polygon points="'+f.polygon.map(P).join(' ')+'" fill="'+fills[i%fills.length]+'" stroke="#444" stroke-width="3"/>';s+='<text x="'+(cc.x*1000).toFixed(1)+'" y="'+(cc.y*1000).toFixed(1)+'" text-anchor="middle" font-size="24" font-weight="700" fill="#111">F'+(i+1)+'</text><text x="'+(cc.x*1000).toFixed(1)+'" y="'+(cc.y*1000+28).toFixed(1)+'" text-anchor="middle" font-size="18" fill="#333">'+Number(f.pitch12).toFixed(1)+'/12 · '+Math.round(f.slopedAreaFt2||0)+' ft²</text>'});
  s+='<polygon points="'+poly.map(P).join(' ')+'" fill="none" stroke="#111" stroke-width="7"/>';
  for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length],mx=(a.x+b.x)/2,my=(a.y+b.y)/2,len=roofNormLengthFt(a,b,outline);s+='<text x="'+(mx*1000).toFixed(1)+'" y="'+(my*1000-8).toFixed(1)+'" text-anchor="middle" font-size="16" font-weight="600" fill="#111" stroke="#fff" stroke-width="5" paint-order="stroke">'+len.toFixed(1)+' ft</text>'}
  const lc={ridge:'#198754',hip:'#2563eb',valley:'#dc2626'};
@@ -1308,7 +1341,15 @@ function roofDiagramSvg(data){
  return s;
 }
 function roofLineTotals(data){
- const out={ridge:0,hip:0,valley:0};const lines=data.geometry?.lines||[];
+ const sm=data.solarModel?.accepted?data.solarModel:null;
+ if(sm?.measurements)return{
+  ridge:Number(sm.measurements.ridgeFt||0),
+  hip:Number(sm.measurements.hipFt||0),
+  valley:Number(sm.measurements.valleyFt||0),
+  eave:Number(sm.measurements.eaveFt||0),
+  rake:Number(sm.measurements.rakeFt||0)
+ };
+ const out={ridge:0,hip:0,valley:0,eave:0,rake:0},lines=data.geometry?.lines||[];
  for(const l of lines){if(out[l.type]==null)continue;out[l.type]+=roofNormLengthFt(l.a,l.b,data.outline)}
  return out;
 }
