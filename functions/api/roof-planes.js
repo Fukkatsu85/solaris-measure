@@ -22,7 +22,10 @@ export async function onRequestPost({request,env}){
   azimuthDeg:+Number(p.azimuthDeg||0).toFixed(1),
   rmse:+Number(p.rmse||0).toFixed(3),
   coefficients:{a:+Number(p.coefficients?.a||0).toFixed(8),b:+Number(p.coefficients?.b||0).toFixed(8),c:+Number(p.coefficients?.c||0).toFixed(5)},
-  bounds:p.bounds||null
+  bounds:p.bounds||null,
+  polygon:Array.isArray(p.polygon)?p.polygon.map(q=>({x:+Number(q.x).toFixed(7),y:+Number(q.y).toFixed(7)})):[],
+  planAreaFt2:+Number(p.planAreaFt2||0).toFixed(1),
+  slopedAreaFt2:+Number(p.slopedAreaFt2||0).toFixed(1)
  }));
  const result={projectId:id,address:b.address||"",planes:clean,acceptedCount:clean.filter(p=>p.accepted).length,savedAt:new Date().toISOString(),status:"accepted-lidar-planes"};
  await env.MEASURE_PHOTOS.put(id+"/_roof_planes.json",JSON.stringify(result),{httpMetadata:{contentType:"application/json"}});
