@@ -61,6 +61,21 @@ self.onmessage=async e=>{
    }finally{LazPerf._free(filePtr);LazPerf._free(pointPtr);lz.delete()}
   }
   let pts=[...cells.values()];
+  // Robust roof-height cleanup. Trees/stray ground returns can survive the
+  // highest-return grid step, so identify the dense central elevation band
+  // and keep a generous envelope around it before plane fitting.
+  if(pts.length>=40){
+   const zs=pts.map(p=>p.z).sort((a,b)=>a-b);
+   const q=(t)=>zs[Math.max(0,Math.min(zs.length-1,Math.floor((zs.length-1)*t)))];
+   const q10=q(.10),q25=q(.25),q50=q(.50),q75=q(.75),q90=q(.90);
+   const iqr=Math.max(.35,q75-q25);
+   // Residential roofs normally occupy a compact vertical band. This keeps
+   // legitimate slope variation while rejecting isolated canopy/ground tails.
+   const low=Math.max(q10-1.25, q50-3.5*iqr);
+   const high=Math.min(q90+1.25, q50+3.5*iqr);
+   const filtered=pts.filter(p=>p.z>=low&&p.z<=high);
+   if(filtered.length>=Math.max(80,pts.length*.55))pts=filtered;
+  }
   if(pts.length>12000){const step=Math.ceil(pts.length/12000);pts=pts.filter((_,i)=>i%step===0)}
   let minZ=Infinity,maxZ=-Infinity;for(const p of pts){if(p.z<minZ)minZ=p.z;if(p.z>maxZ)maxZ=p.z}
   self.postMessage({type:'done',files,decoded,inside,surfacePoints:pts,minZ:Number.isFinite(minZ)?minZ:null,maxZ:Number.isFinite(maxZ)?maxZ:null});
