@@ -651,12 +651,25 @@ document.querySelector('#locate-roof')?.addEventListener('click',async()=>{
 document.querySelector('#confirm-roof-property')?.addEventListener('click',()=>{
  if(!roofLocatedProperty)return;
  localStorage.setItem('solarisRoofProject',JSON.stringify({name:roofLocatedProperty.address,address:roofLocatedProperty.address,createdAt:new Date().toISOString()}));
- const state=document.querySelector('#roof-state');if(state)state.textContent='Selected property: '+roofLocatedProperty.address+'. Ready for roof geometry.';
+ const state=document.querySelector('#roof-state');if(state)state.textContent='Property selected: '+roofLocatedProperty.address;
  const geo=document.querySelector('#roof-geometry');if(geo)geo.disabled=false;
+ const ws=document.querySelector('#roof-selected-workspace'),title=document.querySelector('#roof-selected-address');
+ if(title)title.textContent=roofLocatedProperty.address;if(ws){ws.hidden=false;ws.scrollIntoView({behavior:'smooth',block:'start'});}
+ const confirm=document.querySelector('#confirm-roof-property');if(confirm){confirm.textContent='Property Selected ✓';confirm.disabled=true;}
 });
 document.querySelector('#confirm-roof-property')?.addEventListener('click',()=>{
  if(!roofLocatedProperty)return;
  localStorage.setItem('solarisRoofProject',JSON.stringify({name:roofLocatedProperty.address,address:roofLocatedProperty.address,createdAt:new Date().toISOString()}));
  const state=document.querySelector('#roof-state');if(state)state.textContent='Selected property: '+roofLocatedProperty.address+'. Ready for roof geometry.';
  const geo=document.querySelector('#roof-geometry');if(geo)geo.disabled=false;
+});
+
+document.querySelector('#start-roof-geometry')?.addEventListener('click',()=>{
+ const btn=document.querySelector('#roof-geometry');if(btn){btn.disabled=false;btn.scrollIntoView({behavior:'smooth',block:'center'});setTimeout(()=>btn.focus(),450);}
+ const s=document.querySelector('#roof-state');if(s)s.textContent='Property confirmed. Roof geometry workspace is next.';
+});
+document.querySelector('#change-roof-property')?.addEventListener('click',()=>{
+ roofLocatedProperty=null;const ws=document.querySelector('#roof-selected-workspace');if(ws)ws.hidden=true;
+ const confirm=document.querySelector('#confirm-roof-property');if(confirm){confirm.disabled=true;confirm.textContent='Use This Property';}
+ document.querySelector('#roof-address')?.focus();document.querySelector('#roof-map')?.scrollIntoView({behavior:'smooth',block:'center'});
 });
