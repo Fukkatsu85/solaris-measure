@@ -757,6 +757,7 @@ async function openRoofGeometryWorkspace(){
   if(aerialBadge)aerialBadge.textContent='Ready';
   setTimeout(()=>findRoofLidar().catch(()=>{}),250);
   setTimeout(()=>restoreRoofReportReadyState().catch(()=>{}),350);
+  setTimeout(()=>restoreRoofSolarModel().catch(()=>{}),450);
  }catch(err){
   if(aerialWrap)aerialWrap.innerHTML='<div style="padding:28px;text-align:center"><strong>Analysis imagery unavailable</strong><p class="muted">'+err.message+'</p></div>';
   if(aerialStatus)aerialStatus.textContent='If Google reports an API error, enable Geocoding API for the Solaris Measure key.';
@@ -1251,6 +1252,31 @@ async function generateRoofReport(){
   const sloped=facets.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0),squares=sloped/100,avgPitch=facets.length?facets.reduce((s,p)=>s+Number(p.pitch12||0),0)/facets.length:0,lines=roofLineTotals(d);
   const waste=[10,12,15].map(w=>({w,area:sloped*(1+w/100),sq:squares*(1+w/100)}));
   const facetRows=facets.map((p,i)=>'<tr><td>F'+(i+1)+'</td><td>'+Number(p.pitch12).toFixed(1)+'/12</td><td>'+Number(p.slopeDeg).toFixed(1)+'°</td><td>'+Math.round(Number(p.planAreaFt2||0)).toLocaleString()+'</td><td>'+Math.round(Number(p.slopedAreaFt2||0)).toLocaleString()+'</td><td>'+Number(p.rmse||0).toFixed(2)+' m</td></tr>').join('');
+  const v=d.validation||{};
+  const sm=d.solarModel||null,dm=sm?.measurements||{};
+  const dsmGeometryBlock=sm?.accepted
+   ?('<h2>Accepted Google DSM Geometry</h2><table class="roof-report-table"><tbody>'+
+     '<tr><th>DSM sloped area</th><td>'+Math.round(Number(sm.model?.slopedAreaSqFt||0)).toLocaleString()+' ft²</td></tr>'+
+     '<tr><th>DSM average pitch</th><td>'+Number(sm.model?.rise12||0).toFixed(1)+'/12</td></tr>'+
+     '<tr><th>DSM facets</th><td>'+Number(sm.model?.facets?.length||0)+'</td></tr>'+
+     '<tr><th>Eave</th><td>'+fmtHybridFt(dm.eaveFt)+'</td></tr>'+
+     '<tr><th>Rake</th><td>'+fmtHybridFt(dm.rakeFt)+'</td></tr>'+
+     '<tr><th>Ridge</th><td>'+fmtHybridFt(dm.ridgeFt)+'</td></tr>'+
+     '<tr><th>Hip</th><td>'+fmtHybridFt(dm.hipFt)+'</td></tr>'+
+     '<tr><th>Valley</th><td>'+fmtHybridFt(dm.valleyFt)+'</td></tr>'+
+     '</tbody></table><p class="roof-report-note">These linear classifications come from the accepted Google rooftop-mask/DSM model and remain independently traceable from the LiDAR-derived primary roof model.</p>')
+   :'';
+  const validationBlock=v.available
+   ?('<h2>Hybrid Validation</h2><table class="roof-report-table"><tbody>'+
+     '<tr><th>Google Solar whole-roof area</th><td>'+(Number.isFinite(Number(v.googleWholeRoofAreaFt2))?Math.round(Number(v.googleWholeRoofAreaFt2)).toLocaleString()+' ft²':'—')+'</td></tr>'+
+     '<tr><th>Solaris LiDAR/report area</th><td>'+Math.round(sloped).toLocaleString()+' ft²</td></tr>'+
+     '<tr><th>Area difference</th><td>'+(Number.isFinite(Number(v.areaDifferencePct))?Number(v.areaDifferencePct).toFixed(1)+'%':'—')+'</td></tr>'+
+     '<tr><th>Google weighted pitch</th><td>'+(Number.isFinite(Number(v.googleWeightedPitchDeg))?Number(v.googleWeightedPitchDeg).toFixed(1)+'°':'—')+'</td></tr>'+
+     '<tr><th>LiDAR weighted pitch</th><td>'+(Number.isFinite(Number(v.lidarWeightedPitchDeg))?Number(v.lidarWeightedPitchDeg).toFixed(1)+'°':'—')+'</td></tr>'+
+     '<tr><th>Facet count</th><td>LiDAR '+Number(v.lidarFacetCount||0)+' · Google '+Number(v.googleFacetCount||0)+'</td></tr>'+
+     '</tbody></table>'+
+     (Array.isArray(v.warnings)&&v.warnings.length?'<div class="analysis-state"><strong>Review warnings</strong><br>'+v.warnings.map(escRoof).join('<br>')+'</div>':'<div class="analysis-state"><strong>Cross-check passed</strong><br>No material Google Solar / LiDAR disagreement was detected by the current thresholds.</div>'))
+   :('<h2>Hybrid Validation</h2><div class="analysis-state">Google Solar cross-check unavailable'+(v.error?': '+escRoof(v.error):'.')+'</div>');
   content.innerHTML='<div class="roof-report-sheet">'+
    '<div class="roof-report-head"><div><div class="roof-report-brand">SOLARIS ROOFING</div><h1>Roof Measurement Report</h1><p>'+escRoof(d.outline.address||saved.address||'')+'</p></div><div style="text-align:right"><strong>Solaris Measure</strong><br><span>Generated '+new Date().toLocaleDateString()+'</span><br><span>LiDAR + aerial verified geometry</span></div></div>'+
    '<div class="roof-report-grid"><div class="roof-report-stat"><span>Plan area</span><strong>'+Math.round(plan).toLocaleString()+' ft²</strong></div><div class="roof-report-stat"><span>Sloped roof area</span><strong>'+Math.round(sloped).toLocaleString()+' ft²</strong></div><div class="roof-report-stat"><span>Roofing squares</span><strong>'+squares.toFixed(2)+'</strong></div><div class="roof-report-stat"><span>Roof perimeter</span><strong>'+perim.toFixed(1)+' ft</strong></div><div class="roof-report-stat"><span>Facets</span><strong>'+facets.length+'</strong></div><div class="roof-report-stat"><span>Average pitch</span><strong>'+avgPitch.toFixed(1)+'/12</strong></div><div class="roof-report-stat"><span>Ridge</span><strong>'+(lines.ridge?lines.ridge.toFixed(1)+' ft':'Not verified')+'</strong></div><div class="roof-report-stat"><span>Valley</span><strong>'+(lines.valley?lines.valley.toFixed(1)+' ft':'Not verified')+'</strong></div></div>'+
@@ -1258,7 +1284,9 @@ async function generateRoofReport(){
    '<h2>Facet Measurements</h2><table class="roof-report-table"><thead><tr><th>Facet</th><th>Pitch</th><th>Slope</th><th>Plan ft²</th><th>Sloped ft²</th><th>Plane RMSE</th></tr></thead><tbody>'+facetRows+'</tbody></table>'+
    '<h2>Linear Measurements</h2><table class="roof-report-table"><tbody><tr><th>Roof perimeter</th><td>'+perim.toFixed(1)+' ft</td></tr><tr><th>Ridge</th><td>'+(lines.ridge?lines.ridge.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Hip</th><td>'+(lines.hip?lines.hip.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Valley</th><td>'+(lines.valley?lines.valley.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Eave / rake split</th><td>Not yet classified</td></tr></tbody></table>'+
    '<h2>Waste / Ordering Area</h2><table class="roof-report-table"><thead><tr><th>Waste</th><th>Order area</th><th>Squares</th></tr></thead><tbody><tr><td>0%</td><td>'+Math.round(sloped).toLocaleString()+' ft²</td><td>'+squares.toFixed(2)+'</td></tr>'+waste.map(x=>'<tr><td>'+x.w+'%</td><td>'+Math.round(x.area).toLocaleString()+' ft²</td><td>'+x.sq.toFixed(2)+'</td></tr>').join('')+'</tbody></table>'+
-   '<p class="roof-report-note">Measurements are derived from the accepted aerial roof outline and accepted USGS 3DEP LiDAR plane fits. Internal line totals appear only when reviewed roof geometry has been saved. Eave/rake classification and product-specific material quantities remain pending verification.</p></div>';
+   dsmGeometryBlock+
+   validationBlock+
+   '<p class="roof-report-note">Primary measurements are derived from the accepted aerial roof outline and accepted USGS 3DEP LiDAR plane fits. Accepted Google DSM geometry is retained as a second independently traceable source for facet and line classification. Google data does not silently overwrite the reviewed Solaris geometry.</p></div>';
   if(panel){panel.hidden=false;panel.scrollIntoView({behavior:'smooth',block:'start'});}
   if(state)state.textContent='Roof measurement report ready.';
  }catch(err){if(state)state.textContent='Could not build roof report: '+err.message}
@@ -1281,4 +1309,76 @@ async function restoreRoofReportReadyState(){
  if(fc)fc.textContent=facets.length;if(pit)pit.textContent=avg.toFixed(1)+'/12 avg';if(sq&&sloped>0)sq.textContent=(sloped/100).toFixed(2)+' sq';
  if(area&&d.outline?.measurement?.planAreaFt2)area.textContent=Math.round(d.outline.measurement.planAreaFt2).toLocaleString()+' ft²';
  if(per&&d.outline?.measurement?.perimeterFt)per.textContent=Number(d.outline.measurement.perimeterFt).toFixed(1)+' ft';
+}
+
+let roofSolarProposal=null;
+function fmtHybridFt(v){return Number.isFinite(Number(v))?Number(v).toFixed(1)+' ft':'—'}
+function renderRoofSolarProposal(proposal){
+ const badge=document.querySelector('#roof-solar-badge'),summary=document.querySelector('#roof-solar-summary'),lines=document.querySelector('#roof-solar-lines'),accept=document.querySelector('#accept-roof-solar');
+ const m=proposal?.measurements||{},model=proposal?.model||{},facets=model.facets||[],roofLines=model.roofLines||[];
+ if(badge)badge.textContent='DSM ready';
+ if(summary)summary.innerHTML='<strong>Google DSM roof model ready</strong><br>'+
+   Math.round(Number(model.slopedAreaSqFt||0)).toLocaleString()+' ft² sloped area · '+
+   (Number(model.slopedAreaSqFt||0)/100).toFixed(2)+' squares · '+
+   facets.length+' facets · '+Number(model.rise12||0).toFixed(1)+'/12 average pitch<br>'+
+   'Perimeter '+fmtHybridFt(m.perimeterFt)+' · Eave '+fmtHybridFt(m.eaveFt)+' · Rake '+fmtHybridFt(m.rakeFt)+' · Ridge '+fmtHybridFt(m.ridgeFt)+' · Hip '+fmtHybridFt(m.hipFt)+' · Valley '+fmtHybridFt(m.valleyFt)+
+   '<br><span class="muted">Geometry mode: '+escRoof(model.geometryMode||'detailed')+' · facet coverage '+Math.round(Number(model.facetCoverage||0)*100)+'%'+(model.rgbAssisted?' · RGB edge assist':'')+'</span>';
+ if(lines){
+  const rows=roofLines.filter(l=>['ridge','hip','valley'].includes(l.type)).map((l,i)=>'<div style="display:grid;grid-template-columns:80px 1fr 90px;gap:10px;padding:7px 0;border-bottom:1px solid #e5e7eb"><strong>'+escRoof(l.type)+'</strong><span>DSM shared boundary '+(i+1)+'</span><span>'+fmtHybridFt(Number(l.length3dMeters||l.lengthMeters||0)*3.280839895)+'</span></div>').join('');
+  lines.innerHTML=rows||'<span class="muted">No confident ridge / hip / valley proposals were produced.</span>';
+ }
+ if(accept)accept.disabled=false;
+}
+async function saveRoofSolarModel(accepted=false){
+ if(!roofSolarProposal)return;
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
+ const projectId=saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
+ const r=await fetch('/api/roof-solar-model',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId,address:saved.address,accepted,model:roofSolarProposal})});
+ const d=await r.json().catch(()=>({}));if(!r.ok||!d.ok)throw new Error(d.error||'Could not save Google DSM roof model.');
+ return d.model;
+}
+document.querySelector('#run-roof-solar')?.addEventListener('click',async()=>{
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{},btn=document.querySelector('#run-roof-solar'),badge=document.querySelector('#roof-solar-badge'),summary=document.querySelector('#roof-solar-summary'),accept=document.querySelector('#accept-roof-solar');
+ const lat=Number(saved.lat),lng=Number(saved.lng);
+ if(!Number.isFinite(lat)||!Number.isFinite(lng)){if(summary)summary.textContent='Confirm the roof location first.';return}
+ if(btn)btn.disabled=true;if(accept)accept.disabled=true;if(badge)badge.textContent='Analyzing';if(summary)summary.textContent='Loading Google rooftop mask, DSM, RGB and roof-segment metadata…';
+ try{
+  const br=await fetch('/api/solar-building?lat='+encodeURIComponent(lat)+'&lng='+encodeURIComponent(lng)),building=await br.json();
+  if(!br.ok||!building.ok)throw new Error(building.error||'Google Solar Building Insights is unavailable for this roof.');
+  const engine=await import('/assets/js/solar-roof-engine.js?v=20261002-1');
+  const result=await engine.buildSolarRoofModel(lat,lng,building.roofSegments||[]);
+  const measurements=engine.buildRoofMeasurements(result.outline,result.model.facets||[],result.model.roofLines||[]);
+  roofSolarProposal={
+   source:'google-solar-dsm',
+   lat,lng,
+   imageryQuality:building.imageryQuality||result.quality||null,
+   imageryDate:building.imageryDate||null,
+   googleWholeRoofAreaFt2:Number.isFinite(Number(building.roofAreaMeters2))?Number(building.roofAreaMeters2)*10.7639104167:null,
+   outline:result.outline,
+   rawCornerCount:result.rawCornerCount,
+   model:result.model,
+   measurements
+  };
+  renderRoofSolarProposal(roofSolarProposal);
+  await saveRoofSolarModel(false);
+ }catch(err){
+  roofSolarProposal=null;if(badge)badge.textContent='Unavailable';if(summary)summary.textContent='Google DSM analysis could not run: '+err.message;
+ }finally{if(btn)btn.disabled=false}
+});
+document.querySelector('#accept-roof-solar')?.addEventListener('click',async()=>{
+ const btn=document.querySelector('#accept-roof-solar'),badge=document.querySelector('#roof-solar-badge'),summary=document.querySelector('#roof-solar-summary');
+ if(!roofSolarProposal)return;
+ if(btn)btn.disabled=true;
+ try{
+  await saveRoofSolarModel(true);if(badge)badge.textContent='Accepted ✓';
+  if(summary)summary.innerHTML+='<br><strong>DSM geometry accepted for hybrid report comparison.</strong>';
+ }catch(err){if(summary)summary.innerHTML+='<br><strong>Could not save acceptance:</strong> '+escRoof(err.message);if(btn)btn.disabled=false}
+});
+async function restoreRoofSolarModel(){
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
+ if(!Number.isFinite(Number(saved.lat))||!Number.isFinite(Number(saved.lng)))return;
+ const projectId=saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
+ const r=await fetch('/api/roof-solar-model?projectId='+encodeURIComponent(projectId));if(!r.ok)return;
+ const d=await r.json();if(!d.model)return;roofSolarProposal=d.model;renderRoofSolarProposal(roofSolarProposal);
+ const badge=document.querySelector('#roof-solar-badge');if(d.model.accepted&&badge)badge.textContent='Accepted ✓';
 }
