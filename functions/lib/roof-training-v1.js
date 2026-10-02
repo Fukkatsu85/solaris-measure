@@ -64,9 +64,10 @@ export function findTrainingBenchmark(address,{scope}={}){
  if(scope){
   const exact=rows.find(r=>(r.scope||"all-structures")===scope);if(exact)return exact;
  }
- // Whole-property truth is safest for address-level automatic benchmarking.
- return rows.find(r=>(r.scope||"all-structures")==="all-structures")
-   ||rows.find(r=>(r.scope||"all-structures")==="primary-building")
+ // Solaris Measure normally resolves one building at a time. Prefer primary-building
+ // truth when a provider supplied separate structure reports; otherwise use all-structures.
+ return rows.find(r=>(r.scope||"all-structures")==="primary-building")
+   ||rows.find(r=>(r.scope||"all-structures")==="all-structures")
    ||rows[0];
 }
 
