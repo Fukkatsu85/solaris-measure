@@ -1456,8 +1456,13 @@ async function generateRoofReport(){
   const sm=d.solarModel||null,dm=sm?.measurements||{},dsmFacets=sm?.model?.facets||[];
   if(sm?.model?.facets?.length){
    try{
-    const topo=await import('/assets/js/roof-topology.js?v=20261002-r39');
-    d.topology=topo.buildRoofTopology(sm);
+    const topo=await import('/assets/js/roof-topology.js?v=20261002-opt1');
+    let profileOverrides={};
+    try{
+     const cr=await fetch('/api/training-topology-optimizer',{cache:'no-store'}),cd=await cr.json().catch(()=>({}));
+     profileOverrides=cd?.config?.profileOverrides||{};
+    }catch{}
+    d.topology=topo.buildRoofTopology(sm,{profileOverrides});
    }catch(err){console.warn('Roof topology engine unavailable',err)}
   }
   const topologyPerimFt=(d.topology?.edges||[]).filter(e=>e.type==='perimeter').reduce((s,e)=>s+Number(e.lengthMeters||0)*3.280839895,0);
@@ -1747,6 +1752,25 @@ document.querySelector('#bootstrap-roof-training')?.addEventListener('click',asy
   renderRoofRegression(data);
  }catch(err){if(status)status.textContent='Training bootstrap failed: '+(err?.message||String(err))}
  finally{if(btn){btn.disabled=false;btn.textContent=old||'Rebuild Training Models'}}
+});
+
+document.querySelector('#optimize-roof-topology')?.addEventListener('click',async()=>{
+ const btn=document.querySelector('#optimize-roof-topology'),status=document.querySelector('#roof-optimizer-status'),regStatus=document.querySelector('#roof-regression-status');
+ const old=btn?.textContent;if(btn){btn.disabled=true;btn.textContent='Optimizing…'}
+ if(status)status.textContent='Testing profile-specific topology settings across the processed training corpus…';
+ try{
+  const r=await fetch('/api/training-topology-optimizer',{method:'POST',headers:{'content-type':'application/json'}});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok||!d.ok)throw new Error(d.error||'Topology optimization failed.');
+  const cfg=d.config||{},rows=(cfg.results||[]).filter(x=>x.best);
+  if(status)status.innerHTML='<strong>Topology optimization complete.</strong> '+Number(cfg.trainingCases||0)+' training roofs evaluated across '+rows.length+' solver profiles.<br>'+
+    rows.map(x=>escRoof(x.profile)+': '+escRoof(x.best.name)+' · score '+Number(x.best.score||0).toFixed(1)+' (baseline '+Number(x.baseline?.score||0).toFixed(1)+')').join('<br>');
+  if(regStatus)regStatus.textContent='Optimized topology settings saved. Running regression with the new profile overrides…';
+  const rr=await fetch('/api/training-regression',{cache:'no-store'}),rd=await rr.json().catch(()=>({}));
+  if(!rr.ok||!rd.ok)throw new Error(rd.error||'Optimizer saved, but regression failed.');
+  renderRoofRegression(rd);
+ }catch(err){if(status)status.textContent='Topology optimization failed: '+(err?.message||String(err))}
+ finally{if(btn){btn.disabled=false;btn.textContent=old||'Optimize Topology'}}
 });
 
 document.querySelector('#run-roof-regression')?.addEventListener('click',async()=>{
