@@ -416,9 +416,16 @@ function faceCentroid(face,nodes){
   return {x:poly.reduce((s,p)=>s+p.x,0)/poly.length,y:poly.reduce((s,p)=>s+p.y,0)/poly.length};
 }
 function nearestFacetMeta(c,facets,F){
+  // Prefer the DSM component whose own polygon contains the reconstructed face
+  // centroid. Fall back to nearest component center when polygons do not overlap.
+  for(const f of facets){
+    const poly=(f.outline||[]).map(F.toXY);
+    if(poly.length>=3&&pointInPoly(c,poly))return f;
+  }
   let best=null,bestD=Infinity;
   for(const f of facets){
-    const ll=f.center;if(!ll)continue;const p=F.toXY(ll),d=dist(c,p);
+    const ll=f.center;if(!ll)continue;
+    const p=F.toXY(ll),d=dist(c,p);
     if(d<bestD){bestD=d;best=f}
   }
   return best;
@@ -476,8 +483,8 @@ export function buildRoofTopology(solarModel){
     lengthMeters:dist(graph.nodes[e.a],graph.nodes[e.b])
   }));
   return {
-    version:2.7,
-    source:"architectural-planar-topology-projection-primitives",
+    version:2.8,
+    source:"architectural-planar-topology-multi-component-facets",
     dominantAngle:longest.ang,
     vertices,edges,faces,
     outline:perimeter.map(F.toLL),
