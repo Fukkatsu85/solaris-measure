@@ -526,3 +526,13 @@ async function processProperty(){
  }catch(e){state.textContent='Process Property error: '+(e?.message||String(e));root.innerHTML='<div class="analysis-state">'+(e?.message||String(e))+'</div>';}finally{btn.disabled=false;btn.textContent='Process Property';}
 }
 document.querySelector('#process-property')?.addEventListener('click',e=>{e.preventDefault();processProperty();});
+
+async function buildHouseModel(){
+ const btn=document.querySelector('#build-house-model'),state=document.querySelector('#house-model-state'),root=document.querySelector('#house-model-results');if(!btn||!state||!root)return;
+ btn.disabled=true;btn.textContent='Building…';state.textContent='Merging verified walls, openings, gables and edge geometry into one house model…';
+ try{const r=await fetch('/api/house-model',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:PROJECT_ID})});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'House model failed.');const x=d.houseModel,names=['front','right','rear','left'];
+ root.innerHTML='<div class="metrics"><div class="metric"><span>Model confidence</span><strong>'+x.confidence+'%</strong></div><div class="metric"><span>Wall planes</span><strong>'+x.totals.wallPlanes+'</strong></div><div class="metric"><span>Visible openings</span><strong>'+x.totals.openings+'</strong></div><div class="metric"><span>Metric scale</span><strong>'+(x.metricReady?'Solved':'Unsolved')+'</strong></div></div><table><thead><tr><th>Elevation</th><th>Status</th><th>Source</th><th>Walls</th><th>Openings</th><th>Gables</th></tr></thead><tbody>'+names.map(n=>{const e=x.elevations[n]||{};return '<tr><td>'+n[0].toUpperCase()+n.slice(1)+'</td><td>'+e.status+'</td><td>'+(e.sourceView||'—')+'</td><td>'+(e.wallPlanes||0)+'</td><td>'+(e.openings||0)+'</td><td>'+(e.gables||0)+'</td></tr>'}).join('')+'</tbody></table><div class="analysis-state">'+x.scale.message+'</div>';
+ state.textContent='Shared house geometry built. Next: solve trustworthy real-world scale, then calculate siding quantities.';
+ }catch(e){state.textContent='House model error: '+(e?.message||String(e));}finally{btn.disabled=false;btn.textContent='Build House Model';}
+}
+document.querySelector('#build-house-model')?.addEventListener('click',e=>{e.preventDefault();buildHouseModel();});
