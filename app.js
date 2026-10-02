@@ -974,6 +974,7 @@ async function extractRoofLidar(){
   const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'LiDAR extraction failed.');
   saved.lidarEpt=d.ept;saved.lidarSubset=d.subset;saved.lidarExtractedAt=new Date().toISOString();
   localStorage.setItem('solarisRoofProject',JSON.stringify(saved));
+  const decodeBtn=document.querySelector('#decode-roof-lidar');if(decodeBtn)decodeBtn.disabled=false;
   const pts=Number(d.subset.estimatedPoints||0).toLocaleString();
   if(badge)badge.textContent='Roof window ready';
   if(status)status.textContent='Roof-area LiDAR window resolved. Solaris found '+d.subset.nodeCount+' EPT node'+(d.subset.nodeCount===1?'':'s')+' intersecting the roof search area.';
@@ -985,3 +986,53 @@ async function extractRoofLidar(){
  }finally{if(btn)btn.disabled=false}
 }
 document.querySelector('#extract-roof-lidar')?.addEventListener('click',extractRoofLidar);
+
+let roofLidarDecoded=null;
+function roofMercator(lat,lng){return{x:6378137*lng*Math.PI/180,y:6378137*Math.log(Math.tan(Math.PI/4+lat*Math.PI/360))}}
+function roofPolyToMercator(poly,lat,lng,half){
+ const c=roofMercator(lat,lng),size=half*2;
+ return poly.map(p=>({x:c.x+(Number(p.x)-.5)*size,y:c.y+(.5-Number(p.y))*size}));
+}
+function renderRoofLidar(points,q,poly,minZ,maxZ){
+ const wrap=document.querySelector('#roof-lidar-visual'),canvas=document.querySelector('#roof-lidar-canvas');if(!canvas)return;
+ if(wrap)wrap.hidden=false;const ctx=canvas.getContext('2d'),w=canvas.width,h=canvas.height;ctx.clearRect(0,0,w,h);ctx.fillStyle='#111';ctx.fillRect(0,0,w,h);
+ const sx=x=>(x-q[0])/(q[2]-q[0])*w,sy=y=>h-(y-q[1])/(q[3]-q[1])*h,span=Math.max(.01,(maxZ??1)-(minZ??0));
+ for(const p of points){const t=Math.max(0,Math.min(1,(p.z-(minZ??p.z))/span)),hue=240-240*t;ctx.fillStyle='hsl('+hue+' 90% 60%)';ctx.fillRect(sx(p.x)-1.5,sy(p.y)-1.5,3,3)}
+ if(poly?.length){ctx.beginPath();poly.forEach((p,i)=>{const x=sx(p.x),y=sy(p.y);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.closePath();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke()}
+}
+async function getAcceptedRoofOutline(saved){
+ if(roofOutlineProposal?.polygon?.length>=3)return roofOutlineProposal.polygon;
+ const id=saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
+ const r=await fetch('/api/roof-outline?projectId='+encodeURIComponent(id)),d=await r.json();
+ if(r.ok&&d.outline?.polygon?.length>=3)return d.outline.polygon;
+ throw new Error('Accept the roof outline before decoding LiDAR points.');
+}
+async function decodeRoofLidar(){
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{},status=document.querySelector('#roof-lidar-status'),vstatus=document.querySelector('#roof-lidar-visual-status'),btn=document.querySelector('#decode-roof-lidar'),badge=document.querySelector('#roof-lidar-badge');
+ if(!saved.lidarEpt?.url||!saved.lidarSubset?.nodes?.length){if(status)status.textContent='Extract the roof LiDAR window first.';return}
+ if(btn)btn.disabled=true;if(badge)badge.textContent='Decoding';if(status)status.textContent='Decoding compressed USGS LAZ points in a background worker…';
+ try{
+  const outline=await getAcceptedRoofOutline(saved),lat=Number(saved.lat),lng=Number(saved.lng),half=Number(saved.imageryCropHalfMeters||42),poly=roofPolyToMercator(outline,lat,lng,half);
+  const nodes=[...saved.lidarSubset.nodes].sort((a,b)=>(b.depth||0)-(a.depth||0));let selected=[],budget=0;
+  for(const n of nodes){if(selected.length>=36)break;if(budget+n.count>550000&&selected.length>=4)continue;selected.push(n);budget+=Number(n.count)||0}
+  if(!selected.length)throw new Error('No EPT nodes are available to decode.');
+  const worker=new Worker('/lidar-decode-worker.js?v=1'),result=await new Promise((resolve,reject)=>{
+   const timer=setTimeout(()=>{worker.terminate();reject(new Error('LiDAR decoding timed out.'))},90000);
+   worker.onmessage=e=>{const m=e.data||{};if(m.type==='progress'){if(status)status.textContent='Decoding LiDAR node '+m.current+' of '+m.total+' · '+Number(m.inside||0).toLocaleString()+' roof points found…';return}
+    clearTimeout(timer);worker.terminate();m.type==='done'?resolve(m):reject(new Error(m.error||'LiDAR decoder failed.'))};
+   worker.onerror=e=>{clearTimeout(timer);worker.terminate();reject(new Error(e.message||'LiDAR worker error'))};
+   worker.postMessage({type:'decode',eptUrl:saved.lidarEpt.url,nodes:selected,queryBounds:saved.lidarSubset.queryBounds,polygon:poly,maxDecoded:550000,grid:.45});
+  });
+  roofLidarDecoded={...result,polygon:poly,queryBounds:saved.lidarSubset.queryBounds};
+  renderRoofLidar(result.surfacePoints,saved.lidarSubset.queryBounds,poly,result.minZ,result.maxZ);
+  const zr=(result.minZ!=null&&result.maxZ!=null)?(result.maxZ-result.minZ).toFixed(2):'—';
+  if(badge)badge.textContent='Points decoded';
+  if(status)status.textContent='Roof LiDAR decoded ✓ · '+Number(result.inside||0).toLocaleString()+' points inside the accepted roof · '+Number(result.surfacePoints?.length||0).toLocaleString()+' surface cells retained.';
+  if(vstatus)vstatus.textContent='Top-down LiDAR roof surface · elevation range '+zr+' m · brighter/warmer points are higher. White line is the accepted aerial roof outline.';
+  saved.lidarDecodedSummary={decoded:result.decoded,inside:result.inside,surfaceCells:result.surfacePoints?.length||0,minZ:result.minZ,maxZ:result.maxZ,decodedAt:new Date().toISOString()};
+  localStorage.setItem('solarisRoofProject',JSON.stringify(saved));
+ }catch(err){
+  if(badge)badge.textContent='Decode failed';if(status)status.textContent='Could not decode roof points: '+err.message;if(vstatus)vstatus.textContent='';
+ }finally{if(btn)btn.disabled=false}
+}
+document.querySelector('#decode-roof-lidar')?.addEventListener('click',decodeRoofLidar);
