@@ -64,9 +64,10 @@
         <p class="muted" id="roof-workspace-status">Accept the roof outline first, then detect and classify internal roof geometry.</p>
         <div id="roof-lidar-panel" class="card" style="margin-top:12px">
           <div class="card-head"><div><div class="eyebrow">3D ROOF SOURCE</div><h3>USGS 3DEP LiDAR</h3><p class="muted">Find the point-cloud acquisition covering this roof. This will replace image-only guesses for facets and pitch.</p></div><span id="roof-lidar-badge" class="status">Not checked</span></div>
-          <div class="actions"><button id="find-roof-lidar" class="secondary" type="button">Find LiDAR for This Roof</button></div>
+          <div class="actions"><button id="find-roof-lidar" class="secondary" type="button">Find LiDAR for This Roof</button><button id="extract-roof-lidar" class="primary" type="button" disabled>Extract Roof LiDAR</button></div>
           <p class="muted" id="roof-lidar-status">LiDAR source has not been resolved yet.</p>
           <div id="roof-lidar-details"></div>
+          <div id="roof-lidar-extract" class="analysis-state" hidden style="margin-top:10px"></div>
         </div>
         <div id="roof-line-panel" class="card" hidden style="margin-top:12px">
           <div class="card-head"><div><div class="eyebrow">ROOF GEOMETRY</div><h3>Internal line proposals</h3><p class="muted">Solaris proposes strong roof lines from the aerial image. Review each line before it is used.</p></div><span id="roof-line-count" class="status">0 lines</span></div>
@@ -218,6 +219,6 @@
     </div>
   </main>
 
-  <script src="/app.js?v=20261002-lidar1"></script>
+  <script src="/app.js?v=20261002-lidarextract1"></script>
 </body>
 </html>
