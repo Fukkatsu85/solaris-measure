@@ -1471,9 +1471,13 @@ async function saveRoofSolarModel(accepted=false){
  if(!roofSolarProposal)return;
  const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
  const projectId=saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
- const r=await fetch('/api/roof-solar-model',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId,address:saved.address,accepted,model:roofSolarProposal})});
- const d=await r.json().catch(()=>({}));if(!r.ok||!d.ok)throw new Error(d.error||'Could not save Google DSM roof model.');
- return d.model;
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);
+ try{
+  const r=await fetch('/api/roof-solar-model',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId,address:saved.address,accepted,model:roofSolarProposal}),signal:controller.signal});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok||!d.ok)throw new Error(d.error||'Could not save Google DSM roof model.');
+  return d.model;
+ }finally{clearTimeout(timer)}
 }
 document.querySelector('#run-roof-solar')?.addEventListener('click',async()=>{
  const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{},btn=document.querySelector('#run-roof-solar'),badge=document.querySelector('#roof-solar-badge'),summary=document.querySelector('#roof-solar-summary'),accept=document.querySelector('#accept-roof-solar');
@@ -1506,11 +1510,21 @@ document.querySelector('#run-roof-solar')?.addEventListener('click',async()=>{
 document.querySelector('#accept-roof-solar')?.addEventListener('click',async()=>{
  const btn=document.querySelector('#accept-roof-solar'),badge=document.querySelector('#roof-solar-badge'),summary=document.querySelector('#roof-solar-summary');
  if(!roofSolarProposal)return;
- if(btn)btn.disabled=true;
+ if(btn){btn.disabled=true;btn.textContent='Saving DSM Geometry…'}
+ if(badge)badge.textContent='Saving';
  try{
-  await saveRoofSolarModel(true);if(badge)badge.textContent='Accepted ✓';
-  if(summary)summary.innerHTML+='<br><strong>DSM geometry accepted for hybrid report comparison.</strong>';
- }catch(err){if(summary)summary.innerHTML+='<br><strong>Could not save acceptance:</strong> '+escRoof(err.message);if(btn)btn.disabled=false}
+  await saveRoofSolarModel(true);
+  if(badge)badge.textContent='Accepted ✓';
+  if(btn)btn.textContent='DSM Geometry Accepted ✓';
+  if(summary)summary.innerHTML+='<br><strong>DSM geometry accepted ✓</strong>';
+ }catch(err){
+  const msg=err?.name==='AbortError'?'The DSM save request timed out. Please try again.':(err?.message||String(err));
+  if(badge)badge.textContent='Save failed';
+  if(summary)summary.innerHTML+='<br><strong>Could not save DSM acceptance:</strong> '+escRoof(msg);
+  if(btn){btn.disabled=false;btn.textContent='Accept DSM Geometry'}
+ }finally{
+  document.body.style.cursor='';
+ }
 });
 async function restoreRoofSolarModel(){
  const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
