@@ -79,6 +79,12 @@
             <p class="muted" id="roof-plane-status">Decode roof points first.</p>
           </div>
         </div>
+        <div id="roof-solar-panel" class="card" style="margin-top:12px">
+          <div class="card-head"><div><div class="eyebrow">HYBRID ROOF ENGINE</div><h3>Google Solar DSM Analysis</h3><p class="muted">Independent rooftop mask + DSM + Google roof-segment analysis used to cross-check the USGS LiDAR model and propose roof-line classifications.</p></div><span id="roof-solar-badge" class="status">Not run</span></div>
+          <div class="actions"><button id="run-roof-solar" class="primary" type="button">Analyze Google DSM</button><button id="accept-roof-solar" class="secondary" type="button" disabled>Accept DSM Geometry</button></div>
+          <div id="roof-solar-summary" class="analysis-state" style="margin-top:10px">Run this after confirming the property location. It does not replace the LiDAR model; it provides an independent second measurement engine.</div>
+          <div id="roof-solar-lines" style="margin-top:10px"></div>
+        </div>
         <div id="roof-line-panel" class="card" hidden style="margin-top:12px">
           <div class="card-head"><div><div class="eyebrow">ROOF GEOMETRY</div><h3>Internal line proposals</h3><p class="muted">Solaris proposes strong roof lines from the aerial image. Review each line before it is used.</p></div><span id="roof-line-count" class="status">0 lines</span></div>
           <div id="roof-line-list"></div>
@@ -236,6 +242,6 @@
     </div>
   </main>
 
-  <script src="/app.js?v=20261002-report1"></script>
+  <script src="/app.js?v=20261002-hybrid1"></script>
 </body>
 </html>
