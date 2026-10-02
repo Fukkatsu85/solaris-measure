@@ -118,6 +118,31 @@
         </div>
         <div id="roof-report-content"></div>
       </section>
+      <section id="roof-benchmark-panel" class="card no-print" style="margin-top:16px">
+        <div class="card-head">
+          <div><div class="eyebrow">TRAINING BENCHMARK</div><h3>Compare against a verified roof report</h3><p class="muted">Enter the Roofr / Hover / manual reference measurements. Solaris scores topology first, then roof lines, pitch and area, and saves this case to the shared benchmark library.</p></div>
+          <span id="roof-benchmark-badge" class="status">Not scored</span>
+        </div>
+        <div class="metrics" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));align-items:end">
+          <label>Reference source<input id="bench-source" value="Roofr" placeholder="Roofr"></label>
+          <label>Sloped area ft²<input id="bench-area" type="number" step="0.1" min="1" placeholder="2580"></label>
+          <label>Facet count<input id="bench-facets" type="number" step="1" min="1" placeholder="15"></label>
+          <label>Average pitch /12<input id="bench-pitch" type="number" step="0.1" min="0" placeholder="8"></label>
+          <label>Perimeter ft<input id="bench-perimeter" type="number" step="0.1" min="0"></label>
+          <label>Ridge ft<input id="bench-ridge" type="number" step="0.1" min="0"></label>
+          <label>Hip ft<input id="bench-hip" type="number" step="0.1" min="0"></label>
+          <label>Valley ft<input id="bench-valley" type="number" step="0.1" min="0"></label>
+          <label>Eave ft<input id="bench-eave" type="number" step="0.1" min="0"></label>
+          <label>Rake ft<input id="bench-rake" type="number" step="0.1" min="0"></label>
+        </div>
+        <label style="display:block;margin-top:12px">Facet areas ft² <span class="muted">(optional, comma separated)</span>
+          <textarea id="bench-facet-areas" rows="2" placeholder="618, 618, 226, 199, ..."></textarea>
+        </label>
+        <div class="actions" style="margin-top:12px">
+          <button id="score-roof-benchmark" class="primary" type="button">Save Reference & Score Solaris</button>
+        </div>
+        <div id="roof-benchmark-result" class="analysis-state" style="margin-top:10px">Generate the Solaris report, then enter the verified reference values here.</div>
+      </section>
       <div id="roof-gallery" class="photo-gallery"></div>
     </section>
     <div id="siding-tool">
