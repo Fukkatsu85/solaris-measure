@@ -678,7 +678,9 @@ document.querySelector('#confirm-roof-property')?.addEventListener('click',()=>{
 });
 
 async function openRoofGeometryWorkspace(){
- const project=roofLocatedProperty||JSON.parse(localStorage.getItem('solarisRoofProject')||'null');if(!project?.address)return;
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null');
+ const selectedAddress=document.querySelector('#roof-selected-address')?.textContent?.trim();
+ const project=(selectedAddress&&selectedAddress!=='Roof workspace'?{address:selectedAddress}:saved)||roofLocatedProperty;if(!project?.address)return;
  const ws=document.querySelector('#roof-geometry-workspace'),map=document.querySelector('#roof-workspace-map'),title=document.querySelector('#roof-workspace-address');
  if(title)title.textContent=project.address;
  if(ws)ws.hidden=false;
