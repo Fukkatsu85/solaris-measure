@@ -848,9 +848,47 @@ function rdp(points,eps){
  return[points[0],points[points.length-1]];
 }
 function simplifyClosedRoofPolygon(poly,eps=.008){
- if(poly.length<8)return poly;
+ if(poly.length<5)return poly;
  const open=poly.concat([poly[0]]),simple=rdp(open,eps);simple.pop();
- return simple.length>=6?simple:poly;
+ return simple.length>=4?simple:poly;
+}
+function roofCornerImportance(a,b,c){
+ const ab=Math.hypot(b.x-a.x,b.y-a.y),bc=Math.hypot(c.x-b.x,c.y-b.y);
+ const dev=pointLineDistance(b,a,c);
+ return dev*Math.min(ab,bc);
+}
+function pruneRoofContour(poly,maxPoints=14,minSpacing=.012){
+ let pts=[...poly];
+ // Remove near-duplicate / tiny edge points first.
+ let changed=true;
+ while(changed&&pts.length>4){
+  changed=false;
+  for(let i=0;i<pts.length;i++){
+   const a=pts[(i-1+pts.length)%pts.length],b=pts[i],c=pts[(i+1)%pts.length];
+   if(Math.hypot(b.x-a.x,b.y-a.y)<minSpacing||Math.hypot(c.x-b.x,c.y-b.y)<minSpacing){
+    pts.splice(i,1);changed=true;break;
+   }
+  }
+ }
+ // Keep the strongest architectural corners and discard weak curve/noise samples.
+ while(pts.length>maxPoints){
+  let remove=-1,best=Infinity;
+  for(let i=0;i<pts.length;i++){
+   const a=pts[(i-1+pts.length)%pts.length],b=pts[i],c=pts[(i+1)%pts.length];
+   const score=roofCornerImportance(a,b,c);
+   if(score<best){best=score;remove=i}
+  }
+  if(remove<0)break;
+  pts.splice(remove,1);
+ }
+ return pts;
+}
+function architecturalizeRoofContour(poly){
+ let pts=simplifyClosedRoofPolygon(poly,.0105);
+ pts=pruneRoofContour(pts,14,.010);
+ // One final simplification removes shallow bends left by radial sampling.
+ pts=simplifyClosedRoofPolygon(pts,.0135);
+ return pruneRoofContour(pts,12,.012);
 }
 async function buildRoofPixelContour(box){
  const img=document.querySelector('#mn-aerial-img');await roofImageReady(img);
@@ -860,7 +898,7 @@ async function buildRoofPixelContour(box){
  const lum=(x,y)=>{x=Math.max(0,Math.min(size-1,Math.round(x)));y=Math.max(0,Math.min(size-1,Math.round(y)));const i=(y*size+x)*4;return .2126*data[i]+.7152*data[i+1]+.0722*data[i+2]};
  const x1=Math.max(0,box.x1*size),y1=Math.max(0,box.y1*size),x2=Math.min(size,box.x2*size),y2=Math.min(size,box.y2*size);
  const cx=(x1+x2)/2,cy=(y1+y2)/2,bw=x2-x1,bh=y2-y1;
- const rayCount=40,pts=[];
+ const rayCount=28,pts=[];
  for(let i=0;i<rayCount;i++){
   const ang=-Math.PI/2+i*(Math.PI*2/rayCount),dx=Math.cos(ang),dy=Math.sin(ang);
   const tx=dx>0?(x2-cx)/dx:dx<0?(x1-cx)/dx:Infinity;
@@ -874,14 +912,15 @@ async function buildRoofPixelContour(box){
    const out2=(lum(cx+dx*(r+2)+tangentX*2,cy+dy*(r+2)+tangentY*2)+lum(cx+dx*(r+2)-tangentX*2,cy+dy*(r+2)-tangentY*2))/2;
    const contrast=Math.abs(outside-inside)+.6*Math.abs(out2-in2);
    const proximity=1-Math.min(1,Math.abs(r-expected)/(expected*.42||1));
-   const score=contrast*(.72+.28*proximity);
+   // Favor edges near the detected building envelope so trees/shadows do not
+   // pull the outline into a noisy rounded contour.
+   const score=contrast*(.45+.55*proximity);
    if(score>bestScore){bestScore=score;bestR=r}
   }
   pts.push({x:(cx+dx*bestR)/size,y:(cy+dy*bestR)/size});
  }
  const smooth=pts.map((p,i)=>{const a=pts[(i-1+pts.length)%pts.length],b=pts[(i+1)%pts.length];return{x:(a.x+2*p.x+b.x)/4,y:(a.y+2*p.y+b.y)/4}});
- let simple=simplifyClosedRoofPolygon(smooth,.0065);
- if(simple.length>24)simple=simplifyClosedRoofPolygon(smooth,.011);
+ const simple=architecturalizeRoofContour(smooth);
  return simple.map(p=>({x:Math.max(0,Math.min(1,p.x)),y:Math.max(0,Math.min(1,p.y))}));
 }
 
@@ -900,7 +939,7 @@ async function detectRoofAutomatically(){
   roofOutlineProposal={...d,polygon,pointCount:polygon.length,contourMethod:polygon===d.polygon?'ai-box-fallback':'pixel-edge-radial'};
   renderRoofOutline(polygon,false);
   document.querySelector('#accept-roof-outline').disabled=false;document.querySelector('#edit-roof-outline').disabled=false;document.querySelector('#redetect-roof').disabled=false;
-  if(status)status.textContent='Roof proposal detected with '+polygon.length+' reference points. Yellow outline requires review before measurements are used.';
+  if(status)status.textContent='Roof proposal detected with '+polygon.length+' primary corners. Yellow outline requires review before measurements are used.';
  }catch(err){if(status)status.textContent='Automatic roof detection could not produce a usable proposal: '+err.message}
  finally{if(btn)btn.disabled=false}
 }
