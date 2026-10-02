@@ -1251,6 +1251,18 @@ async function generateRoofReport(){
   const sloped=facets.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0),squares=sloped/100,avgPitch=facets.length?facets.reduce((s,p)=>s+Number(p.pitch12||0),0)/facets.length:0,lines=roofLineTotals(d);
   const waste=[10,12,15].map(w=>({w,area:sloped*(1+w/100),sq:squares*(1+w/100)}));
   const facetRows=facets.map((p,i)=>'<tr><td>F'+(i+1)+'</td><td>'+Number(p.pitch12).toFixed(1)+'/12</td><td>'+Number(p.slopeDeg).toFixed(1)+'°</td><td>'+Math.round(Number(p.planAreaFt2||0)).toLocaleString()+'</td><td>'+Math.round(Number(p.slopedAreaFt2||0)).toLocaleString()+'</td><td>'+Number(p.rmse||0).toFixed(2)+' m</td></tr>').join('');
+  const v=d.validation||{};
+  const validationBlock=v.available
+   ?('<h2>Hybrid Validation</h2><table class="roof-report-table"><tbody>'+
+     '<tr><th>Google Solar whole-roof area</th><td>'+(Number.isFinite(Number(v.googleWholeRoofAreaFt2))?Math.round(Number(v.googleWholeRoofAreaFt2)).toLocaleString()+' ft²':'—')+'</td></tr>'+
+     '<tr><th>Solaris LiDAR/report area</th><td>'+Math.round(sloped).toLocaleString()+' ft²</td></tr>'+
+     '<tr><th>Area difference</th><td>'+(Number.isFinite(Number(v.areaDifferencePct))?Number(v.areaDifferencePct).toFixed(1)+'%':'—')+'</td></tr>'+
+     '<tr><th>Google weighted pitch</th><td>'+(Number.isFinite(Number(v.googleWeightedPitchDeg))?Number(v.googleWeightedPitchDeg).toFixed(1)+'°':'—')+'</td></tr>'+
+     '<tr><th>LiDAR weighted pitch</th><td>'+(Number.isFinite(Number(v.lidarWeightedPitchDeg))?Number(v.lidarWeightedPitchDeg).toFixed(1)+'°':'—')+'</td></tr>'+
+     '<tr><th>Facet count</th><td>LiDAR '+Number(v.lidarFacetCount||0)+' · Google '+Number(v.googleFacetCount||0)+'</td></tr>'+
+     '</tbody></table>'+
+     (Array.isArray(v.warnings)&&v.warnings.length?'<div class="analysis-state"><strong>Review warnings</strong><br>'+v.warnings.map(escRoof).join('<br>')+'</div>':'<div class="analysis-state"><strong>Cross-check passed</strong><br>No material Google Solar / LiDAR disagreement was detected by the current thresholds.</div>'))
+   :('<h2>Hybrid Validation</h2><div class="analysis-state">Google Solar cross-check unavailable'+(v.error?': '+escRoof(v.error):'.')+'</div>');
   content.innerHTML='<div class="roof-report-sheet">'+
    '<div class="roof-report-head"><div><div class="roof-report-brand">SOLARIS ROOFING</div><h1>Roof Measurement Report</h1><p>'+escRoof(d.outline.address||saved.address||'')+'</p></div><div style="text-align:right"><strong>Solaris Measure</strong><br><span>Generated '+new Date().toLocaleDateString()+'</span><br><span>LiDAR + aerial verified geometry</span></div></div>'+
    '<div class="roof-report-grid"><div class="roof-report-stat"><span>Plan area</span><strong>'+Math.round(plan).toLocaleString()+' ft²</strong></div><div class="roof-report-stat"><span>Sloped roof area</span><strong>'+Math.round(sloped).toLocaleString()+' ft²</strong></div><div class="roof-report-stat"><span>Roofing squares</span><strong>'+squares.toFixed(2)+'</strong></div><div class="roof-report-stat"><span>Roof perimeter</span><strong>'+perim.toFixed(1)+' ft</strong></div><div class="roof-report-stat"><span>Facets</span><strong>'+facets.length+'</strong></div><div class="roof-report-stat"><span>Average pitch</span><strong>'+avgPitch.toFixed(1)+'/12</strong></div><div class="roof-report-stat"><span>Ridge</span><strong>'+(lines.ridge?lines.ridge.toFixed(1)+' ft':'Not verified')+'</strong></div><div class="roof-report-stat"><span>Valley</span><strong>'+(lines.valley?lines.valley.toFixed(1)+' ft':'Not verified')+'</strong></div></div>'+
@@ -1258,7 +1270,8 @@ async function generateRoofReport(){
    '<h2>Facet Measurements</h2><table class="roof-report-table"><thead><tr><th>Facet</th><th>Pitch</th><th>Slope</th><th>Plan ft²</th><th>Sloped ft²</th><th>Plane RMSE</th></tr></thead><tbody>'+facetRows+'</tbody></table>'+
    '<h2>Linear Measurements</h2><table class="roof-report-table"><tbody><tr><th>Roof perimeter</th><td>'+perim.toFixed(1)+' ft</td></tr><tr><th>Ridge</th><td>'+(lines.ridge?lines.ridge.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Hip</th><td>'+(lines.hip?lines.hip.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Valley</th><td>'+(lines.valley?lines.valley.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Eave / rake split</th><td>Not yet classified</td></tr></tbody></table>'+
    '<h2>Waste / Ordering Area</h2><table class="roof-report-table"><thead><tr><th>Waste</th><th>Order area</th><th>Squares</th></tr></thead><tbody><tr><td>0%</td><td>'+Math.round(sloped).toLocaleString()+' ft²</td><td>'+squares.toFixed(2)+'</td></tr>'+waste.map(x=>'<tr><td>'+x.w+'%</td><td>'+Math.round(x.area).toLocaleString()+' ft²</td><td>'+x.sq.toFixed(2)+'</td></tr>').join('')+'</tbody></table>'+
-   '<p class="roof-report-note">Measurements are derived from the accepted aerial roof outline and accepted USGS 3DEP LiDAR plane fits. Internal line totals appear only when reviewed roof geometry has been saved. Eave/rake classification and product-specific material quantities remain pending verification.</p></div>';
+   validationBlock+
+   '<p class="roof-report-note">Primary measurements are derived from the accepted aerial roof outline and accepted USGS 3DEP LiDAR plane fits. When Google Solar data is available, it is shown as an independent cross-check rather than silently replacing the reviewed Solaris geometry. Internal line totals appear only when reviewed roof geometry has been saved.</p></div>';
   if(panel){panel.hidden=false;panel.scrollIntoView({behavior:'smooth',block:'start'});}
   if(state)state.textContent='Roof measurement report ready.';
  }catch(err){if(state)state.textContent='Could not build roof report: '+err.message}
