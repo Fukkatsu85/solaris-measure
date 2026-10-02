@@ -633,6 +633,28 @@ async function getRoofMapsKey(){
  if(!r.ok||!d.key)throw new Error(d.error||'Google Maps key is not configured.');
  roofMapsKey=d.key;return roofMapsKey;
 }
+const roofAddressInput=document.querySelector('#roof-address');
+roofAddressInput?.addEventListener('focus',()=>roofAddressInput.select());
+roofAddressInput?.addEventListener('click',()=>{if(document.activeElement===roofAddressInput)roofAddressInput.select();});
+let roofAutocompleteReady=false;
+async function initRoofAddressAutocomplete(){
+ if(roofAutocompleteReady||!roofAddressInput)return;
+ try{
+  const key=await getRoofMapsKey();
+  if(!window.google?.maps?.places){
+   await new Promise((resolve,reject)=>{
+    const s=document.createElement('script');s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&libraries=places&v=weekly';
+    s.async=true;s.onload=resolve;s.onerror=()=>reject(new Error('Google Places could not load.'));document.head.appendChild(s);
+   });
+  }
+  if(window.google?.maps?.places?.Autocomplete){
+   const ac=new google.maps.places.Autocomplete(roofAddressInput,{fields:['formatted_address','geometry'],types:['address'],componentRestrictions:{country:'us'}});
+   ac.addListener('place_changed',()=>{const p=ac.getPlace();if(p?.formatted_address)roofAddressInput.value=p.formatted_address;});
+   roofAutocompleteReady=true;
+  }
+ }catch(err){console.warn('Roof address autocomplete unavailable:',err);}
+}
+roofAddressInput?.addEventListener('focus',initRoofAddressAutocomplete,{once:true});
 document.querySelector('#roof-address')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();document.querySelector('#locate-roof')?.click();}});
 document.querySelector('#locate-roof')?.addEventListener('click',async()=>{
  const address=document.querySelector('#roof-address')?.value.trim();if(!address){alert('Enter a property address first.');return;}
