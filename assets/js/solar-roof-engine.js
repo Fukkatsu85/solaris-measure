@@ -931,6 +931,29 @@ function buildRoofMeasurements(outline,facets=[],roofLines=[]){
   };
 }
 
+function dedupeRoofLines(lines=[]){
+  const kept=[];
+  for(const line of [...lines].sort((a,b)=>Number(b.lengthMeters||0)-Number(a.lengthMeters||0))){
+    if(!["ridge","hip","valley"].includes(line.type)){kept.push(line);continue}
+    let duplicate=false;
+    for(let i=0;i<kept.length;i++){
+      const k=kept[i];
+      if(k.type!==line.type||!k.a||!k.b||!line.a||!line.b)continue;
+      const da=pointSegmentDistanceMetersLL(line.a,k.a,k.b);
+      const db=pointSegmentDistanceMetersLL(line.b,k.a,k.b);
+      // If both endpoints of the shorter line sit on the longer line, it is the same boundary.
+      if(da<=.75&&db<=.75){duplicate=true;break}
+      const ka=pointSegmentDistanceMetersLL(k.a,line.a,line.b);
+      const kb=pointSegmentDistanceMetersLL(k.b,line.a,line.b);
+      if(ka<=.75&&kb<=.75){
+        kept[i]=line;duplicate=true;break;
+      }
+    }
+    if(!duplicate)kept.push(line);
+  }
+  return kept.sort((a,b)=>Number(b.lengthMeters||0)-Number(a.lengthMeters||0));
+}
+
 function extractSharedRoofLines(mask,component,labels,candidates,dsm){
   const pairs=new Map();
   const add=(a,b,x,y)=>{
@@ -974,7 +997,7 @@ function extractSharedRoofLines(mask,component,labels,candidates,dsm){
       creaseStrength:classified.creaseStrength||0
     });
   });
-  return lines.sort((a,b)=>b.lengthMeters-a.lengthMeters);
+  return dedupeRoofLines(lines);
 }
 
 function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
