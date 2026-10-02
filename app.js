@@ -652,26 +652,35 @@ async function loadRoofMapsJs(){
  })();
  return roofMapsScriptPromise;
 }
-async function showRoofLocator(address,lat,lng){
- await loadRoofMapsJs();
+async function showRoofLocator(address,lat,lng,imageryUrl,cropHalfMeters=42){
  const mapEl=document.querySelector('#roof-map');
  if(!mapEl)throw new Error('Roof map container is missing.');
- mapEl.innerHTML='';
- const {Map}=await google.maps.importLibrary('maps');
- const {AdvancedMarkerElement}=await google.maps.importLibrary('marker');
- roofLocatorMap=new Map(mapEl,{center:{lat,lng},zoom:20,mapTypeId:'satellite',mapId:'DEMO_MAP_ID',streetViewControl:false,mapTypeControl:true,fullscreenControl:true});
- roofLocatorMarker=new AdvancedMarkerElement({map:roofLocatorMap,position:{lat,lng},title:'Drag onto the exact roof',gmpDraggable:true});
- const update=()=>{
-  const p=roofLocatorMarker.position;
-  const plat=typeof p?.lat==='function'?p.lat():Number(p?.lat),plng=typeof p?.lng==='function'?p.lng():Number(p?.lng);
-  if(Number.isFinite(plat)&&Number.isFinite(plng)){
-   roofLocatedProperty={address,lat:plat,lng:plng,locationSource:'corrected-pin'};
-   const status=document.querySelector('#roof-location-status');
-   if(status)status.textContent='Pin location: '+plat.toFixed(6)+', '+plng.toFixed(6)+' · drag the pin onto the center of the exact roof, then Use This Location.';
-  }
+ const half=Number(cropHalfMeters)||42;
+ const R=6378137;
+ const mx=R*lng*Math.PI/180,my=R*Math.log(Math.tan(Math.PI/4+lat*Math.PI/360));
+ const mercToLatLng=(x,y)=>({lng:x/R*180/Math.PI,lat:(2*Math.atan(Math.exp(y/R))-Math.PI/2)*180/Math.PI});
+ const normToLatLng=(nx,ny)=>mercToLatLng(mx+(nx-.5)*half*2,my+(.5-ny)*half*2);
+ mapEl.innerHTML='<div id="roof-pin-stage" style="position:relative;width:100%;aspect-ratio:1/1;background:#111;overflow:hidden;touch-action:none;cursor:crosshair">'+
+   '<img src="'+imageryUrl+'" alt="Aerial image for roof location" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;user-select:none;pointer-events:none">'+
+   '<div id="roof-draggable-pin" title="Drag onto the exact roof" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-100%);font-size:38px;line-height:1;cursor:grab;filter:drop-shadow(0 2px 3px rgba(0,0,0,.55));user-select:none">📍</div>'+
+   '</div>';
+ const stage=mapEl.querySelector('#roof-pin-stage'),pin=mapEl.querySelector('#roof-draggable-pin');
+ let dragging=false,nx=.5,ny=.5;
+ const setFromEvent=e=>{
+  const r=stage.getBoundingClientRect();
+  nx=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));ny=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height));
+  pin.style.left=(nx*100)+'%';pin.style.top=(ny*100)+'%';
+  const p=normToLatLng(nx,ny);
+  roofLocatedProperty={address,lat:p.lat,lng:p.lng,locationSource:'corrected-pin'};
+  const status=document.querySelector('#roof-location-status');
+  if(status)status.textContent='Pin location: '+p.lat.toFixed(6)+', '+p.lng.toFixed(6)+' · drag or click the exact roof, then Use This Location.';
  };
- roofLocatorMarker.addEventListener('gmp-dragend',update);
- update();
+ stage.addEventListener('pointerdown',e=>{dragging=true;stage.setPointerCapture?.(e.pointerId);pin.style.cursor='grabbing';setFromEvent(e)});
+ stage.addEventListener('pointermove',e=>{if(dragging)setFromEvent(e)});
+ stage.addEventListener('pointerup',e=>{dragging=false;pin.style.cursor='grab';stage.releasePointerCapture?.(e.pointerId)});
+ roofLocatedProperty={address,lat,lng,locationSource:'address-geocode'};
+ const status=document.querySelector('#roof-location-status');
+ if(status)status.textContent='Property located. Drag or click the pin onto the exact roof, then click Use This Location.';
 }
 
 const roofAddressInput=document.querySelector('#roof-address');
@@ -691,17 +700,12 @@ document.querySelector('#locate-roof')?.addEventListener('click',async()=>{
  const status=document.querySelector('#roof-location-status'),confirm=document.querySelector('#confirm-roof-property'),btn=document.querySelector('#locate-roof');
  if(btn)btn.disabled=true;if(confirm)confirm.disabled=true;if(status)status.textContent='Locating '+address+'…';
  try{
-  await loadRoofMapsJs();
-  const {Geocoder}=await google.maps.importLibrary('geocoding');
-  const geocoder=new Geocoder();
-  const result=await geocoder.geocode({address});
-  const hit=result?.results?.[0];
-  const loc=hit?.geometry?.location;
-  const lat=typeof loc?.lat==='function'?loc.lat():Number(loc?.lat),lng=typeof loc?.lng==='function'?loc.lng():Number(loc?.lng);
+  const r=await fetch('/api/mn-aerial?address='+encodeURIComponent(address)),d=await r.json();
+  if(!r.ok)throw new Error(d.error||'Address could not be located.');
+  const lat=Number(d.lat),lng=Number(d.lng);
   if(!Number.isFinite(lat)||!Number.isFinite(lng))throw new Error('Address could not be located.');
-  roofLocatedProperty={address,lat,lng,locationSource:'browser-geocode'};
-  await showRoofLocator(address,lat,lng);
-  if(status)status.textContent='Property located. Drag the pin onto the exact roof if needed, then click Use This Location.';
+  roofLocatedProperty={address,lat,lng,locationSource:d.locationSource||'address-geocode'};
+  await showRoofLocator(address,lat,lng,d.imageryUrl,d.cropHalfMeters||42);
   if(confirm)confirm.disabled=false;
  }catch(err){
   roofLocatedProperty=null;if(confirm)confirm.disabled=true;
