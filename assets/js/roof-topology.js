@@ -67,7 +67,7 @@ function infiniteLineThroughMid(a,b,angle){
   return {a:{x:m.x-dx*1000,y:m.y-dy*1000},b:{x:m.x+dx*1000,y:m.y+dy*1000}};
 }
 function regularizePerimeter(poly){
-  let pts=simplifyPoly(poly,.65,.22);
+  let pts=simplifyPoly(poly,.28,.10);
   if(pts.length<3)return pts;
   let longest={len:0,ang:0};
   for(let i=0;i<pts.length;i++){
@@ -77,7 +77,7 @@ function regularizePerimeter(poly){
   const base=longest.ang,families=[base,(base+90)%180,(base+45)%180,(base+135)%180];
   const lines=[];
   for(let i=0;i<pts.length;i++){
-    const a=pts[i],b=pts[(i+1)%pts.length],snap=snapAngle(angle180(a,b),families,16);
+    const a=pts[i],b=pts[(i+1)%pts.length],snap=snapAngle(angle180(a,b),families,12);
     lines.push(infiniteLineThroughMid(a,b,snap.angle));
   }
   const rebuilt=[];
@@ -85,7 +85,7 @@ function regularizePerimeter(poly){
     const prev=lines[(i-1+lines.length)%lines.length],cur=lines[i],hit=lineIntersection(prev.a,prev.b,cur.a,cur.b),ref=pts[i];
     rebuilt.push(hit&&dist(hit,ref)<4?{x:hit.x,y:hit.y}:ref);
   }
-  return simplifyPoly(rebuilt,.7,.16);
+  return simplifyPoly(rebuilt,.32,.10);
 }
 function nearestPointOnPerimeter(p,poly){
   let best={distance:Infinity,point:null,edge:-1};
@@ -399,8 +399,8 @@ export function buildRoofTopology(solarModel){
     lengthMeters:dist(graph.nodes[e.a],graph.nodes[e.b])
   }));
   return {
-    version:2.4,
-    source:"architectural-planar-topology-paired-candidates",
+    version:2.5,
+    source:"architectural-planar-topology-detailed-perimeter",
     dominantAngle:longest.ang,
     vertices,edges,faces,
     outline:perimeter.map(F.toLL),
