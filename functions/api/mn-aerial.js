@@ -21,15 +21,36 @@ export async function onRequestGet({request,env}){
  const qLat=Number(url.searchParams.get("lat")),qLng=Number(url.searchParams.get("lng"));
  const hasCoords=Number.isFinite(qLat)&&Number.isFinite(qLng);
  if(!address&&!hasCoords)return Response.json({error:"address or lat/lng is required"},{status:400});
- const key=env.GOOGLE_MAPS_BACKEND_KEY||env.GOOGLE_MAPS_API_KEY;if(!key)return Response.json({error:"Google backend/geocoding key is not configured."},{status:500});
- const g=new URL("https://maps.googleapis.com/maps/api/geocode/json");
- if(hasCoords)g.searchParams.set("latlng",qLat+","+qLng);else g.searchParams.set("address",address);
- g.searchParams.set("key",key);
- const gr=await fetch(g),geo=await gr.json(),hit=geo?.results?.[0];
- if(!gr.ok||geo.status!=="OK"||!hit){
-  const msg=geo?.error_message||("Location could not be geocoded"+(geo?.status?" ("+geo.status+")":"")+".");
-  return Response.json({error:msg,status:geo?.status},{status:422});
+ let hit=null,geoStatus=null,geoError=null;
+ if(hasCoords){
+  const key=env.GOOGLE_MAPS_BACKEND_KEY||env.GOOGLE_MAPS_API_KEY||"";
+  if(key){
+   const g=new URL("https://maps.googleapis.com/maps/api/geocode/json");
+   g.searchParams.set("latlng",qLat+","+qLng);g.searchParams.set("key",key);
+   try{const gr=await fetch(g),geo=await gr.json();geoStatus=geo?.status;geoError=geo?.error_message||null;if(gr.ok&&geo.status==="OK")hit=geo?.results?.[0]||null}catch{}
+  }
+ }else{
+  const key=env.GOOGLE_MAPS_BACKEND_KEY||env.GOOGLE_MAPS_API_KEY||"";
+  if(key){
+   const g=new URL("https://maps.googleapis.com/maps/api/geocode/json");
+   g.searchParams.set("address",address);g.searchParams.set("key",key);
+   try{const gr=await fetch(g),geo=await gr.json();geoStatus=geo?.status;geoError=geo?.error_message||null;if(gr.ok&&geo.status==="OK")hit=geo?.results?.[0]||null}catch{}
+  }
+  if(!hit){
+   // U.S. Census geocoder fallback keeps property lookup working even if Google key restrictions change.
+   const cg=new URL("https://geocoding.geo.census.gov/geocoder/locations/onelineaddress");
+   cg.searchParams.set("address",address);cg.searchParams.set("benchmark","Public_AR_Current");cg.searchParams.set("format","json");
+   try{
+    const cr=await fetch(cg,{headers:{"User-Agent":"SolarisMeasure/1.0"}});
+    const cd=await cr.json(),m=cd?.result?.addressMatches?.[0],xy=m?.coordinates;
+    if(cr.ok&&Number.isFinite(Number(xy?.y))&&Number.isFinite(Number(xy?.x))){
+      hit={geometry:{location:{lat:Number(xy.y),lng:Number(xy.x)}},formatted_address:m.matchedAddress||address,address_components:[]};
+      geoStatus="CENSUS_OK";
+    }
+   }catch{}
+  }
  }
+ if(!hit&&!hasCoords)return Response.json({error:geoError||("Location could not be geocoded"+(geoStatus?" ("+geoStatus+")":"")+".")},{status:422});
  const lat=hasCoords?qLat:hit.geometry?.location?.lat,lng=hasCoords?qLng:hit.geometry?.location?.lng;
  if(!Number.isFinite(lat)||!Number.isFinite(lng))return Response.json({error:"Geocoder did not return coordinates."},{status:422});
  const county=hit.address_components?.find(c=>c.types?.includes("administrative_area_level_2"))?.long_name||"";
