@@ -698,7 +698,7 @@ async function openRoofGeometryWorkspace(){
   if(!ar.ok)throw new Error(ad.error||'Aerial imagery lookup failed.');
   project.lat=ad.lat;project.lng=ad.lng;project.formattedAddress=ad.address;project.imagerySource=ad.source;
   localStorage.setItem('solarisRoofProject',JSON.stringify({...JSON.parse(localStorage.getItem('solarisRoofProject')||'{}'),...project}));
-  if(aerialWrap)aerialWrap.innerHTML='<img src="'+ad.imageryUrl+'" alt="MnGeo aerial image of selected roof" style="display:block;width:100%;height:auto;max-height:720px;object-fit:contain;background:#111">';
+  if(aerialWrap)aerialWrap.innerHTML='<img id="mn-aerial-img" src="'+ad.imageryUrl+'" alt="MnGeo aerial image of selected roof" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#111"><svg id="roof-outline-overlay" viewBox="0 0 1000 1000" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></svg>';
   if(aerialStatus)aerialStatus.textContent='Analysis imagery loaded from '+ad.source+' at '+ad.lat.toFixed(6)+', '+ad.lng.toFixed(6)+'.';
   if(aerialBadge)aerialBadge.textContent='Ready';
  }catch(err){
@@ -717,4 +717,31 @@ document.querySelector('#change-roof-property')?.addEventListener('click',()=>{
  roofLocatedProperty=null;const ws=document.querySelector('#roof-selected-workspace');if(ws)ws.hidden=true;
  const confirm=document.querySelector('#confirm-roof-property');if(confirm){confirm.disabled=true;confirm.textContent='Use This Property';}
  document.querySelector('#roof-address')?.focus();document.querySelector('#roof-map')?.scrollIntoView({behavior:'smooth',block:'center'});
+});
+
+let roofOutlineProposal=null;
+function renderRoofOutline(poly,accepted=false){
+ const svg=document.querySelector('#roof-outline-overlay');if(!svg||!poly?.length)return;
+ const pts=poly.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ');
+ svg.innerHTML='<polygon points="'+pts+'" fill="'+(accepted?'rgba(34,197,94,.20)':'rgba(250,204,21,.22)')+'" stroke="'+(accepted?'#22c55e':'#facc15')+'" stroke-width="7" vector-effect="non-scaling-stroke"/>'+poly.map(p=>'<circle cx="'+(p.x*1000)+'" cy="'+(p.y*1000)+'" r="10" fill="#fff" stroke="#111" stroke-width="4"/>').join('');
+}
+async function detectRoofAutomatically(){
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null'),btn=document.querySelector('#detect-roof'),status=document.querySelector('#mn-aerial-status');
+ if(!saved?.lat||!saved?.lng){if(status)status.textContent='Property coordinates are not ready yet.';return}
+ if(btn)btn.disabled=true;if(status)status.textContent='AI is detecting the roof on the MnGeo aerial image…';
+ try{
+  const r=await fetch('/api/roof-detect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({lat:saved.lat,lng:saved.lng,address:saved.address})}),d=await r.json();
+  if(!r.ok||!d.ok)throw new Error(d.error||'Roof detection failed.');
+  roofOutlineProposal=d;renderRoofOutline(d.polygon,false);
+  document.querySelector('#accept-roof-outline').disabled=false;document.querySelector('#redetect-roof').disabled=false;
+  if(status)status.textContent='Roof proposal detected. Yellow outline requires review before measurements are used.';
+ }catch(err){if(status)status.textContent='Automatic roof detection could not produce a usable proposal: '+err.message}
+ finally{if(btn)btn.disabled=false}
+}
+document.querySelector('#detect-roof')?.addEventListener('click',detectRoofAutomatically);
+document.querySelector('#redetect-roof')?.addEventListener('click',detectRoofAutomatically);
+document.querySelector('#accept-roof-outline')?.addEventListener('click',()=>{
+ if(!roofOutlineProposal)return;renderRoofOutline(roofOutlineProposal.polygon,true);
+ const status=document.querySelector('#mn-aerial-status');if(status)status.textContent='Roof outline accepted ✓. Next: editable control points and roof facet detection.';
+ document.querySelector('#accept-roof-outline').disabled=true;
 });
