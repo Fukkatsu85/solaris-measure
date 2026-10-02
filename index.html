@@ -50,6 +50,12 @@
         <article class="card"><div class="eyebrow">STEP 2</div><h3>Roof geometry</h3><p class="muted">Map facets, ridges, hips, valleys, rakes and eaves.</p><button class="secondary" id="roof-geometry" disabled>Build Roof Geometry</button></article>
         <article class="card"><div class="eyebrow">STEP 3</div><h3>Roof takeoff</h3><p class="muted">Calculate roof area, squares, waste and linear materials.</p><button class="secondary" id="roof-takeoff" disabled>Generate Roof Takeoff</button></article>
       </div>
+      <section id="roof-geometry-workspace" class="card" hidden style="margin-top:16px">
+        <div class="card-head"><div><div class="eyebrow">ROOF GEOMETRY WORKSPACE</div><h3 id="roof-workspace-address">Selected roof</h3><p class="muted">Trace the roof directly over the satellite reference. Geometry tools are the next measurement layer.</p></div><span class="status">Active</span></div>
+        <div id="roof-workspace-map" style="min-height:560px;border-radius:14px;overflow:hidden;background:#e5e7eb;margin-top:12px"></div>
+        <div class="actions" style="margin-top:12px"><button id="roof-outline-tool" class="primary" type="button">Roof Outline</button><button class="secondary" type="button" disabled>Ridge</button><button class="secondary" type="button" disabled>Hip</button><button class="secondary" type="button" disabled>Valley</button><button class="secondary" type="button" disabled>Pitch</button></div>
+        <p class="muted" id="roof-workspace-status">Satellite workspace loaded. Roof drawing controls are being enabled in stages.</p>
+      </section>
       <div id="roof-gallery" class="photo-gallery"></div>
     </section>
     <div id="siding-tool">
@@ -186,6 +192,6 @@
     </div>
   </main>
 
-  <script src="/app.js?v=20261001-address-unfreeze1"></script>
+  <script src="/app.js?v=20261001-roofworkspace1"></script>
 </body>
 </html>
