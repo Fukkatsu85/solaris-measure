@@ -756,6 +756,7 @@ async function openRoofGeometryWorkspace(){
   if(aerialStatus)aerialStatus.textContent='Analysis imagery loaded: '+ad.imageryLabel+' ('+ad.resolution+') · '+ad.county+' · '+ad.lat.toFixed(6)+', '+ad.lng.toFixed(6)+'.';
   if(aerialBadge)aerialBadge.textContent='Ready';
   setTimeout(()=>findRoofLidar().catch(()=>{}),250);
+  setTimeout(()=>restoreRoofReportReadyState().catch(()=>{}),350);
  }catch(err){
   if(aerialWrap)aerialWrap.innerHTML='<div style="padding:28px;text-align:center"><strong>Analysis imagery unavailable</strong><p class="muted">'+err.message+'</p></div>';
   if(aerialStatus)aerialStatus.textContent='If Google reports an API error, enable Geocoding API for the Solaris Measure key.';
@@ -1265,3 +1266,19 @@ async function generateRoofReport(){
 document.querySelector('#roof-takeoff')?.addEventListener('click',generateRoofReport);
 document.querySelector('#print-roof-report')?.addEventListener('click',()=>window.print());
 document.querySelector('#close-roof-report')?.addEventListener('click',()=>{const p=document.querySelector('#roof-report-panel');if(p)p.hidden=true});
+
+async function restoreRoofReportReadyState(){
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
+ if(!Number.isFinite(Number(saved.lat))||!Number.isFinite(Number(saved.lng)))return;
+ const projectId=saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
+ const r=await fetch('/api/roof-report?projectId='+encodeURIComponent(projectId));if(!r.ok)return;
+ const d=await r.json();if(!d.ok)return;
+ const facets=(d.planes?.planes||[]).filter(p=>p.accepted);
+ if(!facets.length)return;
+ const takeoff=document.querySelector('#roof-takeoff');if(takeoff)takeoff.disabled=false;
+ const fc=document.querySelector('#roof-facets'),pit=document.querySelector('#roof-pitch'),sq=document.querySelector('#roof-squares'),area=document.querySelector('#roof-area'),per=document.querySelector('#roof-perimeter');
+ const sloped=facets.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0),avg=facets.reduce((s,p)=>s+Number(p.pitch12||0),0)/facets.length;
+ if(fc)fc.textContent=facets.length;if(pit)pit.textContent=avg.toFixed(1)+'/12 avg';if(sq&&sloped>0)sq.textContent=(sloped/100).toFixed(2)+' sq';
+ if(area&&d.outline?.measurement?.planAreaFt2)area.textContent=Math.round(d.outline.measurement.planAreaFt2).toLocaleString()+' ft²';
+ if(per&&d.outline?.measurement?.perimeterFt)per.textContent=Number(d.outline.measurement.perimeterFt).toFixed(1)+' ft';
+}
