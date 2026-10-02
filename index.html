@@ -149,6 +149,26 @@
         </div>
         <div id="roof-benchmark-result" class="analysis-state" style="margin-top:10px">Generate the Solaris report, then enter the verified reference values here.</div>
       </section>
+      <section id="roof-training-lab" class="card no-print" style="margin-top:16px">
+        <div class="card-head">
+          <div>
+            <div class="eyebrow">SOLARIS TRAINING LAB</div>
+            <h3>24-roof regression suite</h3>
+            <p class="muted">Runs the current roof solver against every verified Roofr, Hover and EagleView case already in the training corpus. Cases without a saved Solaris DSM model are shown as pending instead of being silently ignored.</p>
+          </div>
+          <div class="actions"><button id="run-roof-regression" class="primary" type="button">Run Regression</button></div>
+        </div>
+        <div id="roof-regression-summary" class="metrics" style="grid-template-columns:repeat(auto-fit,minmax(145px,1fr));margin-top:12px">
+          <div class="metric"><span>Training cases</span><strong>24</strong></div>
+          <div class="metric"><span>Processed</span><strong>—</strong></div>
+          <div class="metric"><span>Average score</span><strong>—</strong></div>
+          <div class="metric"><span>Area error</span><strong>—</strong></div>
+          <div class="metric"><span>Facet error</span><strong>—</strong></div>
+          <div class="metric"><span>Roof-line error</span><strong>—</strong></div>
+        </div>
+        <div id="roof-regression-status" class="analysis-state" style="margin-top:12px">Ready to test the current learned solver against the verified training corpus.</div>
+        <div id="roof-regression-results" class="table-wrap" style="margin-top:12px"></div>
+      </section>
       <div id="roof-gallery" class="photo-gallery"></div>
     </section>
     <div id="siding-tool">
@@ -285,6 +305,6 @@
     </div>
   </main>
 
-  <script src="/app.js?v=20261002-training-r24"></script>
+  <script src="/app.js?v=20261002-regression-lab1"></script>
 </body>
 </html>
