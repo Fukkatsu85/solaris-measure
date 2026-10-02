@@ -54,14 +54,25 @@
       <section id="roof-geometry-workspace" class="card" hidden style="margin-top:16px">
         <div class="card-head"><div><div class="eyebrow">ROOF GEOMETRY WORKSPACE</div><h3 id="roof-workspace-address">Selected roof</h3><p class="muted">Trace the roof directly over the satellite reference. Geometry tools are the next measurement layer.</p></div><span class="status">Active</span></div>
         <div id="roof-workspace-map" style="min-height:560px;border-radius:14px;overflow:hidden;background:#e5e7eb;margin-top:12px"></div>
+        <div class="card" id="roof-simple-workflow" style="margin-top:12px">
+          <div class="card-head"><div><div class="eyebrow">ROOF WORKFLOW</div><h3>Process this roof</h3><p class="muted">One guided workflow runs roof detection, Google DSM, LiDAR extraction and plane fitting. Review the outline once, then Solaris handles the technical steps.</p></div><span id="roof-process-badge" class="status">Ready</span></div>
+          <div class="actions">
+            <button id="process-roof-all" class="primary" type="button">Process Roof</button>
+            <button id="approve-roof-analysis" class="secondary" type="button" disabled>Approve Measurements</button>
+            <button id="roof-report-main" class="primary" type="button" disabled>Generate Roof Measurement Report</button>
+          </div>
+          <div id="roof-process-status" class="analysis-state" style="margin-top:10px">Click Process Roof. Solaris will stop only when it needs you to confirm the detected roof outline.</div>
+        </div>
         <div class="card" style="margin-top:12px">
           <div class="card-head"><div><div class="eyebrow">ANALYSIS IMAGERY</div><h3>MnGeo aerial roof image</h3><p class="muted">Independent Minnesota aerial imagery used for roof analysis. Google remains the locator/reference map.</p></div><span id="mn-aerial-badge" class="status">Loading</span></div>
           <div id="mn-aerial-wrap" style="position:relative;aspect-ratio:1/1;border-radius:14px;overflow:hidden;background:#e5e7eb;display:grid;place-items:center"><span class="muted">Loading Minnesota aerial imagery…</span></div>
-          <div class="actions" style="margin-top:12px"><button id="detect-roof" class="primary" type="button">Detect Roof Automatically</button><button id="accept-roof-outline" class="secondary" type="button" disabled>Accept Outline</button><button id="edit-roof-outline" class="secondary" type="button" disabled>Edit Points</button><button id="redetect-roof" class="secondary" type="button" disabled>Redetect</button></div>
+          <div class="actions" style="margin-top:12px"><button id="detect-roof" class="primary" type="button">Detect Roof Automatically</button><button id="accept-roof-outline" class="secondary" type="button" disabled>Confirm Roof Outline</button><button id="edit-roof-outline" class="secondary" type="button" disabled>Edit Points</button><button id="redetect-roof" class="secondary" type="button" disabled>Redetect</button></div>
           <p class="muted" id="mn-aerial-status">Resolving property coordinates…</p>
         </div>
         <div class="actions" style="margin-top:12px"><button id="roof-outline-tool" class="primary" type="button">Roof Outline</button><button id="detect-roof-lines" class="secondary" type="button">Detect Internal Roof Lines</button></div>
         <p class="muted" id="roof-workspace-status">Accept the roof outline first, then detect and classify internal roof geometry.</p>
+        <details id="roof-advanced-tools" style="margin-top:12px">
+          <summary style="cursor:pointer;font-weight:700;padding:12px 0">Advanced / Troubleshooting</summary>
         <div id="roof-lidar-panel" class="card" style="margin-top:12px">
           <div class="card-head"><div><div class="eyebrow">3D ROOF SOURCE</div><h3>USGS 3DEP LiDAR</h3><p class="muted">Find the point-cloud acquisition covering this roof. This will replace image-only guesses for facets and pitch.</p></div><span id="roof-lidar-badge" class="status">Not checked</span></div>
           <div class="actions"><button id="find-roof-lidar" class="secondary" type="button">Find LiDAR for This Roof</button><button id="extract-roof-lidar" class="secondary" type="button" disabled>Extract Roof LiDAR</button><button id="decode-roof-lidar" class="primary" type="button" disabled>Decode Roof Points</button></div>
@@ -74,7 +85,7 @@
           </div>
           <div id="roof-plane-panel" class="card" hidden style="margin-top:12px">
             <div class="card-head"><div><div class="eyebrow">LIDAR ROOF PLANES</div><h3>Facet proposals</h3><p class="muted">Fit planar roof surfaces from the decoded 3D points, then review before using them for pitch or takeoff.</p></div><span id="roof-plane-count" class="status">0 facets</span></div>
-            <div class="actions"><button id="fit-roof-planes" class="primary" type="button">Fit Roof Planes</button><button id="accept-roof-planes" class="secondary" type="button" disabled>Accept Facets</button><button id="roof-report-inline" class="primary" type="button" disabled>Generate Roof Measurement Report</button></div>
+            <div class="actions"><button id="fit-roof-planes" class="primary" type="button">Fit Roof Planes</button><button id="accept-roof-planes" class="secondary" type="button" disabled>Accept Facets</button><button id="roof-report-inline" class="primary" type="button" disabled hidden>Generate Roof Measurement Report</button></div>
             <div id="roof-plane-list" style="margin-top:10px"></div>
             <p class="muted" id="roof-plane-status">Decode roof points first.</p>
           </div>
@@ -85,6 +96,7 @@
           <div id="roof-solar-summary" class="analysis-state" style="margin-top:10px">Run this after confirming the property location. It does not replace the LiDAR model; it provides an independent second measurement engine.</div>
           <div id="roof-solar-lines" style="margin-top:10px"></div>
         </div>
+        </details>
         <div id="roof-line-panel" class="card" hidden style="margin-top:12px">
           <div class="card-head"><div><div class="eyebrow">ROOF GEOMETRY</div><h3>Internal line proposals</h3><p class="muted">Solaris proposes strong roof lines from the aerial image. Review each line before it is used.</p></div><span id="roof-line-count" class="status">0 lines</span></div>
           <div id="roof-line-list"></div>
