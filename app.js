@@ -1679,6 +1679,68 @@ function renderRoofRegression(data){
    '</tr>';
   }).join('')+'</tbody></table>';
 }
+function trainingSlug(address){
+ return 'training-'+String(address||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,72);
+}
+async function bootstrapTrainingCase(row,engine){
+ const address=row.address,geoR=await fetch('/api/geocode?address='+encodeURIComponent(address),{cache:'no-store'});
+ const geo=await geoR.json().catch(()=>({}));
+ if(!geoR.ok||!geo.ok)throw new Error(geo.error||'Could not geocode address.');
+ const lat=Number(geo.lat),lng=Number(geo.lng);
+ const br=await fetch('/api/solar-building?lat='+encodeURIComponent(lat)+'&lng='+encodeURIComponent(lng),{cache:'no-store'});
+ const building=await br.json().catch(()=>({}));
+ if(!br.ok||!building.ok)throw new Error(building.error||'Google Solar Building Insights unavailable.');
+ const result=await engine.buildSolarRoofModel(lat,lng,building.roofSegments||[]);
+ const measurements=engine.buildRoofMeasurements(result.outline,result.model.facets||[],result.model.roofLines||[]);
+ const projectId=trainingSlug(address);
+ const solarModel={
+  source:'google-solar-dsm',
+  trainingAuto:true,
+  trainingVersion:'r39',
+  lat,lng,
+  imageryQuality:building.imageryQuality||result.quality||null,
+  imageryDate:building.imageryDate||null,
+  googleWholeRoofAreaFt2:Number.isFinite(Number(building.roofAreaMeters2))?Number(building.roofAreaMeters2)*10.7639104167:null,
+  outline:result.outline,
+  rawCornerCount:result.rawCornerCount,
+  model:result.model,
+  measurements
+ };
+ const sr=await fetch('/api/roof-solar-model',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId,address,accepted:false,model:solarModel})});
+ const sd=await sr.json().catch(()=>({}));if(!sr.ok||!sd.ok)throw new Error(sd.error||'Could not save DSM model.');
+ const or=await fetch('/api/training-solar-outline',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId,address,lat,lng,outline:result.outline,cropHalfMeters:42})});
+ const od=await or.json().catch(()=>({}));if(!or.ok||!od.ok)throw new Error(od.error||'Could not save Solar outline.');
+ return {projectId,address,lat,lng,facets:Number(result.model?.facets?.length||0),area:Number(result.model?.slopedAreaSqFt||0)};
+}
+document.querySelector('#bootstrap-roof-training')?.addEventListener('click',async()=>{
+ const btn=document.querySelector('#bootstrap-roof-training'),status=document.querySelector('#roof-regression-status');
+ const old=btn?.textContent;if(btn){btn.disabled=true;btn.textContent='Preparing…'}
+ try{
+  const rr=await fetch('/api/training-regression',{cache:'no-store'}),rd=await rr.json().catch(()=>({}));
+  if(!rr.ok||!rd.ok)throw new Error(rd.error||'Could not load training cases.');
+  const pendingRows=(rd.rows||[]).filter(r=>r.status==='not-processed'&&(r.scope==='primary-building'||r.scope==='all-structures'||!r.scope));
+  const byAddress=new Map();for(const r of pendingRows)if(!byAddress.has(r.address))byAddress.set(r.address,r);
+  const queue=[...byAddress.values()];
+  if(!queue.length){if(status)status.textContent='No pending address-level training roofs remain.';return}
+  const engine=await import('/assets/js/solar-roof-engine.js?v=20261002-9');
+  let done=0,failed=0;const failures=[];
+  const worker=async()=>{
+   while(queue.length){
+    const row=queue.shift();if(!row)break;
+    if(status)status.textContent='Automatic DSM bootstrap: '+done+' complete · '+failed+' failed · '+(queue.length+1)+' remaining. Processing '+row.address+'…';
+    try{await bootstrapTrainingCase(row,engine);done++}
+    catch(err){failed++;failures.push(row.address+': '+(err?.message||String(err)))}
+   }
+  };
+  await Promise.all([worker(),worker()]);
+  if(status)status.innerHTML='<strong>Training bootstrap complete.</strong> '+done+' roofs processed · '+failed+' failed.'+(failures.length?'<br><span class="muted">'+failures.slice(0,6).map(escRoof).join('<br>')+(failures.length>6?'<br>…and '+(failures.length-6)+' more':'')+'</span>':'')+'<br>Running regression now…';
+  const reg=await fetch('/api/training-regression',{cache:'no-store'}),data=await reg.json().catch(()=>({}));
+  if(!reg.ok||!data.ok)throw new Error(data.error||'Bootstrap finished, but regression could not run.');
+  renderRoofRegression(data);
+ }catch(err){if(status)status.textContent='Training bootstrap failed: '+(err?.message||String(err))}
+ finally{if(btn){btn.disabled=false;btn.textContent=old||'Process Pending Cases'}}
+});
+
 document.querySelector('#run-roof-regression')?.addEventListener('click',async()=>{
  const btn=document.querySelector('#run-roof-regression'),status=document.querySelector('#roof-regression-status');
  const old=btn?.textContent;if(btn){btn.disabled=true;btn.textContent='Running 39 cases…'}if(status)status.textContent='Running the current solver against the verified training corpus…';
