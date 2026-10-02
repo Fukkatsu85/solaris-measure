@@ -29,7 +29,17 @@
         <div class="metric"><span>Pitch</span><strong id="roof-pitch">—</strong></div>
         <div class="metric"><span>Squares</span><strong id="roof-squares">—</strong></div>
       </div>
-      <div class="analysis-state" id="roof-state">Start a roof measurement. Next build: imagery capture, roof outline/facet editor, pitch and line measurements, then material takeoff.</div>
+      <div class="analysis-state" id="roof-state">Enter the property address to locate the roof.</div>
+      <div class="card" style="margin-top:16px">
+        <div class="eyebrow">PROPERTY</div><h3>Locate roof</h3>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <input id="roof-address" type="text" placeholder="Enter full property address" autocomplete="street-address" style="flex:1;min-width:260px;padding:12px 14px;border-radius:10px;border:1px solid #cbd5e1;font:inherit">
+          <button id="locate-roof" class="primary" type="button">Locate Property</button>
+        </div>
+        <p class="muted" id="roof-location-status">We'll locate the address first, then you can confirm the correct property.</p>
+        <div id="roof-map" style="min-height:420px;border-radius:14px;overflow:hidden;background:#e5e7eb;display:grid;place-items:center;margin-top:12px"><span class="muted">Satellite map will appear here after an address is located.</span></div>
+        <div class="actions" style="margin-top:12px"><button id="confirm-roof-property" class="primary" type="button" disabled>Use This Property</button></div>
+      </div>
       <div class="grid" style="margin-top:16px">
         <article class="card"><div class="eyebrow">STEP 1</div><h3>Property imagery</h3><p class="muted">Upload or capture roof imagery for the property.</p><label class="secondary upload-button">Add Roof Photos<input id="roof-photo-input" type="file" accept="image/*" multiple hidden></label></article>
         <article class="card"><div class="eyebrow">STEP 2</div><h3>Roof geometry</h3><p class="muted">Map facets, ridges, hips, valleys, rakes and eaves.</p><button class="secondary" id="roof-geometry" disabled>Build Roof Geometry</button></article>
@@ -171,6 +181,6 @@
     </div>
   </main>
 
-  <script src="/app.js?v=20261002-rooftab1"></script>
+  <script src="/app.js?v=20261002-rooflocate1"></script>
 </body>
 </html>
