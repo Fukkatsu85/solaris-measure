@@ -1081,9 +1081,15 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
       if(indices.length<2)return;
       const groups=connectedComponentsForLabel(indices,mask.width,mask.height);
       if(groups.length<=1)return;
-      const minKeep=Math.max(35,Math.round(component.size*.007));
+      const minKeep=Math.max(12,Math.min(28,Math.round(component.size*.002)));
       groups.slice(1).forEach(group=>{
         if(group.length>=minKeep)return;
+        // Preserve a small component when it has a real 2D footprint instead of
+        // looking like a one-pixel raster/string artifact.
+        const xs=group.map(idx=>idx%mask.width),ys=group.map(idx=>Math.floor(idx/mask.width));
+        const spanX=Math.max(...xs)-Math.min(...xs)+1,spanY=Math.max(...ys)-Math.min(...ys)+1;
+        const compactEnough=spanX>=3&&spanY>=3&&group.length>=10;
+        if(compactEnough)return;
         const votes=new Map();
         group.forEach(idx=>{
           const x=idx%mask.width,y=Math.floor(idx/mask.width);
@@ -1107,7 +1113,7 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
   component.forEach(idx=>{const lab=labels[idx];if(lab>=0)byLabel[lab].push(idx);});
 
   const facets=[];
-  const minFacetPixels=Math.max(18,Math.min(55,Math.round(component.size*.0025)));
+  const minFacetPixels=Math.max(10,Math.min(32,Math.round(component.size*.0018)));
   byLabel.forEach((indices,i)=>{
     if(indices.length<minFacetPixels)return;
     const groups=connectedComponentsForLabel(indices,mask.width,mask.height);
