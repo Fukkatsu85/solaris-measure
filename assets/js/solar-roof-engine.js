@@ -793,10 +793,12 @@ function classifySharedRoofLine(line,segA,segB,dsm){
 
   const ta=slopeTowardSharedLine(line,segA,dsm);
   const tb=slopeTowardSharedLine(line,segB,dsm);
+  let planeDecision=null,planeStrength=0;
   if(Number.isFinite(ta)&&Number.isFinite(tb)){
     const s=Math.min(Math.abs(ta),Math.abs(tb));
-    if(ta>.18&&tb>.18)valleyScore+=1.5+Math.min(1.5,s*2);
-    if(ta<-.18&&tb<-.18)ridgeScore+=1.5+Math.min(1.5,s*2);
+    planeStrength=s;
+    if(ta>.18&&tb>.18){valleyScore+=1.5+Math.min(1.5,s*2);planeDecision="valley";}
+    if(ta<-.18&&tb<-.18){ridgeScore+=1.5+Math.min(1.5,s*2);planeDecision="ridge_or_hip";}
   }
 
   if(dsm){
@@ -831,9 +833,12 @@ function classifySharedRoofLine(line,segA,segB,dsm){
   }
 
   let type="transition";
-  if(valleyScore>ridgeScore+.35)type="valley";
+  // Plane orientation is the strongest structural signal. DSM curvature is a fallback,
+  // because trees/shadows/low-resolution elevation can invert a local cross section.
+  if(planeDecision&&planeStrength>=.42)type=planeDecision;
+  else if(valleyScore>ridgeScore+.35)type="valley";
   else if(ridgeScore>valleyScore+.35)type="ridge_or_hip";
-  return {type,line:(best&&crossType===type)?best.line:line,creaseStrength:best?Math.abs(best.cross.value):0};
+  return {type,line:(best&&crossType===type&&planeStrength<.42)?best.line:line,creaseStrength:best?Math.abs(best.cross.value):0,planeStrength};
 }
 
 function ridgeOrHipType(segA,segB,dsm){
@@ -1118,6 +1123,7 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
     outline=regularizeFacetOutline(outline,seg.azimuth,6);
     facets.push({
       index:facets.length+1,
+      sourceIndex:seg.sourceIndex,
       pitchDegrees:seg.pitch,
       rise12:Math.tan(seg.pitch*Math.PI/180)*12,
       azimuthDegrees:seg.azimuth,
