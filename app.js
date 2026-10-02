@@ -641,7 +641,7 @@ document.querySelector('#locate-roof')?.addEventListener('click',async()=>{
  try{
   const key=await getRoofMapsKey();
   roofLocatedProperty={address};
-  const src='https://www.google.com/maps/embed/v1/place?key='+encodeURIComponent(key)+'&q='+encodeURIComponent(address)+'&maptype=satellite&zoom=20';
+  const src='https://www.google.com/maps/embed/v1/place?key='+encodeURIComponent(key)+'&q='+encodeURIComponent(address)+'&maptype=satellite&zoom=19';
   if(map)map.innerHTML='<iframe title="Satellite property map" allowfullscreen loading="lazy" referrerpolicy="no-referrer-when-downgrade" style="width:100%;height:460px;border:0" src="'+src+'"></iframe>';
   if(status)status.textContent='Satellite property located. Pan/zoom to verify the correct roof, then select it.';
   if(confirm)confirm.disabled=false;
