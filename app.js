@@ -1464,7 +1464,8 @@ async function generateRoofReport(){
   const perim=topologyPerimFt>0?topologyPerimFt:basePerim;
   const lidarSloped=facets.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0);
   const dsmSloped=Number(sm?.model?.slopedAreaSqFt||0);
-  const sloped=dsmSloped>0?dsmSloped:lidarSloped,squares=sloped/100,lines=roofLineTotals(d);
+  const googleWholeSloped=Number(sm?.googleWholeRoofAreaFt2||0);
+  const sloped=googleWholeSloped>0?googleWholeSloped:(dsmSloped>0?dsmSloped:lidarSloped),squares=sloped/100,lines=roofLineTotals(d);
   const reportFacetCount=Number(dsmFacets.length||facets.length||d.topology?.faces?.length||0);
   const wholePitch=v=>Math.round(Number(v)||0);
   const pitchWeightTotal=dsmFacets.reduce((s,f)=>s+Number(f.slopedAreaSqFt||f.flatAreaSqFt||0),0);
@@ -1479,7 +1480,8 @@ async function generateRoofReport(){
   const v=d.validation||{};
   const dsmGeometryBlock=sm?.model?.facets?.length
    ?('<h2>Accepted Google DSM Geometry</h2><table class="roof-report-table"><tbody>'+
-     '<tr><th>DSM sloped area</th><td>'+Math.round(Number(sm.model?.slopedAreaSqFt||0)).toLocaleString()+' ft²</td></tr>'+
+     '<tr><th>Google whole-roof area</th><td>'+(Number.isFinite(Number(sm.googleWholeRoofAreaFt2))?Math.round(Number(sm.googleWholeRoofAreaFt2)).toLocaleString()+' ft²':'—')+'</td></tr>'+
+     '<tr><th>Raster facet-area sum</th><td>'+Math.round(Number(sm.model?.slopedAreaSqFt||0)).toLocaleString()+' ft²</td></tr>'+
      '<tr><th>DSM average pitch</th><td>'+wholePitch(sm.model?.rise12||avgPitch)+'/12</td></tr>'+
      '<tr><th>DSM facets</th><td>'+Number(sm.model?.facets?.length||0)+'</td></tr>'+
      '<tr><th>Eave</th><td>'+fmtHybridFt(dm.eaveFt)+'</td></tr>'+
@@ -1706,6 +1708,7 @@ async function bootstrapTrainingCase(row,engine){
   imageryQuality:building.imageryQuality||result.quality||null,
   imageryDate:building.imageryDate||null,
   googleWholeRoofAreaFt2:Number.isFinite(Number(building.roofAreaMeters2))?Number(building.roofAreaMeters2)*10.7639104167:null,
+  googleRoofSegmentCount:Array.isArray(building.roofSegments)?building.roofSegments.length:null,
   outline:result.outline,
   rawCornerCount:result.rawCornerCount,
   model:result.model,
@@ -1828,6 +1831,7 @@ async function runRoofSolarAnalysis(){
    imageryQuality:building.imageryQuality||result.quality||null,
    imageryDate:building.imageryDate||null,
    googleWholeRoofAreaFt2:Number.isFinite(Number(building.roofAreaMeters2))?Number(building.roofAreaMeters2)*10.7639104167:null,
+   googleRoofSegmentCount:Array.isArray(building.roofSegments)?building.roofSegments.length:null,
    outline:result.outline,
    rawCornerCount:result.rawCornerCount,
    model:result.model,
