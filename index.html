@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Solaris Measure</title>
   <meta name="description" content="Solaris Measure exterior measurement lab" />
-  <link rel="stylesheet" href="/styles.css?v=20261002-matching2" />
+  <link rel="stylesheet" href="/styles.css?v=20261002-pipeline1" />
 </head>
 <body>
   <header class="topbar">
@@ -107,6 +107,11 @@
         </table>
       </div>
     </section>
+    <section class="card" id="process-card">
+      <div class="card-head"><div><div class="eyebrow">AUTOMATED WORKFLOW</div><h3>Process Property</h3><p class="muted">Runs capture quality, overlap matching, correspondence scoring and house-model readiness in one pass.</p></div><button id="process-property" class="primary">Process Property</button></div>
+      <div id="process-state" class="analysis-state">Ready. This replaces the experimental step-by-step buttons for normal use.</div>
+      <div id="process-results" class="table-wrap"></div>
+    </section>
     <section class="card" id="geometry-card">
       <div class="card-head"><div><div class="eyebrow">PHASE 2</div><h3>Exterior geometry</h3><p class="muted">Trace measurement geometry with lines and polygons. This is stored separately from object detections.</p></div><button id="preserve-verified" class="secondary">Preserve Verified Objects</button></div>
       <div id="geometry-state" class="analysis-state">Loading geometry workspace…</div>
@@ -136,6 +141,6 @@
     </section>
     <section class="card" id="auto-measure-card"><div class="card-head"><div><div class="eyebrow">PHASE 4</div><h3>Auto Reconstruction</h3><p class="muted">Build a house-level reconstruction workspace from the overlapping views, verified objects and traced wall geometry. Manual scale tools are no longer the primary workflow.</p></div><button id="auto-measure" class="primary">Build Auto Reconstruction</button></div><div id="auto-measure-state" class="analysis-state">Ready to reconstruct from the saved five-view dataset. No additional tracing required.</div><div id="auto-measure-results" class="table-wrap"></div></section>\n\n  </main>
 
-  <script src="/app.js?v=20261002-matching2"></script>
+  <script src="/app.js?v=20261002-pipeline1"></script>
 </body>
 </html>
