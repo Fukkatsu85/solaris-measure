@@ -700,12 +700,20 @@ document.querySelector('#locate-roof')?.addEventListener('click',async()=>{
  const status=document.querySelector('#roof-location-status'),confirm=document.querySelector('#confirm-roof-property'),btn=document.querySelector('#locate-roof');
  if(btn)btn.disabled=true;if(confirm)confirm.disabled=true;if(status)status.textContent='Locating '+address+'…';
  try{
-  const r=await fetch('/api/mn-aerial?address='+encodeURIComponent(address)),d=await r.json();
-  if(!r.ok)throw new Error(d.error||'Address could not be located.');
-  const lat=Number(d.lat),lng=Number(d.lng);
+  const gr=await fetch('/api/geocode?address='+encodeURIComponent(address));
+  const gt=gr.headers.get('content-type')||'';
+  if(!gt.includes('application/json'))throw new Error('Geocoder endpoint returned a non-JSON response. Cloudflare Functions may still be deploying.');
+  const gd=await gr.json();
+  if(!gr.ok||!gd.ok)throw new Error(gd.error||'Address could not be located.');
+  const lat=Number(gd.lat),lng=Number(gd.lng);
   if(!Number.isFinite(lat)||!Number.isFinite(lng))throw new Error('Address could not be located.');
-  roofLocatedProperty={address,lat,lng,locationSource:d.locationSource||'address-geocode'};
-  await showRoofLocator(address,lat,lng,d.imageryUrl,d.cropHalfMeters||42);
+  const ar=await fetch('/api/mn-aerial?lat='+encodeURIComponent(lat)+'&lng='+encodeURIComponent(lng)+'&address='+encodeURIComponent(address));
+  const at=ar.headers.get('content-type')||'';
+  if(!at.includes('application/json'))throw new Error('Aerial endpoint returned a non-JSON response. Cloudflare Functions may still be deploying.');
+  const ad=await ar.json();
+  if(!ar.ok)throw new Error(ad.error||'Aerial imagery lookup failed.');
+  roofLocatedProperty={address,lat,lng,locationSource:gd.source||'address-geocode'};
+  await showRoofLocator(address,lat,lng,ad.imageryUrl,ad.cropHalfMeters||42);
   if(confirm)confirm.disabled=false;
  }catch(err){
   roofLocatedProperty=null;if(confirm)confirm.disabled=true;
