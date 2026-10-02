@@ -634,8 +634,15 @@ async function getRoofMapsKey(){
  roofMapsKey=d.key;return roofMapsKey;
 }
 const roofAddressInput=document.querySelector('#roof-address');
-roofAddressInput?.addEventListener('focus',()=>roofAddressInput.select());
-roofAddressInput?.addEventListener('click',()=>{if(document.activeElement===roofAddressInput)roofAddressInput.select();});
+let roofAddressNeedsReplace=true;
+roofAddressInput?.addEventListener('focus',()=>{if(roofAddressNeedsReplace)roofAddressInput.select();});
+roofAddressInput?.addEventListener('pointerdown',()=>{if(document.activeElement!==roofAddressInput)roofAddressNeedsReplace=true;});
+roofAddressInput?.addEventListener('keydown',e=>{
+ if(roofAddressNeedsReplace && e.key.length===1 && !e.ctrlKey && !e.metaKey && !e.altKey){
+  roofAddressInput.value='';roofAddressNeedsReplace=false;
+ }
+});
+roofAddressInput?.addEventListener('input',()=>{roofAddressNeedsReplace=false;});
 let roofAutocompleteReady=false;
 async function initRoofAddressAutocomplete(){
  if(roofAutocompleteReady||!roofAddressInput)return;
