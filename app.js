@@ -677,9 +677,23 @@ document.querySelector('#confirm-roof-property')?.addEventListener('click',()=>{
  const geo=document.querySelector('#roof-geometry');if(geo)geo.disabled=false;
 });
 
-document.querySelector('#start-roof-geometry')?.addEventListener('click',()=>{
- const btn=document.querySelector('#roof-geometry');if(btn){btn.disabled=false;btn.scrollIntoView({behavior:'smooth',block:'center'});setTimeout(()=>btn.focus(),450);}
- const s=document.querySelector('#roof-state');if(s)s.textContent='Property confirmed. Roof geometry workspace is next.';
+async function openRoofGeometryWorkspace(){
+ const project=roofLocatedProperty||JSON.parse(localStorage.getItem('solarisRoofProject')||'null');if(!project?.address)return;
+ const ws=document.querySelector('#roof-geometry-workspace'),map=document.querySelector('#roof-workspace-map'),title=document.querySelector('#roof-workspace-address');
+ if(title)title.textContent=project.address;
+ if(ws)ws.hidden=false;
+ try{
+  const key=await getRoofMapsKey();
+  const src='https://www.google.com/maps/embed/v1/place?key='+encodeURIComponent(key)+'&q='+encodeURIComponent(project.address)+'&maptype=satellite&zoom=19';
+  if(map)map.innerHTML='<iframe title="Roof measurement satellite workspace" allowfullscreen loading="eager" referrerpolicy="no-referrer-when-downgrade" style="width:100%;height:560px;border:0" src="'+src+'"></iframe>';
+ }catch(err){if(map)map.innerHTML='<div style="padding:32px">Could not load satellite workspace: '+err.message+'</div>';}
+ const s=document.querySelector('#roof-state');if(s)s.textContent='Roof measurement workspace active for '+project.address;
+ ws?.scrollIntoView({behavior:'smooth',block:'start'});
+}
+document.querySelector('#start-roof-geometry')?.addEventListener('click',openRoofGeometryWorkspace);
+document.querySelector('#roof-geometry')?.addEventListener('click',openRoofGeometryWorkspace);
+document.querySelector('#roof-outline-tool')?.addEventListener('click',()=>{
+ const s=document.querySelector('#roof-workspace-status');if(s)s.textContent='Roof Outline selected. Interactive tracing is the next tool being connected.';
 });
 document.querySelector('#change-roof-property')?.addEventListener('click',()=>{
  roofLocatedProperty=null;const ws=document.querySelector('#roof-selected-workspace');if(ws)ws.hidden=true;
