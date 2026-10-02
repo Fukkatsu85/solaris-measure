@@ -1,0 +1,37 @@
+{
+  "benchmarkId": "1324-forest-circle-roofr-2026",
+  "address": "1324 Forest Circle, Burnsville, MN 55306",
+  "source": "Roofr PDF provided by property owner",
+  "purpose": "Regression validation only. Never use these values to tune or override production measurements for this property.",
+  "groundTruth": {
+    "totalRoofAreaFt2": 2580,
+    "pitchedRoofAreaFt2": 2580,
+    "flatRoofAreaFt2": 0,
+    "facetCount": 15,
+    "predominantPitch12": 8,
+    "eaveFt": 156.25,
+    "valleyFt": 26.6667,
+    "hipFt": 20.75,
+    "ridgeFt": 69.5833,
+    "rakeFt": 136.1667,
+    "wallFlashingFt": 23.3333,
+    "stepFlashingFt": 44.3333,
+    "transitionFt": 9.4167,
+    "unspecifiedFt": 13.3333,
+    "hipsPlusRidgesFt": 90.25,
+    "eavesPlusRakesFt": 292.4167
+  },
+  "pitchArea": [
+    {"pitch12": 4, "areaFt2": 6},
+    {"pitch12": 8, "areaFt2": 2575}
+  ],
+  "waste": [
+    {"pct": 0, "areaFt2": 2580, "squares": 25.8},
+    {"pct": 10, "areaFt2": 2838, "squares": 28.4},
+    {"pct": 12, "areaFt2": 2890, "squares": 28.9},
+    {"pct": 15, "areaFt2": 2967, "squares": 29.7},
+    {"pct": 17, "areaFt2": 3019, "squares": 30.2},
+    {"pct": 20, "areaFt2": 3096, "squares": 31.0},
+    {"pct": 22, "areaFt2": 3148, "squares": 31.5}
+  ]
+}
