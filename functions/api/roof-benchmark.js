@@ -42,8 +42,11 @@ function buildSolaris(sm,planes,outline){
   facetCount:facets.length,
   slopedAreaFt2:slopedArea,
   avgPitch12:avgPitch,
-  perimeterFt:num(m.perimeterFt)??num(outline?.measurement?.perimeterFt),
-  ridgeFt:num(m.ridgeFt),hipFt:num(m.hipFt),valleyFt:num(m.valleyFt),eaveFt:num(m.eaveFt),rakeFt:num(m.rakeFt),
+  perimeterFt:num(m.perimeterFt),
+  footprintAreaFt2:num(outline?.measurement?.planAreaFt2),
+  footprintPerimeterFt:num(outline?.measurement?.perimeterFt),
+  ridgeFt:num(m.ridgeFt),hipFt:num(m.hipFt),ridgeHipFt:(num(m.ridgeFt)!=null||num(m.hipFt)!=null)?Number(num(m.ridgeFt)||0)+Number(num(m.hipFt)||0):null,
+  valleyFt:num(m.valleyFt),eaveFt:num(m.eaveFt),rakeFt:num(m.rakeFt),
   facetAreasFt2:facetAreas
  };
 }
@@ -55,17 +58,23 @@ function scoreBenchmark(solaris,reference){
  const areaScore=metricScore(areaErr,2,15);
  const pitchScore=metricScore(pitchErr,4,25);
  const facetAreas=facetAreaComparison(solaris.facetAreasFt2,reference.facetAreasFt2);
- const edges=["ridgeFt","hipFt","valleyFt","eaveFt","rakeFt","perimeterFt"].map(k=>edgeMetric(k,solaris[k],reference[k]));
+ const edgeKeys=(reference.ridgeHipFt!=null?["ridgeHipFt"]:["ridgeFt","hipFt"]).concat(["valleyFt","eaveFt","rakeFt","perimeterFt"]);
+ const edges=edgeKeys.map(k=>edgeMetric(k,solaris[k],reference[k]));
  const edgeScores=edges.filter(x=>x.score!=null).map(x=>x.score);
  const edgeScore=edgeScores.length?edgeScores.reduce((a,b)=>a+b,0)/edgeScores.length:null;
+ const footprintAreaErr=pct(solaris.footprintAreaFt2,reference.footprintAreaFt2);
+ const footprintPerimErr=pct(solaris.footprintPerimeterFt,reference.footprintPerimeterFt);
+ const footprintScores=[metricScore(footprintAreaErr,3,18),metricScore(footprintPerimErr,3,18)].filter(v=>v!=null);
+ const footprintScore=footprintScores.length?footprintScores.reduce((a,b)=>a+b,0)/footprintScores.length:null;
  const componentScores={
   topology:topologyScore,
   edges:edgeScore,
   pitch:pitchScore,
   facetAreas:facetAreas.available?facetAreas.score:null,
-  totalArea:areaScore
+  totalArea:areaScore,
+  footprint:footprintScore
  };
- const weights={topology:.40,edges:.20,pitch:.15,facetAreas:.15,totalArea:.10};
+ const weights={topology:.30,edges:.20,pitch:.10,facetAreas:.10,totalArea:.15,footprint:.15};
  let weighted=0,used=0;
  for(const [k,w] of Object.entries(weights)){const s=componentScores[k];if(s!=null){weighted+=s*w;used+=w}}
  const overall=used?weighted/used:null;
@@ -74,7 +83,9 @@ function scoreBenchmark(solaris,reference){
  if(Number.isFinite(areaErr)&&areaErr>5)issues.push({type:"area",message:"Total sloped area differs materially from the reference."});
  if(Number.isFinite(edgeScore)&&edgeScore<70)issues.push({type:"edges",message:"Roof-line totals differ materially; review ridge/hip/valley classification and intersections."});
  if(facetAreas.available&&facetAreas.meanAbsoluteErrorPct>10)issues.push({type:"facet-area",message:"Per-facet areas are not matching closely; inspect facet boundaries and shared junctions."});
- return {overallScore:overall==null?null:+overall.toFixed(1),componentScores:Object.fromEntries(Object.entries(componentScores).map(([k,v])=>[k,v==null?null:+v.toFixed(1)])),errors:{totalAreaPct:areaErr==null?null:+areaErr.toFixed(2),facetCountPct:facetErr==null?null:+facetErr.toFixed(2),pitchPct:pitchErr==null?null:+pitchErr.toFixed(2)},edgeMetrics:edges,facetAreaComparison:facetAreas,issues,weights};
+ if(Number.isFinite(footprintAreaErr)&&footprintAreaErr>6)issues.push({type:"footprint-area",message:"Plan-view roof footprint area differs materially from the verified reference."});
+ if(Number.isFinite(footprintPerimErr)&&footprintPerimErr>6)issues.push({type:"footprint-perimeter",message:"Plan-view perimeter differs materially; perimeter extraction needs correction before topology tuning."});
+ return {overallScore:overall==null?null:+overall.toFixed(1),componentScores:Object.fromEntries(Object.entries(componentScores).map(([k,v])=>[k,v==null?null:+v.toFixed(1)])),errors:{totalAreaPct:areaErr==null?null:+areaErr.toFixed(2),facetCountPct:facetErr==null?null:+facetErr.toFixed(2),pitchPct:pitchErr==null?null:+pitchErr.toFixed(2),footprintAreaPct:footprintAreaErr==null?null:+footprintAreaErr.toFixed(2),footprintPerimeterPct:footprintPerimErr==null?null:+footprintPerimErr.toFixed(2)},edgeMetrics:edges,facetAreaComparison:facetAreas,issues,weights};
 }
 export async function onRequestGet({request,env}){
  if(!env.MEASURE_PHOTOS)return json({error:"R2 binding MEASURE_PHOTOS is not configured."},500);
@@ -95,11 +106,12 @@ export async function onRequestGet({request,env}){
   if(seed&&(sm||planes)){
    const reference={
     source:seed.source||"Roofr",slopedAreaFt2:seed.slopedAreaFt2,facetCount:seed.facetCount,avgPitch12:seed.avgPitch12,
-    perimeterFt:seed.perimeterFt??null,ridgeFt:seed.ridgeFt??null,hipFt:seed.hipFt??null,valleyFt:seed.valleyFt??null,eaveFt:seed.eaveFt??null,rakeFt:seed.rakeFt??null,
-    facetAreasFt2:Array.isArray(seed.facetAreasFt2)?seed.facetAreasFt2:[]
+    perimeterFt:seed.perimeterFt??null,footprintAreaFt2:seed.footprintAreaFt2??null,footprintPerimeterFt:seed.footprintPerimeterFt??null,
+    ridgeFt:seed.ridgeFt??null,hipFt:seed.hipFt??null,ridgeHipFt:seed.ridgeHipFt??null,valleyFt:seed.valleyFt??null,eaveFt:seed.eaveFt??null,rakeFt:seed.rakeFt??null,
+    flatAreaFt2:seed.flatAreaFt2??null,pitchAreas:seed.pitchAreas||null,facetAreasFt2:Array.isArray(seed.facetAreasFt2)?seed.facetAreasFt2:[]
    };
    const solaris=buildSolaris(sm,planes,outline),score=scoreBenchmark(solaris,reference);
-   b={version:1,projectId:id,address:address||seed.address,createdAt:new Date().toISOString(),reference,solaris,score,archetype:seed.archetype||null,seededFrom:"Roofr training corpus supplied by user"};
+   b={version:2,projectId:id,address:address||seed.address,createdAt:new Date().toISOString(),reference,solaris,score,archetype:seed.archetype||null,seededFrom:"Verified roof-report training corpus supplied by user"};
    await Promise.all([
     env.MEASURE_PHOTOS.put(id+"/_benchmark.json",JSON.stringify(b),{httpMetadata:{contentType:"application/json"}}),
     env.MEASURE_PHOTOS.put("benchmarks/"+id+".json",JSON.stringify(b),{httpMetadata:{contentType:"application/json"}})
@@ -117,7 +129,8 @@ export async function onRequestPost({request,env}){
   slopedAreaFt2:num(b.slopedAreaFt2),
   facetCount:num(b.facetCount),
   avgPitch12:num(b.avgPitch12),
-  perimeterFt:num(b.perimeterFt),ridgeFt:num(b.ridgeFt),hipFt:num(b.hipFt),valleyFt:num(b.valleyFt),eaveFt:num(b.eaveFt),rakeFt:num(b.rakeFt),
+  perimeterFt:num(b.perimeterFt),footprintAreaFt2:num(b.footprintAreaFt2),footprintPerimeterFt:num(b.footprintPerimeterFt),
+  ridgeFt:num(b.ridgeFt),hipFt:num(b.hipFt),ridgeHipFt:num(b.ridgeHipFt),valleyFt:num(b.valleyFt),eaveFt:num(b.eaveFt),rakeFt:num(b.rakeFt),
   facetAreasFt2:Array.isArray(b.facetAreasFt2)?b.facetAreasFt2.map(Number).filter(v=>Number.isFinite(v)&&v>0):[]
  };
  if(reference.slopedAreaFt2==null||reference.facetCount==null)return json({error:"Reference sloped area and facet count are required."},400);
@@ -128,7 +141,7 @@ export async function onRequestPost({request,env}){
  ]);
  if(!sm&&!planes)return json({error:"No Solaris roof model exists for this project yet."},404);
  const solaris=buildSolaris(sm,planes,outline),score=scoreBenchmark(solaris,reference);
- const out={version:1,projectId:id,address:b.address||outline?.address||sm?.address||"",createdAt:new Date().toISOString(),reference,solaris,score};
+ const out={version:2,projectId:id,address:b.address||outline?.address||sm?.address||"",createdAt:new Date().toISOString(),reference,solaris,score};
  await Promise.all([
   env.MEASURE_PHOTOS.put(id+"/_benchmark.json",JSON.stringify(out),{httpMetadata:{contentType:"application/json"}}),
   env.MEASURE_PHOTOS.put("benchmarks/"+id+".json",JSON.stringify(out),{httpMetadata:{contentType:"application/json"}})
