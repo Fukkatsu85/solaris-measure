@@ -49,7 +49,7 @@
       <div class="grid" style="margin-top:16px">
         <article class="card"><div class="eyebrow">STEP 1</div><h3>Property imagery</h3><p class="muted">Upload or capture roof imagery for the property.</p><label class="secondary upload-button">Add Roof Photos<input id="roof-photo-input" type="file" accept="image/*" multiple hidden></label></article>
         <article class="card"><div class="eyebrow">STEP 2</div><h3>Roof geometry</h3><p class="muted">Map facets, ridges, hips, valleys, rakes and eaves.</p><button class="secondary" id="roof-geometry" disabled>Build Roof Geometry</button></article>
-        <article class="card"><div class="eyebrow">STEP 3</div><h3>Roof takeoff</h3><p class="muted">Calculate roof area, squares, waste and linear materials.</p><button class="secondary" id="roof-takeoff" disabled>Generate Roof Takeoff</button></article>
+        <article class="card"><div class="eyebrow">STEP 3</div><h3>Roof takeoff</h3><p class="muted">Calculate roof area, squares, waste and linear materials.</p><button class="secondary" id="roof-takeoff" disabled>Generate Roof Measurement Report</button></article>
       </div>
       <section id="roof-geometry-workspace" class="card" hidden style="margin-top:16px">
         <div class="card-head"><div><div class="eyebrow">ROOF GEOMETRY WORKSPACE</div><h3 id="roof-workspace-address">Selected roof</h3><p class="muted">Trace the roof directly over the satellite reference. Geometry tools are the next measurement layer.</p></div><span class="status">Active</span></div>
@@ -74,7 +74,7 @@
           </div>
           <div id="roof-plane-panel" class="card" hidden style="margin-top:12px">
             <div class="card-head"><div><div class="eyebrow">LIDAR ROOF PLANES</div><h3>Facet proposals</h3><p class="muted">Fit planar roof surfaces from the decoded 3D points, then review before using them for pitch or takeoff.</p></div><span id="roof-plane-count" class="status">0 facets</span></div>
-            <div class="actions"><button id="fit-roof-planes" class="primary" type="button">Fit Roof Planes</button><button id="accept-roof-planes" class="secondary" type="button" disabled>Accept Facets</button></div>
+            <div class="actions"><button id="fit-roof-planes" class="primary" type="button">Fit Roof Planes</button><button id="accept-roof-planes" class="secondary" type="button" disabled>Accept Facets</button><button id="roof-report-inline" class="primary" type="button" disabled>Generate Roof Measurement Report</button></div>
             <div id="roof-plane-list" style="margin-top:10px"></div>
             <p class="muted" id="roof-plane-status">Decode roof points first.</p>
           </div>
