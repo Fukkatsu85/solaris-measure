@@ -43,12 +43,13 @@ export async function onRequestGet({request,env}){
  if(!env.MEASURE_PHOTOS)return json({error:"R2 binding MEASURE_PHOTOS is not configured."},500);
  const u=new URL(request.url),id=safeId(u.searchParams.get("projectId"));
  if(!id)return json({error:"projectId is required"},400);
- const [outline,planes,geometry]=await Promise.all([
+ const [outline,planes,geometry,solarModel]=await Promise.all([
   read(env,id+"/_roof_outline_accepted.json"),
   read(env,id+"/_roof_planes.json"),
-  read(env,id+"/_roof_geometry.json")
+  read(env,id+"/_roof_geometry.json"),
+  read(env,id+"/_google_solar_roof_model.json")
  ]);
  if(!outline)return json({error:"Accepted roof outline not found."},404);
  const validation=await solarCrosscheck(env,outline,planes);
- return json({ok:true,projectId:id,outline,planes,geometry,validation});
+ return json({ok:true,projectId:id,outline,planes,geometry,solarModel,validation});
 }
