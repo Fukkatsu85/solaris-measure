@@ -1107,11 +1107,12 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
   component.forEach(idx=>{const lab=labels[idx];if(lab>=0)byLabel[lab].push(idx);});
 
   const facets=[];
+  const minFacetPixels=Math.max(18,Math.min(55,Math.round(component.size*.0025)));
   byLabel.forEach((indices,i)=>{
-    if(indices.length<70)return;
+    if(indices.length<minFacetPixels)return;
     const groups=connectedComponentsForLabel(indices,mask.width,mask.height);
     const group=groups[0]||[];
-    if(group.length<70)return;
+    if(group.length<minFacetPixels)return;
 
     const groupSet=new Set(group);
     let boundary=removeCollinearPixelPoints(traceComponentBoundary(groupSet,mask.width,mask.height));
@@ -1134,12 +1135,14 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
       flatAreaSqFt:group.length*maskPixelArea*SQ_METERS_TO_SQ_FEET,
       slopedAreaSqFt:group.length*maskPixelArea/Math.max(.35,Math.cos(seg.pitch*Math.PI/180))*SQ_METERS_TO_SQ_FEET,
       pixelCount:group.length,
+      supportRatio:group.length/Math.max(1,indices.length),
+      smallFacet:group.length<70,
       outline
     });
   });
 
   facets.sort((a,b)=>b.slopedAreaSqFt-a.slopedAreaSqFt);
-  const kept=facets.slice(0,12);
+  const kept=facets.slice(0,20);
   const coveredPixels=kept.reduce((sum,f)=>sum+(f.pixelCount||0),0);
   const roofLines=extractSharedRoofLines(mask,component,labels,candidates,dsm);
   return {
