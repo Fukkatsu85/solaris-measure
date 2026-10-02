@@ -41,10 +41,16 @@ self.onmessage=async e=>{
    const buf=await r.arrayBuffer(),h=parseHeader(buf),lz=new LazPerf.LASZip(),filePtr=LazPerf._malloc(buf.byteLength),pointPtr=LazPerf._malloc(h.pointLength);
    LazPerf.HEAPU8.set(new Uint8Array(buf),filePtr);
    try{
-    lz.open(filePtr,buf.byteLength);const n=Math.min(lz.getCount(),maxDecoded-decoded),dv=new DataView(LazPerf.HEAPU8.buffer);
+    lz.open(filePtr,buf.byteLength);const n=Math.min(lz.getCount(),maxDecoded-decoded);
     for(let i=0;i<n;i++){
      lz.getPoint(pointPtr);decoded++;
-     const x=dv.getInt32(pointPtr,true)*h.scale[0]+h.offset[0],y=dv.getInt32(pointPtr+4,true)*h.scale[1]+h.offset[1],z=dv.getInt32(pointPtr+8,true)*h.scale[2]+h.offset[2];
+     // Emscripten can grow/replace WASM memory while LAZperf is decoding.
+     // Read through the live HEAP32 view after each decoded point rather than
+     // holding a DataView backed by an old/detached ArrayBuffer.
+     const heap32=LazPerf.HEAP32,base=pointPtr>>2;
+     const x=heap32[base]*h.scale[0]+h.offset[0],
+           y=heap32[base+1]*h.scale[1]+h.offset[1],
+           z=heap32[base+2]*h.scale[2]+h.offset[2];
      if(x<q[0]||x>q[2]||y<q[1]||y>q[3])continue;
      if(polygon?.length>=3&&!pip(x,y,polygon))continue;
      inside++;
