@@ -1229,33 +1229,62 @@ document.querySelector('#accept-roof-planes')?.addEventListener('click',async()=
  if(!roofPlaneProposals.length)return;
  const acceptedPlanes=roofPlaneProposals.filter(p=>p.accepted);
  if(!acceptedPlanes.length){if(status)status.textContent='Select at least one facet before accepting.';return}
- const projectId=saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
- let outline=roofOutlineProposal?.polygon;
- let planMetrics=outline?.length>=3?localRoofPlanMetrics(outline,Number(saved.lat),saved.imageryCropHalfMeters||42):null;
- if(!planMetrics){
-  const rr=await fetch('/api/roof-outline?projectId='+encodeURIComponent(projectId)),rd=await rr.json();
-  if(!rr.ok||!rd.outline?.polygon)throw new Error('Accepted roof outline is required.');
-  outline=rd.outline.polygon;planMetrics=rd.outline.measurement;
- }
- const totalPts=acceptedPlanes.reduce((s,p)=>s+Number(p.pointCount||0),0)||1;
- const payload=roofPlaneProposals.map(p=>{
-  const hull=convexHullRoof((p.points||[]).map(q=>({x:q.x,y:q.y})));
-  const polygon=hull.map(q=>lidarPointToAerialNorm(q,saved)).filter(q=>Number.isFinite(q.x)&&Number.isFinite(q.y));
-  const share=p.accepted?Number(p.pointCount||0)/totalPts:0;
-  const planAreaFt2=p.accepted?Number(planMetrics.planAreaFt2)*share:0;
-  const slopedAreaFt2=planAreaFt2*Math.sqrt(1+Math.pow(Number(p.pitch12||0)/12,2));
-  return{id:p.id,accepted:p.accepted,pointCount:p.pointCount,pitch12:p.pitch12,slopeDeg:p.slopeDeg,azimuthDeg:p.azimuthDeg,rmse:p.rmse,coefficients:p.coefficients,bounds:p.bounds,polygon,planAreaFt2,slopedAreaFt2};
- });
- if(btn)btn.disabled=true;if(status)status.textContent='Saving accepted LiDAR roof facets and measurement model…';
+ if(btn)btn.disabled=true;
+ const fetchWithTimeout=async(url,options={},ms=12000)=>{
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),ms);
+  try{return await fetch(url,{...options,signal:controller.signal})}
+  finally{clearTimeout(timer)}
+ };
  try{
-  const r=await fetch('/api/roof-planes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId,address:saved.address,planes:payload})}),d=await r.json();
+  const projectId=saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
+  let outline=roofOutlineProposal?.polygon;
+  let planMetrics=outline?.length>=3?localRoofPlanMetrics(outline,Number(saved.lat),saved.imageryCropHalfMeters||42):null;
+
+  if(!planMetrics){
+   if(status)status.textContent='Loading accepted roof outline…';
+   const rr=await fetchWithTimeout('/api/roof-outline?projectId='+encodeURIComponent(projectId),{},10000);
+   const rd=await rr.json().catch(()=>({}));
+   if(!rr.ok||!rd.outline?.polygon?.length)throw new Error(rd.error||'Accepted roof outline is required before facets can be saved.');
+   outline=rd.outline.polygon;
+   planMetrics=rd.outline.measurement;
+  }
+
+  const totalPts=acceptedPlanes.reduce((s,p)=>s+Number(p.pointCount||0),0)||1;
+  const payload=roofPlaneProposals.map(p=>{
+   const hull=convexHullRoof((p.points||[]).map(q=>({x:q.x,y:q.y})));
+   const polygon=hull.map(q=>lidarPointToAerialNorm(q,saved)).filter(q=>Number.isFinite(q.x)&&Number.isFinite(q.y));
+   const share=p.accepted?Number(p.pointCount||0)/totalPts:0;
+   const planAreaFt2=p.accepted?Number(planMetrics.planAreaFt2)*share:0;
+   const slopedAreaFt2=planAreaFt2*Math.sqrt(1+Math.pow(Number(p.pitch12||0)/12,2));
+   return{id:p.id,accepted:p.accepted,pointCount:p.pointCount,pitch12:p.pitch12,slopeDeg:p.slopeDeg,azimuthDeg:p.azimuthDeg,rmse:p.rmse,coefficients:p.coefficients,bounds:p.bounds,polygon,planAreaFt2,slopedAreaFt2};
+  });
+
+  if(status)status.textContent='Saving accepted LiDAR roof facets…';
+  const r=await fetchWithTimeout('/api/roof-planes',{
+   method:'POST',
+   headers:{'content-type':'application/json'},
+   body:JSON.stringify({projectId,address:saved.address,planes:payload})
+  },12000);
+  const d=await r.json().catch(()=>({}));
   if(!r.ok||!d.ok)throw new Error(d.error||'Could not save roof facets.');
-  const accepted=payload.filter(p=>p.accepted),avgPitch=accepted.reduce((s,p)=>s+p.pitch12,0)/accepted.length,totalSloped=accepted.reduce((s,p)=>s+p.slopedAreaFt2,0),squares=totalSloped/100;
+
+  const accepted=payload.filter(p=>p.accepted);
+  const avgPitch=accepted.reduce((s,p)=>s+Number(p.pitch12||0),0)/accepted.length;
+  const totalSloped=accepted.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0);
+  const squares=totalSloped/100;
   const fc=document.querySelector('#roof-facets'),pit=document.querySelector('#roof-pitch'),sq=document.querySelector('#roof-squares');
-  if(fc)fc.textContent=accepted.length;if(pit)pit.textContent=avgPitch.toFixed(1)+'/12 avg';if(sq)sq.textContent=squares.toFixed(2)+' sq';
-  const takeoff=document.querySelector('#roof-takeoff');if(takeoff)takeoff.disabled=false;
+  if(fc)fc.textContent=accepted.length;
+  if(pit)pit.textContent=avgPitch.toFixed(1)+'/12 avg';
+  if(sq)sq.textContent=squares.toFixed(2)+' sq';
+  const takeoff=document.querySelector('#roof-takeoff');
+  if(takeoff)takeoff.disabled=false;
   if(status)status.textContent='LiDAR facets accepted ✓ · '+accepted.length+' facets · '+Math.round(totalSloped).toLocaleString()+' ft² sloped area · '+squares.toFixed(2)+' squares. Report is ready.';
- }catch(err){if(status)status.textContent='Could not save facets: '+err.message;if(btn)btn.disabled=false}
+ }catch(err){
+  const msg=err?.name==='AbortError'?'The save request timed out. Please try Accept Facets again.':(err?.message||String(err));
+  if(status)status.textContent='Could not accept facets: '+msg;
+ }finally{
+  if(btn)btn.disabled=false;
+ }
 });
 
 function escRoof(v){return String(v??'').replace(/[&<>"]/g,s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s]))}
