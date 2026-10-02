@@ -9,7 +9,12 @@ async function solarCrosscheck(env,outline,planes){
  const api=new URL("https://solar.googleapis.com/v1/buildingInsights:findClosest");
  api.searchParams.set("location.latitude",String(lat));api.searchParams.set("location.longitude",String(lng));api.searchParams.set("requiredQuality","BASE");api.searchParams.set("key",key);
  try{
-  const r=await fetch(api.toString(),{headers:{Accept:"application/json"}}),d=await r.json().catch(()=>({}));
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),5000);
+  let r,d;
+  try{
+   r=await fetch(api.toString(),{headers:{Accept:"application/json"},signal:controller.signal});
+   d=await r.json().catch(()=>({}));
+  }finally{clearTimeout(timer)}
   if(!r.ok)return {available:false,error:d?.error?.message||"Google Solar Building Insights unavailable.",status:r.status};
   const stats=d.solarPotential?.wholeRoofStats||{},segments=Array.isArray(d.solarPotential?.roofSegmentStats)?d.solarPotential.roofSegmentStats:[];
   const googleAreaM2=Number(stats.areaMeters2),googleAreaFt2=Number.isFinite(googleAreaM2)?googleAreaM2*10.7639104167:null;
@@ -37,7 +42,7 @@ async function solarCrosscheck(env,outline,planes){
    googleWeightedPitchDeg:googlePitch,lidarWeightedPitchDeg:lidarPitch,areaDifferencePct,pitchDifferenceDeg,
    googleSegments:solarSegments,lidarFacetCount:accepted.length,googleFacetCount:solarSegments.length,warnings
   };
- }catch(e){return {available:false,error:"Google Solar cross-check failed: "+String(e?.message||e)}}
+ }catch(e){return {available:false,error:e?.name==="AbortError"?"Google Solar cross-check timed out; saved roof measurements were still used.":"Google Solar cross-check failed: "+String(e?.message||e)}}
 }
 export async function onRequestGet({request,env}){
  if(!env.MEASURE_PHOTOS)return json({error:"R2 binding MEASURE_PHOTOS is not configured."},500);
