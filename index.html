@@ -123,6 +123,12 @@
           <div><div class="eyebrow">TRAINING BENCHMARK</div><h3>Compare against a verified roof report</h3><p class="muted">Enter the Roofr / Hover / manual reference measurements. Solaris scores topology first, then roof lines, pitch and area, and saves this case to the shared benchmark library.</p></div>
           <span id="roof-benchmark-badge" class="status">Not scored</span>
         </div>
+        <div id="roof-reference-drop" style="margin:12px 0;padding:22px;border:2px dashed #94a3b8;border-radius:12px;text-align:center;background:#f8fafc;cursor:pointer">
+          <strong>Drop a Roofr / Hover PDF here</strong><br>
+          <span class="muted">Solaris will extract the report totals, fill the benchmark fields, and save the report as training data.</span>
+          <input id="roof-reference-file" type="file" accept="application/pdf,.pdf" hidden>
+        </div>
+        <div id="roof-reference-status" class="analysis-state" style="margin-bottom:12px">No reference report uploaded for this roof yet.</div>
         <div class="metrics" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));align-items:end">
           <label>Reference source<input id="bench-source" value="Roofr" placeholder="Roofr"></label>
           <label>Sloped area ft²<input id="bench-area" type="number" step="0.1" min="1" placeholder="2580"></label>
