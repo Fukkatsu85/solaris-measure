@@ -433,10 +433,11 @@ function nearestFacetMeta(c,facets,F){
   return best;
 }
 
-export function buildRoofTopology(solarModel){
+export function buildRoofTopology(solarModel,options={}){
   const sm=solarModel||{},facets=sm.model?.facets||[],roofLines=sm.model?.roofLines||[],outlineLL=sm.outline||[];
   if(outlineLL.length<3)return null;
-  const learned=chooseLearnedRoofProfile(sm);
+  const baseLearned=chooseLearnedRoofProfile(sm);
+  const learned={...baseLearned,...(options?.profileOverride||{})};
   const all=[...outlineLL,...roofLines.flatMap(l=>[l.a,l.b]).filter(Boolean),...facets.flatMap(f=>f.outline||[])],F=frame(all);
   let perimeter=regularizePerimeter(outlineLL.map(F.toXY));
   if(polygonArea(perimeter)<0)perimeter.reverse();
@@ -486,9 +487,10 @@ export function buildRoofTopology(solarModel){
     lengthMeters:dist(graph.nodes[e.a],graph.nodes[e.b])
   }));
   return {
-    version:2.9,
+    version:3.0,
     source:"architectural-planar-topology-learned-priors",
     learnedProfile:learned,
+    baseLearnedProfile:baseLearned,
     dominantAngle:longest.ang,
     vertices,edges,faces,
     outline:perimeter.map(F.toLL),
