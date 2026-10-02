@@ -1510,6 +1510,54 @@ async function loadRoofBenchmark(){
   if(r.ok&&d.benchmark){fillBenchmarkForm(d.benchmark);renderBenchmarkScore(d.benchmark)}
  }catch{}
 }
+async function extractPdfText(file){
+ const pdfjs=await import('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs');
+ pdfjs.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs';
+ const data=new Uint8Array(await file.arrayBuffer()),pdf=await pdfjs.getDocument({data}).promise;
+ let text='';
+ for(let i=1;i<=pdf.numPages;i++){
+  const page=await pdf.getPage(i),content=await page.getTextContent();
+  text+='\n--- PAGE '+i+' ---\n'+content.items.map(x=>x.str).join(' ');
+ }
+ return text;
+}
+function applyExtractedBenchmark(x){
+ const map={
+  '#bench-source':x.source,'#bench-area':x.slopedAreaFt2,'#bench-facets':x.facetCount,'#bench-pitch':x.avgPitch12,
+  '#bench-perimeter':x.perimeterFt,'#bench-ridge':x.ridgeFt,'#bench-hip':x.hipFt,'#bench-valley':x.valleyFt,'#bench-eave':x.eaveFt,'#bench-rake':x.rakeFt
+ };
+ for(const [sel,val] of Object.entries(map)){const el=document.querySelector(sel);if(el&&val!=null&&val!=='')el.value=val}
+ const fa=document.querySelector('#bench-facet-areas');
+ if(fa&&Array.isArray(x.facetAreasFt2)&&x.facetAreasFt2.length)fa.value=x.facetAreasFt2.join(', ');
+}
+async function processReferenceRoofReport(file){
+ const status=document.querySelector('#roof-reference-status'),badge=document.querySelector('#roof-benchmark-badge');
+ if(!file)return;
+ if(!/\.pdf$/i.test(file.name)&&file.type!=='application/pdf'){if(status)status.textContent='Please upload a PDF roof report.';return}
+ if(status)status.textContent='Reading '+file.name+'…';if(badge)badge.textContent='Reading PDF';
+ try{
+  const text=await extractPdfText(file);
+  if(!text.trim())throw new Error('No readable text was found in this PDF.');
+  if(status)status.textContent='Extracting roof measurements…';
+  const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{},projectId=benchmarkProjectId();
+  const r=await fetch('/api/reference-report',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId,address:saved.address||'',fileName:file.name,text})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok||!d.ok)throw new Error(d.error||'Could not analyze reference report.');
+  const x=d.report?.extracted||{};applyExtractedBenchmark(x);
+  if(status)status.innerHTML='<strong>Reference report analyzed ✓</strong><br>'+escRoof(file.name)+' · '+(x.slopedAreaFt2?Math.round(x.slopedAreaFt2).toLocaleString()+' ft² · ':'')+(x.facetCount?x.facetCount+' facets · ':'')+(x.avgPitch12?Number(x.avgPitch12).toFixed(1)+'/12 average pitch':'Review extracted fields below.');
+  if(badge)badge.textContent='Reference loaded';
+  if(Number.isFinite(Number(x.slopedAreaFt2))&&Number.isFinite(Number(x.facetCount))){
+   document.querySelector('#score-roof-benchmark')?.click();
+  }
+ }catch(err){if(badge)badge.textContent='Upload issue';if(status)status.textContent='Could not analyze report: '+(err?.message||String(err))}
+}
+const roofDrop=document.querySelector('#roof-reference-drop'),roofFile=document.querySelector('#roof-reference-file');
+roofDrop?.addEventListener('click',()=>roofFile?.click());
+roofDrop?.addEventListener('dragover',e=>{e.preventDefault();roofDrop.style.borderColor='#2563eb'});
+roofDrop?.addEventListener('dragleave',()=>{roofDrop.style.borderColor='#94a3b8'});
+roofDrop?.addEventListener('drop',e=>{e.preventDefault();roofDrop.style.borderColor='#94a3b8';processReferenceRoofReport(e.dataTransfer?.files?.[0])});
+roofFile?.addEventListener('change',()=>processReferenceRoofReport(roofFile.files?.[0]));
+
 document.querySelector('#score-roof-benchmark')?.addEventListener('click',async()=>{
  const btn=document.querySelector('#score-roof-benchmark'),out=document.querySelector('#roof-benchmark-result'),badge=document.querySelector('#roof-benchmark-badge');
  const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{},projectId=benchmarkProjectId();
