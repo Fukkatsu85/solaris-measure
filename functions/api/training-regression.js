@@ -54,11 +54,13 @@ function currentMetrics(sm,outline,profileOverrides){
  const topologyFaces=(topology?.faces||[]).filter(f=>Number(f.slopedAreaSqFt||0)>0);
  return {
   facetCount:modelFacets.length,slopedAreaFt2:slopedArea,avgPitch12:avgPitch,
+  googleSegmentCount:num(sm?.googleRoofSegmentCount),
+  dsmFacetCount:modelFacets.length,
+  topologyFaceCount:topologyFaces.length,
   ...edges,ridgeHipFt:Number(edges.ridgeFt||0)+Number(edges.hipFt||0),
   footprintAreaFt2:num(outline?.measurement?.planAreaFt2),
   footprintPerimeterFt:num(outline?.measurement?.perimeterFt),
   facetAreasFt2:facetAreas,
-  topologyFaceCount:topologyFaces.length,
   googleWholeRoofAreaFt2:googleWhole,
   rasterFacetAreaFt2:modelArea,
   areaAuthority:googleWhole!=null?"google-whole-roof":"raster-facet-model",
@@ -73,7 +75,10 @@ function score(cur,ref){
   facets:ref.facetCount?Math.abs(cur.facetCount-ref.facetCount)/ref.facetCount*100:null,
   pitch:pct(cur.avgPitch12,ref.avgPitch12),
   footprintArea:pct(cur.footprintAreaFt2,ref.footprintAreaFt2),
-  footprintPerimeter:pct(cur.footprintPerimeterFt,ref.footprintPerimeterFt)
+  footprintPerimeter:pct(cur.footprintPerimeterFt,ref.footprintPerimeterFt),
+  googleSegments:ref.facetCount&&cur.googleSegmentCount!=null?Math.abs(cur.googleSegmentCount-ref.facetCount)/ref.facetCount*100:null,
+  dsmFacets:ref.facetCount&&cur.dsmFacetCount!=null?Math.abs(cur.dsmFacetCount-ref.facetCount)/ref.facetCount*100:null,
+  topologyFaces:ref.facetCount&&cur.topologyFaceCount!=null?Math.abs(cur.topologyFaceCount-ref.facetCount)/ref.facetCount*100:null
  };
  const edgeKeys=(ref.ridgeHipFt!=null?["ridgeHipFt"]:["ridgeFt","hipFt"]).concat(["valleyFt","eaveFt","rakeFt","perimeterFt"]);
  const edgeErrors=edgeKeys.map(k=>ref[k]!=null?pct(cur[k],ref[k]):null).filter(Number.isFinite);
@@ -123,6 +128,7 @@ export async function onRequestGet({env}){
   averageScore:mean(scored.map(r=>r.score.overall)),medianScore:median(scored.map(r=>r.score.overall)),
   averageAreaErrorPct:av("area"),averageFacetErrorPct:av("facets"),averageEdgeErrorPct:av("edges"),
   averagePitchErrorPct:av("pitch"),averageFootprintAreaErrorPct:av("footprintArea"),averageFootprintPerimeterErrorPct:av("footprintPerimeter"),
+  averageGoogleSegmentFacetErrorPct:av("googleSegments"),averageDsmFacetErrorPct:av("dsmFacets"),averageTopologyFaceErrorPct:av("topologyFaces"),
   regressionGate:{maxAreaErrorPct:8,maxFacetErrorPct:25,maxEdgeErrorPct:25,minOverallScore:70},
   topologyOptimizerVersion:optimizer?.version||null,
   optimizedProfiles:Object.keys(profileOverrides).length
