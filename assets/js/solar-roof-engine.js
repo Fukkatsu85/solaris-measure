@@ -1130,7 +1130,7 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
       if(groups.length<=1)return;
       const pixelMeters=Math.max(.1,Number(mask.pixelSize)||.1);
       const pixelAreaM2=pixelMeters*pixelMeters;
-      const minExtraAreaM2=.65; // about 7 ft²: below this, extra islands are usually raster noise
+      const minExtraAreaM2=candidates.length<=4?2.8:(candidates.length<=6?1.2:.22); // simple roofs: aggressively collapse islands; complex roofs: preserve micro-facets
       groups.slice(1).forEach(group=>{
         const xs=group.map(idx=>idx%mask.width),ys=group.map(idx=>Math.floor(idx/mask.width));
         const spanXpx=Math.max(...xs)-Math.min(...xs)+1,spanYpx=Math.max(...ys)-Math.min(...ys)+1;
@@ -1139,7 +1139,9 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
         const bboxPixels=Math.max(1,spanXpx*spanYpx);
         const compactness=group.length/bboxPixels;
         // Preserve only physically meaningful secondary pieces of the same roof plane.
-        if(areaM2>=minExtraAreaM2&&Math.min(spanXm,spanYm)>=.65&&compactness>=.28)return;
+        const minSpan=candidates.length<=4?1.35:(candidates.length<=6?.9:.45);
+        const minCompact=candidates.length<=4?.42:(candidates.length<=6?.34:.20);
+        if(areaM2>=minExtraAreaM2&&Math.min(spanXm,spanYm)>=minSpan&&compactness>=minCompact)return;
         const votes=new Map();
         group.forEach(idx=>{
           const x=idx%mask.width,y=Math.floor(idx/mask.width);
@@ -1164,7 +1166,7 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
 
   const facets=[];
   const pixelMeters=Math.max(.1,Number(mask.pixelSize)||.1);
-  const minSecondaryAreaM2=.65; // ~7 ft²
+  const minSecondaryAreaM2=candidates.length<=4?2.8:(candidates.length<=6?1.2:.22);
   byLabel.forEach((indices,i)=>{
     if(!indices.length)return;
     const groups=connectedComponentsForLabel(indices,mask.width,mask.height);
@@ -1177,7 +1179,9 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
       const areaM2=group.length*maskPixelArea;
       const compactness=group.length/Math.max(1,spanXpx*spanYpx);
       const isPrimary=componentIndex===0;
-      const physicalSecondary=isPrimary||(areaM2>=minSecondaryAreaM2&&Math.min(spanXm,spanYm)>=.65&&compactness>=.28);
+      const minSpan=candidates.length<=4?1.35:(candidates.length<=6?.9:.45);
+      const minCompact=candidates.length<=4?.42:(candidates.length<=6?.34:.20);
+      const physicalSecondary=isPrimary||(areaM2>=minSecondaryAreaM2&&Math.min(spanXm,spanYm)>=minSpan&&compactness>=minCompact);
       if(!physicalSecondary)return;
 
       const groupSet=new Set(group);
@@ -1219,7 +1223,7 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
   // The original 24-facet ceiling made verified 38–44 facet roofs impossible
   // to represent. Scale the cap with the number of independent plane seeds,
   // while retaining a hard safety ceiling for pathological raster noise.
-  const facetCap=Math.min(64,Math.max(12,candidates.length*3));
+  const facetCap=64;
   const kept=facets.slice(0,facetCap);
   const coveredPixels=kept.reduce((sum,f)=>sum+(f.pixelCount||0),0);
   const roofLines=extractSharedRoofLines(mask,component,labels,candidates,dsm);
@@ -1330,7 +1334,7 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
   model.rawCandidatePlaneCount=facetResult.rawCandidateCount??null;
   model.candidatePlaneCount=facetResult.candidateCount??null;
   model.facetCap=facetResult.facetCap??null;
-  model.facetEngineVersion="2026-10-02-r2";
+  model.facetEngineVersion="2026-10-02-r3";
   return {outline,rawCornerCount,quality:mask.quality||dsm.quality,model};
 }
 
