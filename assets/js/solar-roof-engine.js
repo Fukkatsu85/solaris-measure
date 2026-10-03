@@ -1130,7 +1130,7 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
       if(groups.length<=1)return;
       const pixelMeters=Math.max(.1,Number(mask.pixelSize)||.1);
       const pixelAreaM2=pixelMeters*pixelMeters;
-      const minExtraAreaM2=candidates.length<=4?2.8:(candidates.length<=6?1.2:.22); // simple roofs: aggressively collapse islands; complex roofs: preserve micro-facets
+      const minExtraAreaM2=1.85; // ~20 ft²; secondary islands below this are usually segmentation fragments
       groups.slice(1).forEach(group=>{
         const xs=group.map(idx=>idx%mask.width),ys=group.map(idx=>Math.floor(idx/mask.width));
         const spanXpx=Math.max(...xs)-Math.min(...xs)+1,spanYpx=Math.max(...ys)-Math.min(...ys)+1;
@@ -1139,9 +1139,9 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
         const bboxPixels=Math.max(1,spanXpx*spanYpx);
         const compactness=group.length/bboxPixels;
         // Preserve only physically meaningful secondary pieces of the same roof plane.
-        const minSpan=candidates.length<=4?1.35:(candidates.length<=6?.9:.45);
-        const minCompact=candidates.length<=4?.42:(candidates.length<=6?.34:.20);
-        if(areaM2>=minExtraAreaM2&&Math.min(spanXm,spanYm)>=minSpan&&compactness>=minCompact)return;
+        const share=group.length/Math.max(1,indices.length);
+        const strongSecondary=areaM2>=minExtraAreaM2&&Math.min(spanXm,spanYm)>=1.0&&compactness>=.34&&share>=.12;
+        if(strongSecondary)return;
         const votes=new Map();
         group.forEach(idx=>{
           const x=idx%mask.width,y=Math.floor(idx/mask.width);
@@ -1166,7 +1166,7 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
 
   const facets=[];
   const pixelMeters=Math.max(.1,Number(mask.pixelSize)||.1);
-  const minSecondaryAreaM2=candidates.length<=4?2.8:(candidates.length<=6?1.2:.22);
+  const minSecondaryAreaM2=1.85;
   byLabel.forEach((indices,i)=>{
     if(!indices.length)return;
     const groups=connectedComponentsForLabel(indices,mask.width,mask.height);
@@ -1179,9 +1179,8 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
       const areaM2=group.length*maskPixelArea;
       const compactness=group.length/Math.max(1,spanXpx*spanYpx);
       const isPrimary=componentIndex===0;
-      const minSpan=candidates.length<=4?1.35:(candidates.length<=6?.9:.45);
-      const minCompact=candidates.length<=4?.42:(candidates.length<=6?.34:.20);
-      const physicalSecondary=isPrimary||(areaM2>=minSecondaryAreaM2&&Math.min(spanXm,spanYm)>=minSpan&&compactness>=minCompact);
+      const share=group.length/Math.max(1,indices.length);
+      const physicalSecondary=isPrimary||(areaM2>=minSecondaryAreaM2&&Math.min(spanXm,spanYm)>=1.0&&compactness>=.34&&share>=.12);
       if(!physicalSecondary)return;
 
       const groupSet=new Set(group);
@@ -1220,10 +1219,12 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
   });
 
   facets.sort((a,b)=>b.slopedAreaSqFt-a.slopedAreaSqFt);
-  // The original 24-facet ceiling made verified 38–44 facet roofs impossible
-  // to represent. Scale the cap with the number of independent plane seeds,
-  // while retaining a hard safety ceiling for pathological raster noise.
-  const facetCap=64;
+  // Keep one primary component per plane plus only strongly supported secondary
+  // components. This prevents simple roofs from fragmenting into dozens of
+  // artificial facets while still allowing complex roofs to exceed the Google
+  // segment count when the raster contains a real disconnected plane region.
+  const primaryCount=facets.filter(f=>!f.smallFacet).length;
+  const facetCap=Math.min(64,Math.max(primaryCount,Math.round(primaryCount*1.45)+2));
   const kept=facets.slice(0,facetCap);
   const coveredPixels=kept.reduce((sum,f)=>sum+(f.pixelCount||0),0);
   const roofLines=extractSharedRoofLines(mask,component,labels,candidates,dsm);
@@ -1334,7 +1335,7 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
   model.rawCandidatePlaneCount=facetResult.rawCandidateCount??null;
   model.candidatePlaneCount=facetResult.candidateCount??null;
   model.facetCap=facetResult.facetCap??null;
-  model.facetEngineVersion="2026-10-02-r3";
+  model.facetEngineVersion="2026-10-03-r4";
   return {outline,rawCornerCount,quality:mask.quality||dsm.quality,model};
 }
 
