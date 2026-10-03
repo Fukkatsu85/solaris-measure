@@ -1655,7 +1655,9 @@ function renderRoofRegression(data){
    ['Processed',s.processedCases??0],
    ['Average score',fmtRegression(s.averageScore,' /100')],
    ['Area error',fmtRegression(s.averageAreaErrorPct,'%')],
-   ['Facet error',fmtRegression(s.averageFacetErrorPct,'%')],
+   ['DSM facet error',fmtRegression(s.averageDsmFacetErrorPct??s.averageFacetErrorPct,'%')],
+   ['Google segment err',fmtRegression(s.averageGoogleSegmentFacetErrorPct,'%')],
+   ['Topology face err',fmtRegression(s.averageTopologyFaceErrorPct,'%')],
    ['Roof-line error',fmtRegression(s.averageEdgeErrorPct,'%')]
   ];
   summary.innerHTML=cards.map(([a,b])=>'<div class="metric"><span>'+escRoof(a)+'</span><strong>'+escRoof(b)+'</strong></div>').join('');
@@ -1664,12 +1666,13 @@ function renderRoofRegression(data){
  const failures=scored.filter(r=>r.gatePass===false);
  if(status){
   status.innerHTML='<strong>Regression complete.</strong> '+Number(s.processedCases||0)+' of '+Number(s.totalCases||rows.length)+' cases currently have saved Solaris geometry. '+
+   '<br><span class="muted">Facet diagnostics: DSM '+fmtRegression(s.averageDsmFacetErrorPct??s.averageFacetErrorPct,'%')+' · Google segments '+fmtRegression(s.averageGoogleSegmentFacetErrorPct,'%')+' · Topology faces '+fmtRegression(s.averageTopologyFaceErrorPct,'%')+'.</span> '+
    (failures.length?'<strong>'+failures.length+' processed case'+(failures.length===1?'':'s')+' fail the regression gate.</strong>':'All processed cases pass the current gate.')+
    (Number(s.pendingCases||0)?' '+Number(s.pendingCases)+' case'+(Number(s.pendingCases)===1?'':'s')+' still need an initial Solaris process run.':'');
  }
  if(!results)return;
  const ordered=[...scored,...rows.filter(r=>r.status!=='scored')];
- results.innerHTML='<table><thead><tr><th>Roof</th><th>Type</th><th>Ref facets</th><th>Solaris</th><th>Area err</th><th>Facet err</th><th>Lines err</th><th>Score</th><th>Gate</th></tr></thead><tbody>'+
+ results.innerHTML='<table><thead><tr><th>Roof</th><th>Type</th><th>Ref</th><th>Google seg</th><th>DSM facets</th><th>Topo faces</th><th>Area err</th><th>Lines err</th><th>Score</th><th>Gate</th></tr></thead><tbody>'+
   ordered.map(r=>{
    const e=r.score?.errors||{},cur=r.current||{},pending=r.status!=='scored';
    const gate=pending?'Pending':(r.gatePass?'Pass':'Review');
@@ -1677,9 +1680,10 @@ function renderRoofRegression(data){
     '<td><strong>'+escRoof(r.address)+'</strong><br><span class="muted">'+escRoof(r.source||'')+'</span></td>'+
     '<td>'+escRoof(r.archetype||'—')+'</td>'+
     '<td>'+escRoof(r.reference?.facetCount??'—')+'</td>'+
-    '<td>'+(pending?'—':escRoof(cur.facetCount??'—'))+'</td>'+
+    '<td>'+(pending?'—':escRoof(cur.googleSegmentCount??'—'))+'</td>'+
+    '<td>'+(pending?'—':escRoof(cur.dsmFacetCount??cur.facetCount??'—'))+'</td>'+
+    '<td>'+(pending?'—':escRoof(cur.topologyFaceCount??'—'))+'</td>'+
     '<td>'+fmtRegression(e.area,'%')+'</td>'+
-    '<td>'+fmtRegression(e.facets,'%')+'</td>'+
     '<td>'+fmtRegression(e.edges,'%')+'</td>'+
     '<td>'+(pending?'—':fmtRegression(r.score?.overall,' /100'))+'</td>'+
     '<td><strong>'+gate+'</strong></td>'+
