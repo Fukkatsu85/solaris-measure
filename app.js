@@ -1471,7 +1471,12 @@ async function generateRoofReport(){
   const lidarSloped=facets.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0);
   const dsmSloped=Number(sm?.model?.slopedAreaSqFt||0);
   const googleWholeSloped=Number(sm?.googleWholeRoofAreaFt2||0);
-  const sloped=googleWholeSloped>0?googleWholeSloped:(dsmSloped>0?dsmSloped:lidarSloped),squares=sloped/100,lines=roofLineTotals(d);
+  const footprintArea=Number(sm?.model?.footprintSqFt||plan||0);
+  const googleToDsm=(googleWholeSloped>0&&dsmSloped>0)?googleWholeSloped/dsmSloped:null;
+  const googleAreaSane=googleWholeSloped>0
+    &&(googleToDsm==null||(googleToDsm>=.55&&googleToDsm<=1.8))
+    &&(!footprintArea||googleWholeSloped/footprintArea<=3);
+  const sloped=googleAreaSane?googleWholeSloped:(dsmSloped>0?dsmSloped:lidarSloped),squares=sloped/100,lines=roofLineTotals(d);
   const reportFacetCount=Number(dsmFacets.length||facets.length||d.topology?.faces?.length||0);
   const wholePitch=v=>Math.round(Number(v)||0);
   const pitchWeightTotal=dsmFacets.reduce((s,f)=>s+Number(f.slopedAreaSqFt||f.flatAreaSqFt||0),0);
@@ -1696,21 +1701,37 @@ function trainingSlug(address){
  return 'training-'+String(address||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,72);
 }
 async function bootstrapTrainingCase(row,engine){
- const address=row.address,geoR=await fetch('/api/geocode?address='+encodeURIComponent(address),{cache:'no-store'});
- const geo=await geoR.json().catch(()=>({}));
- if(!geoR.ok||!geo.ok)throw new Error(geo.error||'Could not geocode address.');
- const lat=Number(geo.lat),lng=Number(geo.lng);
- if(geo.source==='google'&&!geo.rooftop)throw new Error('Google geocode was not rooftop-precise ('+(geo.precision||'unknown')+').');
+ const address=row.address;
+ // Training geometry must start from a rooftop-level coordinate. The server
+ // geocoder can fall back to Census interpolation, which is good enough for a
+ // map but can select a neighboring building in Google Solar.
+ await loadRoofMapsJs();
+ const geocoder=new google.maps.Geocoder();
+ const gres=await geocoder.geocode({address});
+ const hit=gres?.results?.[0],loc=hit?.geometry?.location;
+ const lat=typeof loc?.lat==='function'?loc.lat():Number(loc?.lat);
+ const lng=typeof loc?.lng==='function'?loc.lng():Number(loc?.lng);
+ const precision=hit?.geometry?.location_type||null;
+ if(!Number.isFinite(lat)||!Number.isFinite(lng))throw new Error('Google Maps could not geocode this address.');
+ if(precision!=='ROOFTOP')throw new Error('Google Maps geocode was not rooftop-precise ('+(precision||'unknown')+').');
+ const geo={source:'google-browser',address:hit?.formatted_address||address,lat,lng,precision,rooftop:true};
  const br=await fetch('/api/solar-building?lat='+encodeURIComponent(lat)+'&lng='+encodeURIComponent(lng),{cache:'no-store'});
  const building=await br.json().catch(()=>({}));
  if(!br.ok||!building.ok)throw new Error(building.error||'Google Solar Building Insights unavailable.');
+ const bc=building.center;
+ if(bc&&Number.isFinite(Number(bc.latitude))&&Number.isFinite(Number(bc.longitude))){
+  const dy=(Number(bc.latitude)-lat)*111320;
+  const dx=(Number(bc.longitude)-lng)*111320*Math.cos(lat*Math.PI/180);
+  const centerDistance=Math.hypot(dx,dy);
+  if(centerDistance>35)throw new Error('Google Solar selected a building '+centerDistance.toFixed(1)+' m from the rooftop geocode.');
+ }
  const result=await engine.buildSolarRoofModel(lat,lng,building.roofSegments||[]);
  const measurements=engine.buildRoofMeasurements(result.outline,result.model.facets||[],result.model.roofLines||[]);
  const projectId=trainingSlug(address);
  const solarModel={
   source:'google-solar-dsm',
   trainingAuto:true,
-  trainingVersion:'r39-rooftop',
+  trainingVersion:'r39-browser-rooftop-v2',
   geocodeSource:geo.source||null,
   geocodePrecision:geo.precision||null,
   geocodeRooftop:Boolean(geo.rooftop),
