@@ -1460,7 +1460,8 @@ async function generateRoofReport(){
     let profileOverrides={};
     try{
      const cr=await fetch('/api/training-topology-optimizer',{cache:'no-store'}),cd=await cr.json().catch(()=>({}));
-     profileOverrides=cd?.config?.profileOverrides||{};
+     const cfg=cd?.config||null;
+     profileOverrides=(cfg?.version==='topology-opt-2-scope-aware'&&cfg?.scopePolicy==='primary-building-only')?(cfg.profileOverrides||{}):{};
     }catch{}
     d.topology=topo.buildRoofTopology(sm,{profileOverrides});
    }catch(err){console.warn('Roof topology engine unavailable',err)}
