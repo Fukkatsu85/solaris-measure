@@ -1249,15 +1249,24 @@ function planeResultQuality(result){
   const lines=Array.isArray(result.roofLines)?result.roofLines:[];
   const lineStrengths=lines.map(l=>Math.max(Number(l.planeStrength||0),Number(l.creaseStrength||0))).filter(Number.isFinite);
   const lineStrength=lineStrengths.length?Math.min(1,median(lineStrengths)/.45):0;
+  const internalLineM=lines.reduce((s,l)=>s+Math.max(0,Number(l.length3dMeters||l.lengthMeters||0)),0);
+  const footprintM2=Math.max(1,Number(result.footprintM2||1));
+  const lineRatio=internalLineM/Math.sqrt(footprintM2);
+  // One very short strong crease used to score well even when most ridges/valleys
+  // were missing. Reward useful internal-line coverage, but cap the benefit so
+  // noisy line explosions cannot win.
+  const lineExtentScore=Math.max(0,Math.min(1,lineRatio/1.35));
+  const lineOverflowPenalty=Math.max(0,lineRatio-5)*2;
   const facets=Array.isArray(result.facets)?result.facets:[];
   const residuals=facets.map(f=>Number(f.dsmResidualM)).filter(Number.isFinite);
   const residualScore=residuals.length?Math.max(0,1-median(residuals)/.65):.5;
   const google=Math.max(1,Number(result.googleCandidateCount||0));
   const inflation=Math.max(0,facets.length-(google*1.8+2));
-  return supportScore*40+coverageScore*30+lineStrength*15+residualScore*15-Math.min(15,inflation*1.5);
+  return supportScore*35+coverageScore*25+lineStrength*12+lineExtentScore*13+residualScore*15
+    -Math.min(15,inflation*1.5)-Math.min(12,lineOverflowPenalty);
 }
 
-function detectPlaneIntersectionFacets(mask,component,dsm,solarSegments,rawOutline,rgb=null,{includeDsmRegions=true}={}){
+function detectPlaneIntersectionFacets(mask,component,dsm,solarSegments,rawOutline,rgb=null,{includeDsmRegions=true,bboxPadM=1.25}={}){
   if(!Array.isArray(rawOutline)||rawOutline.length<3)return {valid:false,reason:"outline"};
   const {raw,candidates,googleCandidates=0,dsmRegionCandidates=0}=planeCandidateSet(solarSegments,dsm,rgb,mask,component,{includeDsmRegions});
   if(candidates.length<2)return {valid:false,reason:"planes",rawCandidateCount:raw.length,candidateCount:candidates.length};
@@ -1274,7 +1283,7 @@ function detectPlaneIntersectionFacets(mask,component,dsm,solarSegments,rawOutli
     if(bb?.sw&&bb?.ne){
       const sw=frame.toXY({lat:Number(bb.sw.latitude),lng:Number(bb.sw.longitude)});
       const ne=frame.toXY({lat:Number(bb.ne.latitude),lng:Number(bb.ne.longitude)});
-      const pad=1.25;
+      const pad=Math.max(0,Number(bboxPadM)||0);
       cell=clipPolygonRectXY(cell,Math.min(sw.x,ne.x)-pad,Math.min(sw.y,ne.y)-pad,Math.max(sw.x,ne.x)+pad,Math.max(sw.y,ne.y)+pad);
     }
 
@@ -1348,7 +1357,11 @@ function detectPlaneIntersectionFacets(mask,component,dsm,solarSegments,rawOutli
     valid,facets:cells.sort((a,b)=>b.slopedAreaSqFt-a.slopedAreaSqFt),roofLines:dedupeRoofLines(roofLines),
     assignedCoverage:Math.min(1,areaCoverage),rgbAssisted:false,rawCandidateCount:raw.length,candidateCount:candidates.length,
     googleCandidateCount:googleCandidates,dsmRegionCandidateCount:dsmRegionCandidates,
-    areaCoverage,medianSupport,engine:includeDsmRegions?"plane-v3-dsm-regions":"plane-v2-google-only",reason:valid?null:"quality"
+    areaCoverage,medianSupport,footprintM2,
+    bboxPadM:Number(bboxPadM)||0,
+    totalInternalLineMeters:roofLines.reduce((s,l)=>s+Math.max(0,Number(l.length3dMeters||l.lengthMeters||0)),0),
+    engine:(Number(bboxPadM)>2?(includeDsmRegions?"plane-v4-wide-dsm":"plane-v4-wide-google"):(includeDsmRegions?"plane-v3-dsm-regions":"plane-v2-google-only")),
+    reason:valid?null:"quality"
   };
   result.qualityScore=planeResultQuality(result);
   return result;
@@ -1666,20 +1679,28 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
 
   const model=analyzeDsmRoof(mask,component,dsm);
   const rasterFacetResult=detectRoofFacets(mask,component,dsm,solarSegments,rgb);
-  const planeV2=detectPlaneIntersectionFacets(mask,component,dsm,solarSegments,rawOutline,rgb,{includeDsmRegions:false});
-  const planeV3=detectPlaneIntersectionFacets(mask,component,dsm,solarSegments,rawOutline,rgb,{includeDsmRegions:true});
-  let planeFacetResult=null;
+  const planeV2=detectPlaneIntersectionFacets(mask,component,dsm,solarSegments,rawOutline,rgb,{includeDsmRegions:false,bboxPadM:1.25});
+  const planeV3=detectPlaneIntersectionFacets(mask,component,dsm,solarSegments,rawOutline,rgb,{includeDsmRegions:true,bboxPadM:1.25});
+  let tightBest=null;
   if(planeV2.valid&&planeV3.valid){
-    // DSM augmentation must beat the Google-only hypothesis on independent
-    // geometry quality; otherwise retain the simpler model.
-    planeFacetResult=Number(planeV3.qualityScore)>Number(planeV2.qualityScore)+2.5?planeV3:planeV2;
-  }else planeFacetResult=planeV3.valid?planeV3:(planeV2.valid?planeV2:null);
+    tightBest=Number(planeV3.qualityScore)>Number(planeV2.qualityScore)+2.5?planeV3:planeV2;
+  }else tightBest=planeV3.valid?planeV3:(planeV2.valid?planeV2:null);
+
+  // Google segment bounding boxes are often conservative and were truncating
+  // otherwise valid ridge/valley intersections to 1–2 m. Re-run the winning
+  // plane family with a wider soft neighborhood and keep it only when the
+  // independent DSM/coverage/line-quality score improves.
+  const wideUsesDsm=tightBest?tightBest.engine==="plane-v3-dsm-regions":true;
+  const planeWide=detectPlaneIntersectionFacets(mask,component,dsm,solarSegments,rawOutline,rgb,{includeDsmRegions:wideUsesDsm,bboxPadM:6});
+  let planeFacetResult=tightBest;
+  if(planeWide.valid&&(!planeFacetResult||Number(planeWide.qualityScore)>Number(planeFacetResult.qualityScore)+1.5))planeFacetResult=planeWide;
+
   const facetResult=planeFacetResult||rasterFacetResult;
 
   let outline=simplifyOutline(rawOutline,24);
   let finalFacets=facetResult.facets;
   let finalRoofLines=facetResult.roofLines||[];
-  let geometryMode=planeFacetResult?(planeFacetResult.engine==="plane-v3-dsm-regions"?"plane_intersection_v3_selected":"plane_intersection_v2_selected"):"detailed_raster_fallback";
+  let geometryMode=planeFacetResult?("plane_intersection_"+planeFacetResult.engine+"_selected"):"detailed_raster_fallback";
 
   const simple=regularizeSimpleGable(rawOutline,finalFacets,finalRoofLines);
   if(simple){
@@ -1698,7 +1719,11 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
   model.rawCandidatePlaneCount=facetResult.rawCandidateCount??null;
   model.candidatePlaneCount=facetResult.candidateCount??null;
   model.facetCap=facetResult.facetCap??null;
-  model.facetEngineVersion=planeFacetResult?(planeFacetResult.engine==="plane-v3-dsm-regions"?"plane-v3-selected":"plane-v2-selected"):"raster-r4-fallback";
+  model.facetEngineVersion=planeFacetResult?(
+    planeFacetResult.engine==="plane-v4-wide-dsm"?"plane-v4-wide-dsm-selected":
+    planeFacetResult.engine==="plane-v4-wide-google"?"plane-v4-wide-google-selected":
+    planeFacetResult.engine==="plane-v3-dsm-regions"?"plane-v3-selected":"plane-v2-selected"
+  ):"raster-r4-fallback";
   model.planeIntersectionDiagnostics={
     valid:Boolean(planeFacetResult),
     selected:planeFacetResult?.engine||"raster-r4-fallback",
@@ -1710,7 +1735,8 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
     googleCandidateCount:Number.isFinite(Number(planeFacetResult?.googleCandidateCount))?Number(planeFacetResult.googleCandidateCount):null,
     dsmRegionCandidateCount:Number.isFinite(Number(planeFacetResult?.dsmRegionCandidateCount))?Number(planeFacetResult.dsmRegionCandidateCount):null,
     googleOnly:{valid:Boolean(planeV2.valid),qualityScore:Number.isFinite(Number(planeV2.qualityScore))?Number(planeV2.qualityScore):null,facets:Array.isArray(planeV2.facets)?planeV2.facets.length:0,lines:Array.isArray(planeV2.roofLines)?planeV2.roofLines.length:0},
-    dsmAugmented:{valid:Boolean(planeV3.valid),qualityScore:Number.isFinite(Number(planeV3.qualityScore))?Number(planeV3.qualityScore):null,facets:Array.isArray(planeV3.facets)?planeV3.facets.length:0,lines:Array.isArray(planeV3.roofLines)?planeV3.roofLines.length:0}
+    dsmAugmented:{valid:Boolean(planeV3.valid),qualityScore:Number.isFinite(Number(planeV3.qualityScore))?Number(planeV3.qualityScore):null,facets:Array.isArray(planeV3.facets)?planeV3.facets.length:0,lines:Array.isArray(planeV3.roofLines)?planeV3.roofLines.length:0},
+    wide:{valid:Boolean(planeWide.valid),engine:planeWide.engine||null,qualityScore:Number.isFinite(Number(planeWide.qualityScore))?Number(planeWide.qualityScore):null,facets:Array.isArray(planeWide.facets)?planeWide.facets.length:0,lines:Array.isArray(planeWide.roofLines)?planeWide.roofLines.length:0,totalInternalLineMeters:Number(planeWide.totalInternalLineMeters||0)}
   };
   return {outline,rawCornerCount,quality:mask.quality||dsm.quality,model};
 }
