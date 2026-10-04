@@ -113,7 +113,8 @@ function refFor(t){return {
 export async function onRequestGet({env}){
  if(!env.MEASURE_PHOTOS)return json({error:"R2 binding MEASURE_PHOTOS is not configured."},500);
  const optimizer=await readJson(env,"training/_topology_optimizer.json");
- const profileOverrides=optimizer?.profileOverrides||{};
+ const optimizerValid=optimizer?.version==="topology-opt-2-scope-aware"&&optimizer?.scopePolicy==="primary-building-only";
+ const profileOverrides=optimizerValid?(optimizer?.profileOverrides||{}):{};
  const keys=await listSolarModels(env);
  const models=[];
  for(const key of keys){
@@ -146,7 +147,8 @@ export async function onRequestGet({env}){
   averagePitchErrorPct:av("pitch"),averageFootprintAreaErrorPct:av("footprintArea"),averageFootprintPerimeterErrorPct:av("footprintPerimeter"),
   averageGoogleSegmentFacetErrorPct:av("googleSegments"),averageDsmFacetErrorPct:av("dsmFacets"),averageTopologyFaceErrorPct:av("topologyFaces"),
   regressionGate:{maxAreaErrorPct:8,maxFacetErrorPct:25,maxEdgeErrorPct:25,minOverallScore:70},
-  topologyOptimizerVersion:optimizer?.version||null,
+  topologyOptimizerVersion:optimizerValid?optimizer.version:null,
+  ignoredTopologyOptimizerVersion:!optimizerValid?(optimizer?.version||null):null,
   optimizedProfiles:Object.keys(profileOverrides).length
  };
  for(const r of rows)if(r.status==="scored"){
