@@ -139,7 +139,7 @@ export async function onRequestGet({env}){
  const geometryRows=rows.filter(r=>r.status!=="not-processed");
  const av=k=>mean(scored.map(r=>r.score.errors[k]));
  const summary={
-  trainingVersion:LEARNED_PRIORS_V1.version,totalCases:rows.length,processedCases:scored.length,geometryProcessedCases:geometryRows.length,
+  trainingVersion:LEARNED_PRIORS_V1.version,totalCases:rows.length,processedCases:geometryRows.length,comparableCases:scored.length,geometryProcessedCases:geometryRows.length,
   pendingCases:rows.filter(r=>r.status==="not-processed").length,scopeSpecificCases:rows.filter(r=>r.status==="scope-specific").length,
   averageScore:mean(scored.map(r=>r.score.overall)),medianScore:median(scored.map(r=>r.score.overall)),
   averageAreaErrorPct:av("area"),averageFacetErrorPct:av("facets"),averageEdgeErrorPct:av("edges"),
