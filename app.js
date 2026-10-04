@@ -1467,7 +1467,9 @@ async function generateRoofReport(){
    }catch(err){console.warn('Roof topology engine unavailable',err)}
   }
   const topologyPerimFt=(d.topology?.edges||[]).filter(e=>e.type==='perimeter').reduce((s,e)=>s+Number(e.lengthMeters||0)*3.280839895,0);
-  const perim=topologyPerimFt>0?topologyPerimFt:basePerim;
+  const lines=roofLineTotals(d);
+  const roofEdgePerimFt=Number(lines.eave||0)+Number(lines.rake||0);
+  const perim=roofEdgePerimFt>0?roofEdgePerimFt:(topologyPerimFt>0?topologyPerimFt:basePerim);
   const lidarSloped=facets.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0);
   const dsmSloped=Number(sm?.model?.slopedAreaSqFt||0);
   const googleWholeSloped=Number(sm?.googleWholeRoofAreaFt2||0);
@@ -1493,7 +1495,7 @@ async function generateRoofReport(){
   const consensusArea=areaCandidates.length===1?areaCandidates[0]
     :areaCandidates.length%2?areaCandidates[(areaCandidates.length-1)/2]
     :(areaCandidates[areaCandidates.length/2-1]+areaCandidates[areaCandidates.length/2])/2;
-  const sloped=consensusArea>0?consensusArea:(lidarSloped>0?lidarSloped:dsmSloped),squares=sloped/100,lines=roofLineTotals(d);
+  const sloped=consensusArea>0?consensusArea:(lidarSloped>0?lidarSloped:dsmSloped),squares=sloped/100;
   const reportFacetCount=Number(dsmFacets.length||facets.length||d.topology?.faces?.length||0);
   const waste=[10,12,15].map(w=>({w,area:sloped*(1+w/100),sq:squares*(1+w/100)}));
   const facetRows=(dsmFacets.length?dsmFacets:facets).map((p,i)=>{
