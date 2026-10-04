@@ -1766,7 +1766,7 @@ document.querySelector('#bootstrap-roof-training')?.addEventListener('click',asy
   const byAddress=new Map();for(const r of pendingRows)if(!byAddress.has(r.address))byAddress.set(r.address,r);
   const queue=[...byAddress.values()];
   if(!queue.length){if(status)status.textContent='All eligible training roofs already use line engine v5.';return}
-  const engine=await import('/assets/js/solar-roof-engine.js?v=20261004-line-trace-v5');
+  const engine=await import('/assets/js/solar-roof-engine.js?v=20261004-line-trace-v5b');
   let done=0,failed=0;const failures=[];
   const worker=async()=>{
    while(queue.length){
@@ -1882,7 +1882,7 @@ async function runRoofSolarAnalysis(){
  try{
   const br=await fetch('/api/solar-building?lat='+encodeURIComponent(lat)+'&lng='+encodeURIComponent(lng)),building=await br.json();
   if(!br.ok||!building.ok)throw new Error(building.error||'Google Solar Building Insights is unavailable for this roof.');
-  const engine=await import('/assets/js/solar-roof-engine.js?v=20261004-line-trace-v5');
+  const engine=await import('/assets/js/solar-roof-engine.js?v=20261004-line-trace-v5b');
   const result=await engine.buildSolarRoofModel(lat,lng,building.roofSegments||[]);
   const measurements=engine.buildRoofMeasurements(result.outline,result.model.facets||[],result.model.roofLines||[]);
   roofSolarProposal={
