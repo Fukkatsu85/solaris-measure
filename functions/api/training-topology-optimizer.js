@@ -58,7 +58,9 @@ function variants(base){
 }
 export async function onRequestGet({env}){
  if(!env.MEASURE_PHOTOS)return json({error:"R2 binding MEASURE_PHOTOS missing"},500);
- return json({ok:true,config:await readJson(env,"training/_topology_optimizer.json")});
+ const config=await readJson(env,"training/_topology_optimizer.json");
+ const valid=config?.version==="topology-opt-2-scope-aware"&&config?.scopePolicy==="primary-building-only";
+ return json({ok:true,config:valid?config:null,staleVersion:valid?null:(config?.version||null)});
 }
 export async function onRequestPost({env}){
  if(!env.MEASURE_PHOTOS)return json({error:"R2 binding MEASURE_PHOTOS missing"},500);
