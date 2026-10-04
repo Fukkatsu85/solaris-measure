@@ -97,6 +97,14 @@ function score(cur,ref){
  let total=0,used=0;for(const[k,w]of Object.entries(weights))if(comp[k]!=null){total+=comp[k]*w;used+=w}
  return {overall:used?total/used:null,errors,components:comp};
 }
+function effectiveScope(t){
+ const explicit=String(t?.scope||"").trim();
+ if(explicit)return explicit;
+ const archetype=String(t?.archetype||"").toLowerCase();
+ // Older corpus rows predate explicit scope metadata. Only infer whole-property
+ // scope when the verified report itself was labeled as multi-structure.
+ return /multi[- ]?structure|multistructure/.test(archetype)?"all-structures":"primary-building";
+}
 function refFor(t){return {
  slopedAreaFt2:t.slopedAreaFt2,facetCount:t.facetCount,avgPitch12:t.avgPitch12,
  perimeterFt:t.perimeterFt??null,footprintAreaFt2:t.footprintAreaFt2??null,footprintPerimeterFt:t.footprintPerimeterFt??null,
@@ -117,17 +125,22 @@ export async function onRequestGet({env}){
  for(const t of ROOF_TRAINING_V1){
   const candidates=models.filter(m=>m.matches.includes(t));
   const found=candidates.sort((a,b)=>String(b.sm.savedAt||"").localeCompare(String(a.sm.savedAt||"")))[0];
-  if(!found){rows.push({caseId:t.caseId||null,address:t.address,scope:t.scope||"all-structures",source:t.source,archetype:t.archetype,status:"not-processed",reference:refFor(t)});continue}
+  if(!found){const scope=effectiveScope(t);rows.push({caseId:t.caseId||null,address:t.address,scope,source:t.source,archetype:t.archetype,status:"not-processed",reference:refFor(t)});continue}
   const projectId=found.key.split("/")[0],outline=await readJson(env,projectId+"/_roof_outline_accepted.json");
   const current=currentMetrics(found.sm,outline,profileOverrides),result=score(current,refFor(t));
-  const scope=t.scope||"all-structures";
-  const scopeComparable=scope==="primary-building"||scope==="all-structures";
-  rows.push({caseId:t.caseId||null,address:t.address,scope,source:t.source,archetype:t.archetype,status:scopeComparable?"scored":"scope-specific",projectId,reference:refFor(t),current,score:result});
+  const scope=effectiveScope(t);
+  // A training-* Solar model resolves one geocoded building. Whole-property and
+  // detached-structure provider reports are useful truth, but are not directly
+  // comparable until Solaris aggregates/selects the same structure scope.
+  const scopeComparable=scope==="primary-building";
+  rows.push({caseId:t.caseId||null,address:t.address,scope,source:t.source,archetype:t.archetype,status:scopeComparable?"scored":"scope-specific",projectId,reference:refFor(t),current,score:scopeComparable?result:null});
  }
  const scored=rows.filter(r=>r.status==="scored"&&Number.isFinite(r.score?.overall));
+ const geometryRows=rows.filter(r=>r.status!=="not-processed");
  const av=k=>mean(scored.map(r=>r.score.errors[k]));
  const summary={
-  trainingVersion:LEARNED_PRIORS_V1.version,totalCases:rows.length,processedCases:scored.length,pendingCases:rows.filter(r=>r.status==="not-processed").length,scopeSpecificCases:rows.filter(r=>r.status==="scope-specific").length,
+  trainingVersion:LEARNED_PRIORS_V1.version,totalCases:rows.length,processedCases:scored.length,geometryProcessedCases:geometryRows.length,
+  pendingCases:rows.filter(r=>r.status==="not-processed").length,scopeSpecificCases:rows.filter(r=>r.status==="scope-specific").length,
   averageScore:mean(scored.map(r=>r.score.overall)),medianScore:median(scored.map(r=>r.score.overall)),
   averageAreaErrorPct:av("area"),averageFacetErrorPct:av("facets"),averageEdgeErrorPct:av("edges"),
   averagePitchErrorPct:av("pitch"),averageFootprintAreaErrorPct:av("footprintArea"),averageFootprintPerimeterErrorPct:av("footprintPerimeter"),
