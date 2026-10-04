@@ -128,7 +128,7 @@ function refFor(t){return {
 export async function onRequestGet({env}){
  if(!env.MEASURE_PHOTOS)return json({error:"R2 binding MEASURE_PHOTOS is not configured."},500);
  const optimizer=await readJson(env,"training/_topology_optimizer.json");
- const optimizerValid=optimizer?.version==="topology-opt-2-scope-aware"&&optimizer?.scopePolicy==="primary-building-only";
+ const optimizerValid=optimizer?.version==="topology-opt-3-holdout"&&optimizer?.scopePolicy==="primary-building-only"&&optimizer?.validationPolicy==="deterministic-profile-holdout";
  const profileOverrides=optimizerValid?(optimizer?.profileOverrides||{}):{};
  const keys=await listSolarModels(env);
  const models=[];
