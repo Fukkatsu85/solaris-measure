@@ -1472,17 +1472,29 @@ async function generateRoofReport(){
   const dsmSloped=Number(sm?.model?.slopedAreaSqFt||0);
   const googleWholeSloped=Number(sm?.googleWholeRoofAreaFt2||0);
   const footprintArea=Number(sm?.model?.footprintSqFt||plan||0);
+  const wholePitch=v=>Math.round(Number(v)||0);
+  const pitchWeightTotal=dsmFacets.reduce((s,f)=>s+Number(f.slopedAreaSqFt||f.flatAreaSqFt||0),0);
+  const rawAvgPitch=dsmFacets.length
+   ?(pitchWeightTotal>0?dsmFacets.reduce((s,f)=>s+Number(f.rise12||0)*Number(f.slopedAreaSqFt||f.flatAreaSqFt||0),0)/pitchWeightTotal:dsmFacets.reduce((s,f)=>s+Number(f.rise12||0),0)/dsmFacets.length)
+   :(facets.length?facets.reduce((s,p)=>s+Number(p.pitch12||0),0)/facets.length:0);
+  const avgPitch=wholePitch(rawAvgPitch);
   const googleToDsm=(googleWholeSloped>0&&dsmSloped>0)?googleWholeSloped/dsmSloped:null;
   const googleAreaSane=googleWholeSloped>0
     &&(googleToDsm==null||(googleToDsm>=.55&&googleToDsm<=1.8))
     &&(!footprintArea||googleWholeSloped/footprintArea<=3);
-  const sloped=googleAreaSane?googleWholeSloped:(dsmSloped>0?dsmSloped:lidarSloped),squares=sloped/100,lines=roofLineTotals(d);
+  const footprintPitchArea=footprintArea>0
+    ?footprintArea*Math.sqrt(1+Math.pow(rawAvgPitch/12,2))
+    :0;
+  const areaCandidates=[
+    googleAreaSane?googleWholeSloped:0,
+    dsmSloped>0?dsmSloped:0,
+    footprintPitchArea>0?footprintPitchArea:0
+  ].filter(v=>Number.isFinite(v)&&v>0).sort((a,b)=>a-b);
+  const consensusArea=areaCandidates.length===1?areaCandidates[0]
+    :areaCandidates.length%2?areaCandidates[(areaCandidates.length-1)/2]
+    :(areaCandidates[areaCandidates.length/2-1]+areaCandidates[areaCandidates.length/2])/2;
+  const sloped=consensusArea>0?consensusArea:(lidarSloped>0?lidarSloped:dsmSloped),squares=sloped/100,lines=roofLineTotals(d);
   const reportFacetCount=Number(dsmFacets.length||facets.length||d.topology?.faces?.length||0);
-  const wholePitch=v=>Math.round(Number(v)||0);
-  const pitchWeightTotal=dsmFacets.reduce((s,f)=>s+Number(f.slopedAreaSqFt||f.flatAreaSqFt||0),0);
-  const avgPitch=dsmFacets.length
-   ?wholePitch(pitchWeightTotal>0?dsmFacets.reduce((s,f)=>s+Number(f.rise12||0)*Number(f.slopedAreaSqFt||f.flatAreaSqFt||0),0)/pitchWeightTotal:dsmFacets.reduce((s,f)=>s+Number(f.rise12||0),0)/dsmFacets.length)
-   :wholePitch(facets.length?facets.reduce((s,p)=>s+Number(p.pitch12||0),0)/facets.length:0);
   const waste=[10,12,15].map(w=>({w,area:sloped*(1+w/100),sq:squares*(1+w/100)}));
   const facetRows=(dsmFacets.length?dsmFacets:facets).map((p,i)=>{
    const isDsm=dsmFacets.length>0,pitch=wholePitch(isDsm?p.rise12:p.pitch12),slope=isDsm?Number(p.pitchDegrees||0):Number(p.slopeDeg||0),planArea=isDsm?Number(p.flatAreaSqFt||0):Number(p.planAreaFt2||0),slopedArea=isDsm?Number(p.slopedAreaSqFt||0):Number(p.slopedAreaFt2||0);
@@ -1491,8 +1503,10 @@ async function generateRoofReport(){
   const v=d.validation||{};
   const dsmGeometryBlock=sm?.model?.facets?.length
    ?('<h2>Accepted Google DSM Geometry</h2><table class="roof-report-table"><tbody>'+
+     '<tr><th>Solaris consensus area</th><td>'+Math.round(sloped).toLocaleString()+' ft²</td></tr>'+
      '<tr><th>Google whole-roof area</th><td>'+(Number.isFinite(Number(sm.googleWholeRoofAreaFt2))?Math.round(Number(sm.googleWholeRoofAreaFt2)).toLocaleString()+' ft²':'—')+'</td></tr>'+
-     '<tr><th>Raster facet-area sum</th><td>'+Math.round(Number(sm.model?.slopedAreaSqFt||0)).toLocaleString()+' ft²</td></tr>'+
+     '<tr><th>DSM surface area</th><td>'+Math.round(Number(sm.model?.slopedAreaSqFt||0)).toLocaleString()+' ft²</td></tr>'+
+     '<tr><th>Footprint × pitch area</th><td>'+(footprintPitchArea>0?Math.round(footprintPitchArea).toLocaleString()+' ft²':'—')+'</td></tr>'+
      '<tr><th>DSM average pitch</th><td>'+wholePitch(sm.model?.rise12||avgPitch)+'/12</td></tr>'+
      '<tr><th>DSM facets</th><td>'+Number(sm.model?.facets?.length||0)+'</td></tr>'+
      '<tr><th>Eave</th><td>'+fmtHybridFt(dm.eaveFt)+'</td></tr>'+
