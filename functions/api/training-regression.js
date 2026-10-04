@@ -74,6 +74,7 @@ function currentMetrics(sm,outline,profileOverrides){
   learnedProfile:topology?.learnedProfile||null,
   topologyVersion:topology?.version||null,
   facetEngineVersion:sm?.model?.facetEngineVersion||null,
+  lineEngineVersion:sm?.model?.lineEngineVersion||null,
   geometryMode:sm?.model?.geometryMode||null,
   planeIntersectionDiagnostics:sm?.model?.planeIntersectionDiagnostics||null
  };
@@ -157,6 +158,8 @@ export async function onRequestGet({env}){
  const summary={
   trainingVersion:LEARNED_PRIORS_V1.version,totalCases:rows.length,processedCases:geometryRows.length,comparableCases:scored.length,geometryProcessedCases:geometryRows.length,
   pendingCases:rows.filter(r=>r.status==="not-processed").length,scopeSpecificCases:rows.filter(r=>r.status==="scope-specific").length,
+  lineEngineV5Cases:geometryRows.filter(r=>r.current?.lineEngineVersion==="plane-dsm-trace-v5").length,
+  staleLineEngineCases:geometryRows.filter(r=>r.current?.lineEngineVersion!=="plane-dsm-trace-v5").length,
   averageScore:mean(scored.map(r=>r.score.overall)),medianScore:median(scored.map(r=>r.score.overall)),
   averageAreaErrorPct:av("area"),averageFacetErrorPct:av("facets"),averageEdgeErrorPct:av("edges"),
   averagePitchErrorPct:av("pitch"),averageFootprintAreaErrorPct:av("footprintArea"),averageFootprintPerimeterErrorPct:av("footprintPerimeter"),
