@@ -2,7 +2,7 @@ import { ROOF_TRAINING_V1, findTrainingBenchmarks, LEARNED_PRIORS_V1 } from "../
 import { buildRoofTopology } from "../../assets/js/roof-topology.js";
 
 const json=(d,s=200)=>new Response(JSON.stringify(d),{status:s,headers:{"content-type":"application/json; charset=utf-8","cache-control":"no-store"}});
-const num=v=>Number.isFinite(Number(v))?Number(v):null;
+const num=v=>(v===null||v===undefined||v==='')?null:(Number.isFinite(Number(v))?Number(v):null);
 const pct=(a,b)=>Number.isFinite(a)&&Number.isFinite(b)&&b!==0?Math.abs(a-b)/Math.abs(b)*100:null;
 const metric=(e,soft=5,hard=25)=>e==null?null:e<=soft?100:e>=hard?0:100-(e-soft)/(hard-soft)*100;
 const mean=a=>{const v=a.filter(Number.isFinite);return v.length?v.reduce((x,y)=>x+y,0)/v.length:null};
@@ -31,6 +31,10 @@ function edgeTotals(topology,sm){
  }
  const m=sm?.measurements||{};
  for(const k of ["ridgeFt","hipFt","valleyFt","eaveFt","rakeFt"])if(!(out[k]>0)&&num(m[k])!=null)out[k]=num(m[k]);
+ // Roof-report "perimeter" is the total exposed roof edge: eave + rake.
+ // Keep footprint perimeter as its own metric instead of comparing plan-view
+ // perimeter against a provider's eave+rake total.
+ if(out.eaveFt>0||out.rakeFt>0)out.perimeterFt=out.eaveFt+out.rakeFt;
  return out;
 }
 function currentMetrics(sm,outline,profileOverrides){
