@@ -112,7 +112,10 @@ function score(cur,ref){
   dsmFacets:ref.facetCount&&cur.dsmFacetCount!=null?Math.abs(cur.dsmFacetCount-ref.facetCount)/ref.facetCount*100:null,
   topologyFaces:ref.facetCount&&cur.topologyFaceCount!=null?Math.abs(cur.topologyFaceCount-ref.facetCount)/ref.facetCount*100:null
  };
- const edgeKeys=(ref.ridgeHipFt!=null?["ridgeHipFt"]:["ridgeFt","hipFt"]).concat(["valleyFt","eaveFt","rakeFt","perimeterFt"]);
+ const edgeKeys=(ref.ridgeHipFt!=null?["ridgeHipFt"]:["ridgeFt","hipFt"]).concat(["valleyFt","eaveFt","rakeFt"]);
+ // Provider perimeter is normally the same exterior roof edge already represented
+ // by eave + rake. Do not count it a second time in the aggregate line score.
+ if(ref.eaveFt==null&&ref.rakeFt==null&&ref.perimeterFt!=null)edgeKeys.push("perimeterFt");
  const edgePairs=edgeKeys
    .filter(k=>ref[k]!=null&&Number.isFinite(Number(cur[k])))
    .map(k=>({k,ref:Number(ref[k]),cur:Number(cur[k])}));
