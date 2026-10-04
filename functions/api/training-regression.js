@@ -43,10 +43,15 @@ function currentMetrics(sm,outline,profileOverrides){
  const facetAreas=modelFacets.map(f=>num(f.slopedAreaSqFt)).filter(Number.isFinite);
  const modelArea=num(sm?.model?.slopedAreaSqFt);
  const googleWhole=num(sm?.googleWholeRoofAreaFt2);
- // Google Solar wholeRoofStats is the safest area authority for the selected
- // building. The raster-derived facet model is retained for topology/pitch, but
- // its facet areas can overlap while segmentation is still being tuned.
- const slopedArea=googleWhole!=null?googleWhole:(modelArea!=null?modelArea:facetAreas.reduce((a,b)=>a+b,0));
+ const footprint=num(outline?.measurement?.planAreaFt2)||num(sm?.model?.footprintSqFt);
+ // Google wholeRoofStats can occasionally attach to a nearby/incorrect building
+ // when geocoding is not rooftop-precise. Trust it only when it is physically
+ // consistent with the independently decoded DSM roof surface and footprint.
+ const areaRatio=(googleWhole&&modelArea)?googleWhole/modelArea:null;
+ const googleAreaSane=googleWhole!=null&&googleWhole>0
+   &&(areaRatio==null||(areaRatio>=.55&&areaRatio<=1.8))
+   &&(!footprint||googleWhole/footprint<=3);
+ const slopedArea=googleAreaSane?googleWhole:(modelArea!=null?modelArea:facetAreas.reduce((a,b)=>a+b,0));
  const w=modelFacets.map(f=>({p:num(f.rise12),a:num(f.slopedAreaSqFt)||0})).filter(x=>x.p!=null);
  const aw=w.reduce((s,x)=>s+x.a,0);
  const avgPitch=w.length?(aw?w.reduce((s,x)=>s+x.p*x.a,0)/aw:w.reduce((s,x)=>s+x.p,0)/w.length):null;
@@ -58,12 +63,13 @@ function currentMetrics(sm,outline,profileOverrides){
   dsmFacetCount:modelFacets.length,
   topologyFaceCount:topologyFaces.length,
   ...edges,ridgeHipFt:Number(edges.ridgeFt||0)+Number(edges.hipFt||0),
-  footprintAreaFt2:num(outline?.measurement?.planAreaFt2),
+  footprintAreaFt2:footprint,
   footprintPerimeterFt:num(outline?.measurement?.perimeterFt),
   facetAreasFt2:facetAreas,
   googleWholeRoofAreaFt2:googleWhole,
   rasterFacetAreaFt2:modelArea,
-  areaAuthority:googleWhole!=null?"google-whole-roof":"raster-facet-model",
+  areaAuthority:googleAreaSane?"google-whole-roof":"dsm-surface-area",
+  googleAreaRejected:googleWhole!=null&&!googleAreaSane,
   rasterToGoogleAreaRatio:(googleWhole&&modelArea)?modelArea/googleWhole:null,
   learnedProfile:topology?.learnedProfile||null,
   topologyVersion:topology?.version||null,
@@ -103,6 +109,7 @@ function effectiveScope(t){
  const archetype=String(t?.archetype||"").toLowerCase();
  // Older corpus rows predate explicit scope metadata. Only infer whole-property
  // scope when the verified report itself was labeled as multi-structure.
+ if(/garage/.test(archetype))return "detached-garage";
  return /multi[- ]?structure|multistructure/.test(archetype)?"all-structures":"primary-building";
 }
 function refFor(t){return {
