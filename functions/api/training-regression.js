@@ -66,7 +66,10 @@ function currentMetrics(sm,outline,profileOverrides){
   areaAuthority:googleWhole!=null?"google-whole-roof":"raster-facet-model",
   rasterToGoogleAreaRatio:(googleWhole&&modelArea)?modelArea/googleWhole:null,
   learnedProfile:topology?.learnedProfile||null,
-  topologyVersion:topology?.version||null
+  topologyVersion:topology?.version||null,
+  facetEngineVersion:sm?.model?.facetEngineVersion||null,
+  geometryMode:sm?.model?.geometryMode||null,
+  planeIntersectionDiagnostics:sm?.model?.planeIntersectionDiagnostics||null
  };
 }
 function score(cur,ref){
