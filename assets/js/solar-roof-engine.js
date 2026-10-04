@@ -1078,7 +1078,104 @@ function lineSpanInPolygonXY(line,poly){
   return {min:hits[0],max:hits[hits.length-1],p0,dir};
 }
 
-function planeCandidateSet(solarSegments,dsm,rgb){
+
+function solve3x3(m,b){
+  const a=m.map((r,i)=>[...r,b[i]]);
+  for(let i=0;i<3;i++){
+    let p=i;for(let r=i+1;r<3;r++)if(Math.abs(a[r][i])>Math.abs(a[p][i]))p=r;
+    if(Math.abs(a[p][i])<1e-9)return null;
+    [a[i],a[p]]=[a[p],a[i]];
+    const d=a[i][i];for(let k=i;k<4;k++)a[i][k]/=d;
+    for(let r=0;r<3;r++)if(r!==i){
+      const q=a[r][i];for(let k=i;k<4;k++)a[r][k]-=q*a[i][k];
+    }
+  }
+  return [a[0][3],a[1][3],a[2][3]];
+}
+
+function fitDsmPlaneRegion(mask,dsm,indices){
+  if(!indices?.length)return null;
+  const lls=[],pts=[];
+  let lat0=0,lng0=0;
+  for(const idx of indices){
+    const x=idx%mask.width,y=Math.floor(idx/mask.width),ll=rasterLatLng(mask,x+.5,y+.5);
+    lat0+=ll.lat;lng0+=ll.lng;lls.push(ll);
+  }
+  lat0/=lls.length;lng0/=lls.length;
+  const origin={lat:lat0,lng:lng0};
+  for(const ll of lls){
+    const s=dsmSampleAt(dsm,ll.lat,ll.lng);if(!Number.isFinite(s?.z)||s.z<-1000)continue;
+    const o=localOffsetMeters(ll,origin);pts.push({x:o.east,y:o.north,z:s.z});
+  }
+  if(pts.length<12)return null;
+  let sx=0,sy=0,sz=0,sxx=0,syy=0,sxy=0,sxz=0,syz=0;
+  for(const p of pts){sx+=p.x;sy+=p.y;sz+=p.z;sxx+=p.x*p.x;syy+=p.y*p.y;sxy+=p.x*p.y;sxz+=p.x*p.z;syz+=p.y*p.z}
+  const sol=solve3x3([[sxx,sxy,sx],[sxy,syy,sy],[sx,sy,pts.length]],[sxz,syz,sz]);
+  if(!sol)return null;
+  const [A,B,C]=sol,res=pts.map(p=>Math.abs(p.z-(A*p.x+B*p.y+C)));
+  const med=median(res),good=res.filter(x=>x<=.45).length/res.length;
+  const ge=-A,gn=-B,slope=Math.hypot(ge,gn),pitch=Math.atan(slope)*180/Math.PI;
+  if(!Number.isFinite(pitch)||pitch>60||med>.65||good<.55)return null;
+  let azimuth=Math.atan2(ge,gn)*180/Math.PI;if(azimuth<0)azimuth+=360;
+  const z0=C;
+  const lats=lls.map(p=>p.lat),lngs=lls.map(p=>p.lng);
+  return {
+    center:origin,z0,pitch,azimuth,gradientEast:ge,gradientNorth:gn,
+    residualMedianM:med,supportRatio:good,
+    boundingBox:{sw:{latitude:Math.min(...lats),longitude:Math.min(...lngs)},ne:{latitude:Math.max(...lats),longitude:Math.max(...lngs)}}
+  };
+}
+
+function dsmRegionalPlaneCandidates(mask,component,dsm){
+  if(!mask||!component?.size||!dsm)return [];
+  const slopeByIdx=new Map();
+  for(const idx of component){
+    const s=dsmSlopeAt(mask,dsm,idx);
+    if(s&&Number.isFinite(s.pitch)&&s.pitch<=55)slopeByIdx.set(idx,s);
+  }
+  const seen=new Set(),regions=[];
+  const pix=Math.max(.1,Number(mask.pixelSize)||.1),pixArea=pix*pix;
+  const similar=(a,b)=>{
+    const pTol=Math.max(2.4,Math.min(5.5,2.6+Math.min(a.pitch,b.pitch)*.06));
+    const aTol=Math.min(a.pitch,b.pitch)<3?55:14;
+    return Math.abs(a.pitch-b.pitch)<=pTol&&angleDifference(a.azimuth,b.azimuth)<=aTol;
+  };
+  for(const start of slopeByIdx.keys()){
+    if(seen.has(start))continue;
+    const stack=[start],group=[];seen.add(start);
+    while(stack.length){
+      const idx=stack.pop(),s=slopeByIdx.get(idx);group.push(idx);
+      const x=idx%mask.width,y=Math.floor(idx/mask.width),n=[];
+      if(x>0)n.push(idx-1);if(x<mask.width-1)n.push(idx+1);if(y>0)n.push(idx-mask.width);if(y<mask.height-1)n.push(idx+mask.width);
+      for(const q of n){
+        if(seen.has(q)||!component.has(q))continue;
+        const qs=slopeByIdx.get(q);if(!qs||!similar(s,qs))continue;
+        seen.add(q);stack.push(q);
+      }
+    }
+    const area=group.length*pixArea;
+    if(area<.45)continue;
+    regions.push({indices:group,area});
+  }
+  regions.sort((a,b)=>b.area-a.area);
+  const out=[];
+  for(const r of regions.slice(0,48)){
+    const fit=fitDsmPlaneRegion(mask,dsm,r.indices);if(!fit)continue;
+    const minArea=fit.pitch>=9?.45:fit.pitch>=4?.75:1.15;
+    if(r.area<minArea)continue;
+    out.push({
+      source:"dsm-region",sourceIndex:1000+out.length,
+      center:fit.center,z0:fit.z0,pitch:fit.pitch,azimuth:fit.azimuth,
+      pitchDegrees:fit.pitch,azimuthDegrees:fit.azimuth,
+      gradientEast:fit.gradientEast,gradientNorth:fit.gradientNorth,
+      groundAreaMeters2:r.area,areaMeters2:r.area/Math.max(.35,Math.cos(fit.pitch*Math.PI/180)),
+      boundingBox:fit.boundingBox,dsmResidualMedianM:fit.residualMedianM,dsmSupportRatio:fit.supportRatio
+    });
+  }
+  return out;
+}
+
+function planeCandidateSet(solarSegments,dsm,rgb,mask=null,component=null){
   const raw=(solarSegments||[])
     .filter(s=>Number.isFinite(Number(s.pitchDegrees))&&Number.isFinite(Number(s.azimuthDegrees))&&s.center)
     .slice(0,64)
@@ -1106,7 +1203,25 @@ function planeCandidateSet(solarSegments,dsm,rgb){
       duplicate.groundAreaMeters2=Number(duplicate.groundAreaMeters2||0)+Number(seg.groundAreaMeters2||0);
     }else kept.push({...seg,mergedSourceIndices:[seg.sourceIndex]});
   });
-  return {raw,candidates:kept};
+
+  const dsmRegions=mask&&component?dsmRegionalPlaneCandidates(mask,component,dsm):[];
+  const augmented=[...kept];
+  for(const seg of dsmRegions){
+    const duplicate=augmented.find(x=>{
+      const pitchDiff=Math.abs(Number(x.pitch)-Number(seg.pitch)),azDiff=angleDifference(Number(x.azimuth),Number(seg.azimuth));
+      const dist=metersBetween(x.center,seg.center);
+      if(pitchDiff>2.1||azDiff>10||dist>5.5)return false;
+      const za=planeHeightAt(x,seg.center),zb=planeHeightAt(seg,x.center);
+      return (!Number.isFinite(za)||Math.abs(za-seg.z0)<.5)&&(!Number.isFinite(zb)||Math.abs(zb-x.z0)<.5);
+    });
+    if(!duplicate)augmented.push(seg);
+  }
+  augmented.sort((a,b)=>{
+    const ag=String(a.source||"").startsWith("dsm")?0:1,bg=String(b.source||"").startsWith("dsm")?0:1;
+    if(ag!==bg)return bg-ag;
+    return Number(b.groundAreaMeters2||b.areaMeters2||0)-Number(a.groundAreaMeters2||a.areaMeters2||0);
+  });
+  return {raw,candidates:augmented.slice(0,48),googleCandidates:kept.length,dsmRegionCandidates:dsmRegions.length};
 }
 
 function dsmSupportForCell(mask,component,dsm,cellXY,seg,frame){
@@ -1128,7 +1243,7 @@ function dsmSupportForCell(mask,component,dsm,cellXY,seg,frame){
 
 function detectPlaneIntersectionFacets(mask,component,dsm,solarSegments,rawOutline,rgb=null){
   if(!Array.isArray(rawOutline)||rawOutline.length<3)return {valid:false,reason:"outline"};
-  const {raw,candidates}=planeCandidateSet(solarSegments,dsm,rgb);
+  const {raw,candidates,googleCandidates=0,dsmRegionCandidates=0}=planeCandidateSet(solarSegments,dsm,rgb,mask,component);
   if(candidates.length<2)return {valid:false,reason:"planes",rawCandidateCount:raw.length,candidateCount:candidates.length};
 
   const outline=simplifyOutline(rawOutline,40),frame=polygonLocalFrame(outline),roofXY=outline.map(frame.toXY);
@@ -1216,7 +1331,8 @@ function detectPlaneIntersectionFacets(mask,component,dsm,solarSegments,rawOutli
   return {
     valid,facets:cells.sort((a,b)=>b.slopedAreaSqFt-a.slopedAreaSqFt),roofLines:dedupeRoofLines(roofLines),
     assignedCoverage:Math.min(1,areaCoverage),rgbAssisted:false,rawCandidateCount:raw.length,candidateCount:candidates.length,
-    areaCoverage,medianSupport,engine:"plane-intersection-v2",reason:valid?null:"quality"
+    googleCandidateCount:googleCandidates,dsmRegionCandidateCount:dsmRegionCandidates,
+    areaCoverage,medianSupport,engine:"plane-intersection-v3-dsm-regions",reason:valid?null:"quality"
   };
 }
 
@@ -1538,7 +1654,7 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
   let outline=simplifyOutline(rawOutline,24);
   let finalFacets=facetResult.facets;
   let finalRoofLines=facetResult.roofLines||[];
-  let geometryMode=planeFacetResult.valid?"plane_intersection_v2":"detailed_raster_fallback";
+  let geometryMode=planeFacetResult.valid?"plane_intersection_v3_dsm_regions":"detailed_raster_fallback";
 
   const simple=regularizeSimpleGable(rawOutline,finalFacets,finalRoofLines);
   if(simple){
@@ -1557,14 +1673,16 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
   model.rawCandidatePlaneCount=facetResult.rawCandidateCount??null;
   model.candidatePlaneCount=facetResult.candidateCount??null;
   model.facetCap=facetResult.facetCap??null;
-  model.facetEngineVersion=planeFacetResult.valid?"plane-v2":"raster-r4-fallback";
+  model.facetEngineVersion=planeFacetResult.valid?"plane-v3":"raster-r4-fallback";
   model.planeIntersectionDiagnostics={
     valid:Boolean(planeFacetResult.valid),
     reason:planeFacetResult.reason||null,
     areaCoverage:Number.isFinite(Number(planeFacetResult.areaCoverage))?Number(planeFacetResult.areaCoverage):null,
     medianDsmSupport:Number.isFinite(Number(planeFacetResult.medianSupport))?Number(planeFacetResult.medianSupport):null,
     facetCount:Array.isArray(planeFacetResult.facets)?planeFacetResult.facets.length:0,
-    roofLineCount:Array.isArray(planeFacetResult.roofLines)?planeFacetResult.roofLines.length:0
+    roofLineCount:Array.isArray(planeFacetResult.roofLines)?planeFacetResult.roofLines.length:0,
+    googleCandidateCount:Number.isFinite(Number(planeFacetResult.googleCandidateCount))?Number(planeFacetResult.googleCandidateCount):null,
+    dsmRegionCandidateCount:Number.isFinite(Number(planeFacetResult.dsmRegionCandidateCount))?Number(planeFacetResult.dsmRegionCandidateCount):null
   };
   return {outline,rawCornerCount,quality:mask.quality||dsm.quality,model};
 }
