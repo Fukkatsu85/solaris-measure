@@ -1745,6 +1745,9 @@ async function bootstrapTrainingCase(row,engine){
  }
  const result=await engine.buildSolarRoofModel(lat,lng,building.roofSegments||[]);
  const measurements=engine.buildRoofMeasurements(result.outline,result.model.facets||[],result.model.roofLines||[]);
+ const detailBoundaryMeasurements=Array.isArray(result.measurementOutlineCandidate)&&result.measurementOutlineCandidate.length>=3
+  ?engine.buildRoofMeasurements(result.measurementOutlineCandidate,result.model.facets||[],result.model.roofLines||[])
+  :null;
  const projectId=trainingSlug(address);
  const solarModel={
   source:'google-solar-dsm',
@@ -1762,7 +1765,8 @@ async function bootstrapTrainingCase(row,engine){
   outline:result.outline,
   rawCornerCount:result.rawCornerCount,
   model:result.model,
-  measurements
+  measurements,
+  measurementCandidates:{detailBoundary:detailBoundaryMeasurements}
  };
  const sr=await fetch('/api/roof-solar-model',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId,address,accepted:false,model:solarModel})});
  const sd=await sr.json().catch(()=>({}));if(!sr.ok||!sd.ok)throw new Error(sd.error||'Could not save DSM model.');
@@ -1782,7 +1786,7 @@ document.querySelector('#bootstrap-roof-training')?.addEventListener('click',asy
   const byAddress=new Map();for(const r of pendingRows)if(!byAddress.has(r.address))byAddress.set(r.address,r);
   const queue=[...byAddress.values()];
   if(!queue.length){if(status)status.textContent='All eligible training roofs already use restored v5 line engine.';return}
-  const engine=await import('/assets/js/solar-roof-engine.js?v=20261004-line-v5-restored');
+  const engine=await import('/assets/js/solar-roof-engine.js?v=20261004-boundary-shadow1');
   let done=0,failed=0;const failures=[];
   const worker=async()=>{
    while(queue.length){
@@ -1898,9 +1902,12 @@ async function runRoofSolarAnalysis(){
  try{
   const br=await fetch('/api/solar-building?lat='+encodeURIComponent(lat)+'&lng='+encodeURIComponent(lng)),building=await br.json();
   if(!br.ok||!building.ok)throw new Error(building.error||'Google Solar Building Insights is unavailable for this roof.');
-  const engine=await import('/assets/js/solar-roof-engine.js?v=20261004-line-v5-restored');
+  const engine=await import('/assets/js/solar-roof-engine.js?v=20261004-boundary-shadow1');
   const result=await engine.buildSolarRoofModel(lat,lng,building.roofSegments||[]);
   const measurements=engine.buildRoofMeasurements(result.outline,result.model.facets||[],result.model.roofLines||[]);
+  const detailBoundaryMeasurements=Array.isArray(result.measurementOutlineCandidate)&&result.measurementOutlineCandidate.length>=3
+   ?engine.buildRoofMeasurements(result.measurementOutlineCandidate,result.model.facets||[],result.model.roofLines||[])
+   :null;
   roofSolarProposal={
    source:'google-solar-dsm',
    lat,lng,
@@ -1911,7 +1918,8 @@ async function runRoofSolarAnalysis(){
    outline:result.outline,
    rawCornerCount:result.rawCornerCount,
    model:result.model,
-   measurements
+   measurements,
+   measurementCandidates:{detailBoundary:detailBoundaryMeasurements}
   };
   renderRoofSolarProposal(roofSolarProposal);
   await saveRoofSolarModel(false);
