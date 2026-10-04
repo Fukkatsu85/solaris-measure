@@ -931,12 +931,6 @@ function buildRoofMeasurements(outline,facets=[],roofLines=[]){
   };
 }
 
-function roofLineConfidence(l){
-  const trace=Number(l.traceSupport||0)*1.2+Math.min(2,Number(l.traceStrength||0))*.35;
-  const plane=Math.min(1,Math.abs(Number(l.planeStrength||0)))*1.1;
-  const crease=Math.min(1.5,Math.abs(Number(l.creaseStrength||0)))*.45;
-  return trace+plane+crease+Math.min(1,Number(l.lengthMeters||0)/8)*.2;
-}
 function dedupeRoofLines(lines=[]){
   const kept=[];
   for(const line of [...lines].sort((a,b)=>Number(b.lengthMeters||0)-Number(a.lengthMeters||0))){
@@ -944,15 +938,13 @@ function dedupeRoofLines(lines=[]){
     let duplicate=false;
     for(let i=0;i<kept.length;i++){
       const k=kept[i];
-      if(!["ridge","hip","valley"].includes(k.type)||!k.a||!k.b||!line.a||!line.b)continue;
+      if(k.type!==line.type||!k.a||!k.b||!line.a||!line.b)continue;
       const da=pointSegmentDistanceMetersLL(line.a,k.a,k.b);
       const db=pointSegmentDistanceMetersLL(line.b,k.a,k.b);
+      if(da<=.75&&db<=.75){duplicate=true;break}
       const ka=pointSegmentDistanceMetersLL(k.a,line.a,line.b);
       const kb=pointSegmentDistanceMetersLL(k.b,line.a,line.b);
-      const sameBoundary=(da<=.75&&db<=.75)||(ka<=.75&&kb<=.75);
-      if(!sameBoundary)continue;
-      if(roofLineConfidence(line)>roofLineConfidence(k))kept[i]=line;
-      duplicate=true;break;
+      if(ka<=.75&&kb<=.75){kept[i]=line;duplicate=true;break}
     }
     if(!duplicate)kept.push(line);
   }
@@ -1413,29 +1405,18 @@ function detectPlaneIntersectionFacets(mask,component,dsm,solarSegments,rawOutli
     if(!fa||!fb)continue;
     const ca=candidates[sep.i],cb=candidates[sep.j];
 
-    // A mathematical intersection is only a real roof line when the two solved
-    // facet cells are actually neighbors. Earlier v5 could trace intersections
-    // between non-adjacent planes across the roof, inflating ridge/hip/valley totals.
-    const aXY=fa.outline.map(frame.toXY),bXY=fb.outline.map(frame.toXY);
-    const sa=lineSpanInPolygonXY(sep.line,aXY),sb=lineSpanInPolygonXY(sep.line,bXY);
-    if(!sa||!sb)continue;
-    const neighborLo=Math.max(sa.min,sb.min),neighborHi=Math.min(sa.max,sb.max);
-    if(neighborHi-neighborLo<.45)continue;
-
-    // Once adjacency is proven by the cells, allow DSM support to extend the
-    // physical line beyond conservative Google segment bounds.
+    // Best-performing v5 behavior: trace the plane intersection across the roof
+    // using DSM support on both sides, then fall back to the shared clipped cells.
     let traced=traceSupportedPlaneIntersection(mask,component,dsm,frame,roofXY,sep.line,ca,cb);
     let line=null,traceSupport=0,traceStrength=0;
-    if(traced){
-      const overlap=Math.max(0,Math.min(traced.t1,neighborHi)-Math.max(traced.t0,neighborLo));
-      const gap=Math.max(0,neighborLo-traced.t1,traced.t0-neighborHi);
-      if(overlap<.2&&gap>1.25)traced=null;
-    }
     if(traced){
       line={a:traced.a,b:traced.b,lengthMeters:traced.lengthMeters};
       traceSupport=traced.support;traceStrength=traced.strength;
     }else{
-      const lo=neighborLo,hi=neighborHi;
+      const aXY=fa.outline.map(frame.toXY),bXY=fb.outline.map(frame.toXY);
+      const sa=lineSpanInPolygonXY(sep.line,aXY),sb=lineSpanInPolygonXY(sep.line,bXY);
+      if(!sa||!sb)continue;
+      const lo=Math.max(sa.min,sb.min),hi=Math.min(sa.max,sb.max);
       if(hi-lo<.75)continue;
       const p=t=>frame.toLL({x:sa.p0.x+sa.dir.x*t,y:sa.p0.y+sa.dir.y*t});
       line={a:p(lo),b:p(hi),lengthMeters:hi-lo};
@@ -1825,7 +1806,7 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
   model.rawCandidatePlaneCount=facetResult.rawCandidateCount??null;
   model.candidatePlaneCount=facetResult.candidateCount??null;
   model.facetCap=facetResult.facetCap??null;
-  model.lineEngineVersion="plane-dsm-trace-v6-adjacency";
+  model.lineEngineVersion="plane-dsm-trace-v5-restored";
   model.facetEngineVersion=planeFacetResult?(
     planeFacetResult.engine==="plane-v4-wide-dsm"?"plane-v4-wide-dsm-selected":
     planeFacetResult.engine==="plane-v4-wide-google"?"plane-v4-wide-google-selected":
