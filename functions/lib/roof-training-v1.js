@@ -51,7 +51,18 @@ const norm=s=>String(s||"").toLowerCase()
 
 function addressScore(a,b){
  const n=norm(a),r=norm(b);if(!n||!r)return 0;if(n===r)return 1;
- const aa=new Set(n.split(" ")),bb=new Set(r.split(" "));
+ const nt=n.split(" "),rt=r.split(" ");
+ // House number is a hard identity boundary. Nearby homes on the same street
+ // otherwise share almost every token (e.g. 506/507/508/509 Annis) and were
+ // incorrectly borrowing one another's saved Solaris model.
+ const houseNumber=tokens=>{
+  const first=tokens[0]||"";
+  const m=first.match(/^\d+[a-z]?$/i);
+  return m?first.toLowerCase():null;
+ };
+ const nh=houseNumber(nt),rh=houseNumber(rt);
+ if(nh&&rh&&nh!==rh)return 0;
+ const aa=new Set(nt),bb=new Set(rt);
  return [...aa].filter(x=>bb.has(x)).length/Math.max(aa.size,bb.size);
 }
 export function findTrainingBenchmarks(address){
