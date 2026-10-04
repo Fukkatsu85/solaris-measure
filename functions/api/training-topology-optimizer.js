@@ -37,6 +37,11 @@ function scoreTopology(topo,ref){
  const edgeScore=edgeErr==null?50:Math.max(0,100-edgeErr*1.5);
  return {score:facetScore*.6+edgeScore*.4,facetErr,edgeErr,facetCount,edges:e};
 }
+function effectiveScope(t){
+ const explicit=String(t?.scope||"").trim();
+ if(explicit)return explicit;
+ return /multi[- ]?structure|multistructure/.test(String(t?.archetype||"").toLowerCase())?"all-structures":"primary-building";
+}
 function refFor(t){return {facetCount:t.facetCount,ridgeFt:t.ridgeFt??null,hipFt:t.hipFt??null,ridgeHipFt:t.ridgeHipFt??null,valleyFt:t.valleyFt??null,eaveFt:t.eaveFt??null,rakeFt:t.rakeFt??null}}
 function variants(base){
  const n=(v,f,min)=>Math.max(min,typeof v==="number"?v*f:min);
@@ -61,7 +66,10 @@ export async function onRequestPost({env}){
  for(const key of keys){
   const sm=await readJson(env,key);if(!sm?.address)continue;
   const matches=findTrainingBenchmarks(sm.address);
-  const t=matches.find(x=>(x.scope||"all-structures")==="primary-building")||matches.find(x=>(x.scope||"all-structures")==="all-structures");
+  // Optimize only against references that describe the same single building
+  // returned by Google Solar. Whole-property and detached-garage truth would
+  // otherwise teach the solver to compensate for a scope mismatch.
+  const t=matches.find(x=>effectiveScope(x)==="primary-building");
   if(!t)continue;
   let base;try{base=buildRoofTopology(sm)}catch{continue}
   if(!base?.baseLearnedProfile?.name)continue;
@@ -84,7 +92,7 @@ export async function onRequestPost({env}){
   if(best&&best.name!=="current")profileOverrides[profile]=best.override;
   results.push({profile,cases:items.length,best,baseline:ranked.find(x=>x.name==="current"),candidates:ranked});
  }
- const config={version:"topology-opt-1",createdAt:new Date().toISOString(),trainingCases:cases.length,profileOverrides,results};
+ const config={version:"topology-opt-2-scope-aware",createdAt:new Date().toISOString(),trainingCases:cases.length,scopePolicy:"primary-building-only",profileOverrides,results};
  await env.MEASURE_PHOTOS.put("training/_topology_optimizer.json",JSON.stringify(config),{httpMetadata:{contentType:"application/json"}});
  return json({ok:true,config});
 }
