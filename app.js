@@ -1681,6 +1681,7 @@ function renderRoofRegression(data){
    ['Google segment err',fmtRegression(s.averageGoogleSegmentFacetErrorPct,'%')],
    ['Topology face err',fmtRegression(s.averageTopologyFaceErrorPct,'%')],
    ['Roof-line error',fmtRegression(s.averageEdgeErrorPct,'%')],
+   ['Boundary candidate',fmtRegression(s.averageDetailBoundaryEdgeErrorPct,'%')],
    ['Line v5 restored',(s.lineEngineV5RestoredCases??0)+' / '+(s.geometryProcessedCases??s.processedCases??0)]
   ];
   summary.innerHTML=cards.map(([a,b])=>'<div class="metric"><span>'+escRoof(a)+'</span><strong>'+escRoof(b)+'</strong></div>').join('');
@@ -1690,7 +1691,7 @@ function renderRoofRegression(data){
  if(status){
   status.innerHTML='<strong>Regression complete.</strong> '+Number((s.geometryProcessedCases??s.processedCases)||0)+' of '+Number(s.totalCases||rows.length)+' cases currently have saved Solaris geometry; '+Number(s.comparableCases??0)+' are directly comparable single-building references. '+
    '<br><span class="muted">Facet diagnostics: DSM '+fmtRegression(s.averageDsmFacetErrorPct??s.averageFacetErrorPct,'%')+' · Google segments '+fmtRegression(s.averageGoogleSegmentFacetErrorPct,'%')+' · Topology faces '+fmtRegression(s.averageTopologyFaceErrorPct,'%')+'.</span>'+
-   '<br><span class="muted">Line engine v5: '+Number(s.lineEngineV5RestoredCases||0)+' current · '+Number(s.staleLineEngineCases||0)+' stale.</span> '+
+   '<br><span class="muted">Line engine v5: '+Number(s.lineEngineV5RestoredCases||0)+' current · '+Number(s.staleLineEngineCases||0)+' stale. Detailed boundary candidates: '+Number(s.detailBoundaryCases||0)+'.</span> '+
    (failures.length?'<strong>'+failures.length+' comparable case'+(failures.length===1?'':'s')+' fail the regression gate.</strong>':'All comparable cases pass the current gate.')+
    (Number(s.pendingCases||0)?' '+Number(s.pendingCases)+' case'+(Number(s.pendingCases)===1?'':'s')+' still need an initial Solaris process run.':'');
  }
@@ -1781,11 +1782,13 @@ document.querySelector('#bootstrap-roof-training')?.addEventListener('click',asy
   const rr=await fetch('/api/training-regression',{cache:'no-store'}),rd=await rr.json().catch(()=>({}));
   if(!rr.ok||!rd.ok)throw new Error(rd.error||'Could not load training cases.');
   const pendingRows=(rd.rows||[]).filter(r=>(r.scope==='primary-building'||r.scope==='all-structures'||!r.scope)&&(
-    r.status==='not-processed' || r.current?.lineEngineVersion!=='plane-dsm-trace-v5-restored'
+    r.status==='not-processed' ||
+    r.current?.lineEngineVersion!=='plane-dsm-trace-v5-restored' ||
+    r.current?.detailBoundaryPerimeterFt==null
   ));
   const byAddress=new Map();for(const r of pendingRows)if(!byAddress.has(r.address))byAddress.set(r.address,r);
   const queue=[...byAddress.values()];
-  if(!queue.length){if(status)status.textContent='All eligible training roofs already use restored v5 line engine.';return}
+  if(!queue.length){if(status)status.textContent='All eligible training roofs already have the restored v5 line engine and detailed-boundary shadow candidate.';return}
   const engine=await import('/assets/js/solar-roof-engine.js?v=20261004-boundary-shadow1');
   let done=0,failed=0;const failures=[];
   const worker=async()=>{
@@ -1797,7 +1800,7 @@ document.querySelector('#bootstrap-roof-training')?.addEventListener('click',asy
    }
   };
   await Promise.all([worker(),worker()]);
-  const rebuildSummary='<strong>Training rebuild complete.</strong> '+done+' roofs updated to restored v5 line engine · '+failed+' failed.'+(failures.length?'<br><span class="muted">'+failures.slice(0,8).map(escRoof).join('<br>')+(failures.length>8?'<br>…and '+(failures.length-8)+' more':'')+'</span>':'');
+  const rebuildSummary='<strong>Training rebuild complete.</strong> '+done+' roofs updated with restored v5 plus detailed-boundary shadow candidate · '+failed+' failed.'+(failures.length?'<br><span class="muted">'+failures.slice(0,8).map(escRoof).join('<br>')+(failures.length>8?'<br>…and '+(failures.length-8)+' more':'')+'</span>':'');
   if(status)status.innerHTML=rebuildSummary+'<br>Running regression now…';
   const reg=await fetch('/api/training-regression',{cache:'no-store'}),data=await reg.json().catch(()=>({}));
   if(!reg.ok||!data.ok)throw new Error(data.error||'Bootstrap finished, but regression could not run.');
