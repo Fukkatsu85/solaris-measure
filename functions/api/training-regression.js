@@ -69,6 +69,10 @@ function currentMetrics(sm,outline,profileOverrides){
  ].filter(Number.isFinite);
  const slopedArea=areaCandidates.length?median(areaCandidates):(facetAreas.reduce((a,b)=>a+b,0));
  const edges=edgeTotals(topology,sm);
+ const detailBoundary=sm?.measurementCandidates?.detailBoundary||null;
+ const detailEave=num(detailBoundary?.eaveFt);
+ const detailRake=num(detailBoundary?.rakeFt);
+ const detailPerimeter=(detailEave!=null||detailRake!=null)?Number(detailEave||0)+Number(detailRake||0):null;
  const topologyFaces=(topology?.faces||[]).filter(f=>Number(f.slopedAreaSqFt||0)>0);
  return {
   facetCount:modelFacets.length,slopedAreaFt2:slopedArea,avgPitch12:avgPitch,
@@ -76,6 +80,9 @@ function currentMetrics(sm,outline,profileOverrides){
   dsmFacetCount:modelFacets.length,
   topologyFaceCount:topologyFaces.length,
   ...edges,ridgeHipFt:Number(edges.ridgeFt||0)+Number(edges.hipFt||0),
+  detailBoundaryEaveFt:detailEave,
+  detailBoundaryRakeFt:detailRake,
+  detailBoundaryPerimeterFt:detailPerimeter,
   footprintAreaFt2:footprint,
   footprintPerimeterFt:num(outline?.measurement?.perimeterFt),
   facetAreasFt2:facetAreas,
@@ -116,6 +123,19 @@ function score(cur,ref){
  const edgeAbsError=edgePairs.reduce((s,x)=>s+Math.abs(x.cur-x.ref),0);
  errors.edgeCategoryPct=Object.fromEntries(edgePairs.map(x=>[x.k,pct(x.cur,x.ref)]));
  errors.edges=edgeRefTotal>0?edgeAbsError/edgeRefTotal*100:null;
+
+ const detailPairs=edgeKeys
+   .filter(k=>ref[k]!=null)
+   .map(k=>{
+     let cv=cur[k];
+     if(k==="eaveFt"&&cur.detailBoundaryEaveFt!=null)cv=cur.detailBoundaryEaveFt;
+     if(k==="rakeFt"&&cur.detailBoundaryRakeFt!=null)cv=cur.detailBoundaryRakeFt;
+     if(k==="perimeterFt"&&cur.detailBoundaryPerimeterFt!=null)cv=cur.detailBoundaryPerimeterFt;
+     return Number.isFinite(Number(cv))?{k,ref:Number(ref[k]),cur:Number(cv)}:null;
+   }).filter(Boolean);
+ const detailRefTotal=detailPairs.reduce((s,x)=>s+Math.abs(x.ref),0);
+ const detailAbsError=detailPairs.reduce((s,x)=>s+Math.abs(x.cur-x.ref),0);
+ errors.detailBoundaryEdges=detailRefTotal>0?detailAbsError/detailRefTotal*100:null;
  const comp={
   topology:metric(errors.facets,0,35),
   edges:metric(errors.edges,5,30),
@@ -177,6 +197,7 @@ export async function onRequestGet({env}){
   staleLineEngineCases:geometryRows.filter(r=>r.current?.lineEngineVersion!=="plane-dsm-trace-v5-restored").length,
   averageScore:mean(scored.map(r=>r.score.overall)),medianScore:median(scored.map(r=>r.score.overall)),
   averageAreaErrorPct:av("area"),averageFacetErrorPct:av("facets"),averageEdgeErrorPct:av("edges"),
+  averageDetailBoundaryEdgeErrorPct:av("detailBoundaryEdges"),
   averagePitchErrorPct:av("pitch"),averageFootprintAreaErrorPct:av("footprintArea"),averageFootprintPerimeterErrorPct:av("footprintPerimeter"),
   averageGoogleSegmentFacetErrorPct:av("googleSegments"),averageDsmFacetErrorPct:av("dsmFacets"),averageTopologyFaceErrorPct:av("topologyFaces"),
   regressionGate:{maxAreaErrorPct:8,maxFacetErrorPct:25,maxEdgeErrorPct:25,minOverallScore:70},
