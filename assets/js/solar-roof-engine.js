@@ -1797,6 +1797,16 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
     geometryMode=simple.mode;
   }
 
+  // Shadow candidate for exterior-edge measurement. Keep the production outline
+  // unchanged until regression proves that preserving more mask detail improves
+  // eave/rake totals across held-out roofs.
+  let measurementOutlineCandidate=outline;
+  if(!simple&&rawOutline.length>=3){
+    const mf=polygonLocalFrame(rawOutline);
+    const detailed=simplifyClosedGeometry(rawOutline.map(mf.toXY),48,.35);
+    if(detailed.length>=3)measurementOutlineCandidate=detailed.map(mf.toLL);
+  }
+
   model.facets=finalFacets;
   model.roofLines=finalRoofLines;
   model.geometryMode=geometryMode;
@@ -1826,7 +1836,7 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
     dsmAugmented:{valid:Boolean(planeV3.valid),qualityScore:Number.isFinite(Number(planeV3.qualityScore))?Number(planeV3.qualityScore):null,facets:Array.isArray(planeV3.facets)?planeV3.facets.length:0,lines:Array.isArray(planeV3.roofLines)?planeV3.roofLines.length:0},
     wide:{valid:Boolean(planeWide.valid),engine:planeWide.engine||null,qualityScore:Number.isFinite(Number(planeWide.qualityScore))?Number(planeWide.qualityScore):null,facets:Array.isArray(planeWide.facets)?planeWide.facets.length:0,lines:Array.isArray(planeWide.roofLines)?planeWide.roofLines.length:0,totalInternalLineMeters:Number(planeWide.totalInternalLineMeters||0)}
   };
-  return {outline,rawCornerCount,quality:mask.quality||dsm.quality,model};
+  return {outline,measurementOutlineCandidate,rawCornerCount,quality:mask.quality||dsm.quality,model};
 }
 
 
