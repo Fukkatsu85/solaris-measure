@@ -1337,7 +1337,7 @@ function traceSupportedPlaneIntersection(mask,component,dsm,frame,roofXY,line,se
   const spanCount=Math.max(1,i1-i0+1);
   const support=bestCluster.length/spanCount;
   if(support<.48)return null;
-  const strength=mean(bestCluster.map(i=>samples[i].strength));
+  const vals=bestCluster.map(i=>Number(samples[i].strength||0)).filter(Number.isFinite); const strength=vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:0;
   const p=t=>frame.toLL({x:span.p0.x+span.dir.x*t,y:span.p0.y+span.dir.y*t});
   return {a:p(t0),b:p(t1),lengthMeters:t1-t0,support,strength};
 }
