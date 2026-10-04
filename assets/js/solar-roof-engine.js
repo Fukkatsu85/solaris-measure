@@ -1000,6 +1000,226 @@ function extractSharedRoofLines(mask,component,labels,candidates,dsm){
   return dedupeRoofLines(lines);
 }
 
+
+function pointInPolygonXY(point,poly){
+  if(!Array.isArray(poly)||poly.length<3)return false;
+  let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const a=poly[i],b=poly[j];
+    const hit=((a.y>point.y)!==(b.y>point.y))&&(point.x<(b.x-a.x)*(point.y-a.y)/((b.y-a.y)||1e-12)+a.x);
+    if(hit)inside=!inside;
+  }
+  return inside;
+}
+
+function clipPolygonImplicitXY(poly,A,B,C,keepSign){
+  if(!Array.isArray(poly)||poly.length<3)return [];
+  const val=p=>A*p.x+B*p.y+C;
+  const inside=p=>val(p)*keepSign>=-1e-7;
+  const out=[];
+  for(let i=0;i<poly.length;i++){
+    const cur=poly[i],prev=poly[(i-1+poly.length)%poly.length];
+    const cv=val(cur),pv=val(prev),ci=inside(cur),pi=inside(prev);
+    if(ci){
+      if(!pi){
+        const den=pv-cv,t=Math.abs(den)<1e-12?0:pv/den;
+        out.push({x:prev.x+(cur.x-prev.x)*t,y:prev.y+(cur.y-prev.y)*t});
+      }
+      out.push(cur);
+    }else if(pi){
+      const den=pv-cv,t=Math.abs(den)<1e-12?0:pv/den;
+      out.push({x:prev.x+(cur.x-prev.x)*t,y:prev.y+(cur.y-prev.y)*t});
+    }
+  }
+  return out;
+}
+
+function clipPolygonRectXY(poly,minX,minY,maxX,maxY){
+  let out=poly;
+  out=clipPolygonImplicitXY(out,1,0,-minX,1);
+  out=clipPolygonImplicitXY(out,-1,0,maxX,1);
+  out=clipPolygonImplicitXY(out,0,1,-minY,1);
+  out=clipPolygonImplicitXY(out,0,-1,maxY,1);
+  return out;
+}
+
+function planeEquationInFrame(seg,frame){
+  const c=frame.toXY(seg.center);
+  const ge=Number(seg.gradientEast||0),gn=Number(seg.gradientNorth||0);
+  // z = A*x + B*y + C in the roof-local east/north frame.
+  return {A:-ge,B:-gn,C:Number(seg.z0)+ge*c.x+gn*c.y,cx:c.x,cy:c.y};
+}
+
+function planeDifferenceLine(eqA,eqB){
+  return {A:eqA.A-eqB.A,B:eqA.B-eqB.B,C:eqA.C-eqB.C};
+}
+
+function lineSpanInPolygonXY(line,poly){
+  if(!Array.isArray(poly)||poly.length<3)return null;
+  const norm=Math.hypot(line.A,line.B);
+  if(norm<1e-8)return null;
+  const p0={x:-line.A*line.C/(norm*norm),y:-line.B*line.C/(norm*norm)};
+  const dir={x:-line.B/norm,y:line.A/norm};
+  const hits=[];
+  const push=t=>{if(Number.isFinite(t)&&!hits.some(x=>Math.abs(x-t)<1e-5))hits.push(t)};
+  for(let i=0;i<poly.length;i++){
+    const p=poly[i],q=poly[(i+1)%poly.length];
+    const vp=line.A*p.x+line.B*p.y+line.C;
+    const vq=line.A*q.x+line.B*q.y+line.C;
+    if(Math.abs(vp)<1e-7)push((p.x-p0.x)*dir.x+(p.y-p0.y)*dir.y);
+    if(vp*vq<0){
+      const tEdge=vp/(vp-vq);
+      const hit={x:p.x+(q.x-p.x)*tEdge,y:p.y+(q.y-p.y)*tEdge};
+      push((hit.x-p0.x)*dir.x+(hit.y-p0.y)*dir.y);
+    }
+  }
+  if(hits.length<2)return null;
+  hits.sort((a,b)=>a-b);
+  return {min:hits[0],max:hits[hits.length-1],p0,dir};
+}
+
+function planeCandidateSet(solarSegments,dsm,rgb){
+  const raw=(solarSegments||[])
+    .filter(s=>Number.isFinite(Number(s.pitchDegrees))&&Number.isFinite(Number(s.azimuthDegrees))&&s.center)
+    .slice(0,64)
+    .map((seg,i)=>{
+      const center={lat:Number(seg.center.latitude??seg.center.lat),lng:Number(seg.center.longitude??seg.center.lng)};
+      const sample=dsmSampleAt(dsm,center.lat,center.lng);
+      const pitch=Number(seg.pitchDegrees),azimuth=Number(seg.azimuthDegrees),slope=Math.tan(pitch*Math.PI/180),az=azimuth*Math.PI/180;
+      return {...seg,sourceIndex:i,center,
+        z0:Number.isFinite(Number(seg.planeHeightAtCenterMeters))?Number(seg.planeHeightAtCenterMeters):Number(sample?.z),
+        pitch,azimuth,gradientEast:slope*Math.sin(az),gradientNorth:slope*Math.cos(az),rgb0:rgbSampleAt(rgb,center.lat,center.lng)};
+    })
+    .filter(seg=>Number.isFinite(seg.z0)&&seg.z0>-1000);
+
+  const kept=[];
+  raw.sort((a,b)=>Number(b.areaMeters2||b.groundAreaMeters2||0)-Number(a.areaMeters2||a.groundAreaMeters2||0)).forEach(seg=>{
+    const duplicate=kept.find(x=>{
+      if(Math.abs(x.pitch-seg.pitch)>1.1||angleDifference(x.azimuth,seg.azimuth)>6)return false;
+      if(metersBetween(x.center,seg.center)>3.2)return false;
+      const za=planeHeightAt(x,seg.center),zb=planeHeightAt(seg,x.center);
+      return (!Number.isFinite(za)||Math.abs(za-seg.z0)<.35)&&(!Number.isFinite(zb)||Math.abs(zb-x.z0)<.35);
+    });
+    if(duplicate){
+      duplicate.mergedSourceIndices=(duplicate.mergedSourceIndices||[duplicate.sourceIndex]).concat(seg.sourceIndex);
+      duplicate.areaMeters2=Number(duplicate.areaMeters2||0)+Number(seg.areaMeters2||0);
+      duplicate.groundAreaMeters2=Number(duplicate.groundAreaMeters2||0)+Number(seg.groundAreaMeters2||0);
+    }else kept.push({...seg,mergedSourceIndices:[seg.sourceIndex]});
+  });
+  return {raw,candidates:kept};
+}
+
+function dsmSupportForCell(mask,component,dsm,cellXY,seg,frame){
+  if(!cellXY?.length)return {support:0,samples:0,medianResidual:null};
+  const residuals=[],step=Math.max(1,Math.ceil(component.size/1800));
+  let n=0,inside=0;
+  for(const idx of component){
+    if((n++%step)!==0)continue;
+    const x=idx%mask.width,y=Math.floor(idx/mask.width),ll=rasterLatLng(mask,x+.5,y+.5),p=frame.toXY(ll);
+    if(!pointInPolygonXY(p,cellXY))continue;
+    inside++;
+    const sample=dsmSampleAt(dsm,ll.lat,ll.lng),pred=planeHeightAt(seg,ll);
+    if(Number.isFinite(sample?.z)&&Number.isFinite(pred))residuals.push(Math.abs(sample.z-pred));
+  }
+  if(!inside||!residuals.length)return {support:0,samples:inside,medianResidual:null};
+  const good=residuals.filter(r=>r<=.65).length;
+  return {support:good/residuals.length,samples:residuals.length,medianResidual:median(residuals)};
+}
+
+function detectPlaneIntersectionFacets(mask,component,dsm,solarSegments,rawOutline,rgb=null){
+  if(!Array.isArray(rawOutline)||rawOutline.length<3)return {valid:false,reason:"outline"};
+  const {raw,candidates}=planeCandidateSet(solarSegments,dsm,rgb);
+  if(candidates.length<2)return {valid:false,reason:"planes",rawCandidateCount:raw.length,candidateCount:candidates.length};
+
+  const outline=simplifyOutline(rawOutline,40),frame=polygonLocalFrame(outline),roofXY=outline.map(frame.toXY);
+  const eqs=candidates.map(s=>planeEquationInFrame(s,frame));
+  const cells=[],separators=[];
+
+  for(let i=0;i<candidates.length;i++){
+    const seg=candidates[i],eq=eqs[i];
+    let cell=roofXY.map(p=>({...p}));
+
+    const bb=seg.boundingBox;
+    if(bb?.sw&&bb?.ne){
+      const sw=frame.toXY({lat:Number(bb.sw.latitude),lng:Number(bb.sw.longitude)});
+      const ne=frame.toXY({lat:Number(bb.ne.latitude),lng:Number(bb.ne.longitude)});
+      const pad=1.25;
+      cell=clipPolygonRectXY(cell,Math.min(sw.x,ne.x)-pad,Math.min(sw.y,ne.y)-pad,Math.max(sw.x,ne.x)+pad,Math.max(sw.y,ne.y)+pad);
+    }
+
+    for(let j=0;j<candidates.length&&cell.length>=3;j++){
+      if(i===j)continue;
+      const line=planeDifferenceLine(eq,eqs[j]),norm=Math.hypot(line.A,line.B);
+      if(norm<1e-6)continue;
+      const ci={x:eq.cx,y:eq.cy},cj={x:eqs[j].cx,y:eqs[j].cy};
+      const vi=line.A*ci.x+line.B*ci.y+line.C,vj=line.A*cj.x+line.B*cj.y+line.C;
+      // Only use a plane intersection as a partition when it actually separates
+      // the two plane centers. Otherwise these planes are not direct neighbors.
+      if(Math.abs(vi)<.04||Math.abs(vj)<.04||vi*vj>=0)continue;
+      const roofSpan=lineSpanInPolygonXY(line,roofXY);
+      if(!roofSpan||roofSpan.max-roofSpan.min<.75)continue;
+      cell=clipPolygonImplicitXY(cell,line.A,line.B,line.C,Math.sign(vi)||1);
+      if(i<j)separators.push({i,j,line});
+    }
+
+    if(cell.length<3)continue;
+    const areaM2=polygonAreaXY(cell);
+    if(areaM2<.45)continue;
+    const support=dsmSupportForCell(mask,component,dsm,cell,seg,frame);
+    const expected=Number(seg.groundAreaMeters2||0);
+    const areaRatio=expected>0?areaM2/expected:null;
+    // Google plane stats are trusted as hypotheses, but the fitted region still
+    // needs either reasonable DSM support or area agreement.
+    if(support.samples>=15&&support.support<.28&&(areaRatio==null||areaRatio<.35||areaRatio>2.8))continue;
+
+    const poly=cell.map(frame.toLL),pitch=Number(seg.pitch)||0;
+    cells.push({
+      index:cells.length+1,planeIndex:i,sourceIndex:seg.sourceIndex,sourceComponentIndex:0,
+      pitchDegrees:pitch,rise12:Math.tan(pitch*Math.PI/180)*12,azimuthDegrees:Number(seg.azimuth)||0,
+      center:seg.center,planeCenter:seg.center,z0:seg.z0,gradientEast:seg.gradientEast,gradientNorth:seg.gradientNorth,
+      flatAreaSqFt:areaM2*SQ_METERS_TO_SQ_FEET,
+      slopedAreaSqFt:areaM2/Math.max(.35,Math.cos(pitch*Math.PI/180))*SQ_METERS_TO_SQ_FEET,
+      componentAreaM2:areaM2,compactness:1,outline:regularizeFacetOutline(poly,seg.azimuth,8),
+      dsmSupport:support.support,dsmResidualM:support.medianResidual,expectedGroundAreaM2:expected||null,areaRatio
+    });
+  }
+
+  if(cells.length<2)return {valid:false,reason:"cells",facets:cells,rawCandidateCount:raw.length,candidateCount:candidates.length};
+
+  const byPlane=new Map(cells.map(f=>[f.planeIndex,f])),roofLines=[];
+  for(const sep of separators){
+    const fa=byPlane.get(sep.i),fb=byPlane.get(sep.j);
+    if(!fa||!fb)continue;
+    const aXY=fa.outline.map(frame.toXY),bXY=fb.outline.map(frame.toXY);
+    const sa=lineSpanInPolygonXY(sep.line,aXY),sb=lineSpanInPolygonXY(sep.line,bXY);
+    if(!sa||!sb)continue;
+    const lo=Math.max(sa.min,sb.min),hi=Math.min(sa.max,sb.max);
+    if(hi-lo<.75)continue;
+    const p=t=>frame.toLL({x:sa.p0.x+sa.dir.x*t,y:sa.p0.y+sa.dir.y*t});
+    const line={a:p(lo),b:p(hi),lengthMeters:hi-lo};
+    const ca=candidates[sep.i],cb=candidates[sep.j],classified=classifySharedRoofLine(line,ca,cb,dsm);
+    if(classified.type==="transition")continue;
+    const refined=classified.line||line;
+    const type=classified.type==="ridge_or_hip"?ridgeOrHipType(ca,cb,dsm):classified.type;
+    roofLines.push({type,facetA:fa.index-1,facetB:fb.index-1,a:refined.a,b:refined.b,
+      lengthMeters:metersBetween(refined.a,refined.b),length3dMeters:roofLine3dMeters(refined,ca,cb),
+      creaseStrength:classified.creaseStrength||0,planeStrength:classified.planeStrength||0,source:"plane-intersection-v2"});
+  }
+
+  const footprintM2=component.size*Math.pow(Math.max(.1,Number(mask.pixelSize)||.1),2);
+  const planSum=cells.reduce((s,f)=>s+Number(f.componentAreaM2||0),0);
+  const areaCoverage=footprintM2>0?planSum/footprintM2:0;
+  const supports=cells.map(f=>Number(f.dsmSupport)).filter(Number.isFinite);
+  const medianSupport=supports.length?median(supports):0;
+  const valid=areaCoverage>=.62&&areaCoverage<=1.22&&medianSupport>=.25&&roofLines.length>=1;
+
+  return {
+    valid,facets:cells.sort((a,b)=>b.slopedAreaSqFt-a.slopedAreaSqFt),roofLines:dedupeRoofLines(roofLines),
+    assignedCoverage:Math.min(1,areaCoverage),rgbAssisted:false,rawCandidateCount:raw.length,candidateCount:candidates.length,
+    areaCoverage,medianSupport,engine:"plane-intersection-v2",reason:valid?null:"quality"
+  };
+}
+
 function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
   const rawCandidates=solarSegments
     .filter(s=>Number.isFinite(Number(s.pitchDegrees))&&Number.isFinite(Number(s.azimuthDegrees))&&s.center)
@@ -1311,12 +1531,14 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
   const rawOutline=pixelOutline.map(([x,y])=>rasterLatLng(mask,x,y));
 
   const model=analyzeDsmRoof(mask,component,dsm);
-  const facetResult=detectRoofFacets(mask,component,dsm,solarSegments,rgb);
+  const rasterFacetResult=detectRoofFacets(mask,component,dsm,solarSegments,rgb);
+  const planeFacetResult=detectPlaneIntersectionFacets(mask,component,dsm,solarSegments,rawOutline,rgb);
+  const facetResult=planeFacetResult.valid?planeFacetResult:rasterFacetResult;
 
   let outline=simplifyOutline(rawOutline,24);
   let finalFacets=facetResult.facets;
   let finalRoofLines=facetResult.roofLines||[];
-  let geometryMode="detailed";
+  let geometryMode=planeFacetResult.valid?"plane_intersection_v2":"detailed_raster_fallback";
 
   const simple=regularizeSimpleGable(rawOutline,finalFacets,finalRoofLines);
   if(simple){
@@ -1335,9 +1557,17 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
   model.rawCandidatePlaneCount=facetResult.rawCandidateCount??null;
   model.candidatePlaneCount=facetResult.candidateCount??null;
   model.facetCap=facetResult.facetCap??null;
-  model.facetEngineVersion="2026-10-03-r4";
+  model.facetEngineVersion=planeFacetResult.valid?"plane-v2":"raster-r4-fallback";
+  model.planeIntersectionDiagnostics={
+    valid:Boolean(planeFacetResult.valid),
+    reason:planeFacetResult.reason||null,
+    areaCoverage:Number.isFinite(Number(planeFacetResult.areaCoverage))?Number(planeFacetResult.areaCoverage):null,
+    medianDsmSupport:Number.isFinite(Number(planeFacetResult.medianSupport))?Number(planeFacetResult.medianSupport):null,
+    facetCount:Array.isArray(planeFacetResult.facets)?planeFacetResult.facets.length:0,
+    roofLineCount:Array.isArray(planeFacetResult.roofLines)?planeFacetResult.roofLines.length:0
+  };
   return {outline,rawCornerCount,quality:mask.quality||dsm.quality,model};
 }
 
 
-export {buildSolarRoofModel,buildRoofMeasurements,detectRoofFacets,extractSharedRoofLines,analyzeDsmRoof,decodeSolarRaster,dsmSlopeAt,exteriorEdgeType,rasterPixelForLatLng,rasterLatLng};
+export {buildSolarRoofModel,buildRoofMeasurements,detectRoofFacets,detectPlaneIntersectionFacets,extractSharedRoofLines,analyzeDsmRoof,decodeSolarRaster,dsmSlopeAt,exteriorEdgeType,rasterPixelForLatLng,rasterLatLng};
