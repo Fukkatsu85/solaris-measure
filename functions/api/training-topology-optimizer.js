@@ -40,7 +40,9 @@ function scoreTopology(topo,ref){
 function effectiveScope(t){
  const explicit=String(t?.scope||"").trim();
  if(explicit)return explicit;
- return /multi[- ]?structure|multistructure/.test(String(t?.archetype||"").toLowerCase())?"all-structures":"primary-building";
+ const archetype=String(t?.archetype||"").toLowerCase();
+ if(/garage/.test(archetype))return "detached-garage";
+ return /multi[- ]?structure|multistructure/.test(archetype)?"all-structures":"primary-building";
 }
 function refFor(t){return {facetCount:t.facetCount,ridgeFt:t.ridgeFt??null,hipFt:t.hipFt??null,ridgeHipFt:t.ridgeHipFt??null,valleyFt:t.valleyFt??null,eaveFt:t.eaveFt??null,rakeFt:t.rakeFt??null}}
 function variants(base){
