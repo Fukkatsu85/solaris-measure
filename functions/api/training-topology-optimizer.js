@@ -2,7 +2,7 @@ import { ROOF_TRAINING_V1, findTrainingBenchmarks } from "../lib/roof-training-v
 import { buildRoofTopology } from "../../assets/js/roof-topology.js";
 
 const json=(d,s=200)=>new Response(JSON.stringify(d),{status:s,headers:{"content-type":"application/json; charset=utf-8","cache-control":"no-store"}});
-const num=v=>Number.isFinite(Number(v))?Number(v):null;
+const num=v=>(v===null||v===undefined||v==='')?null:(Number.isFinite(Number(v))?Number(v):null);
 const pct=(a,b)=>Number.isFinite(a)&&Number.isFinite(b)&&b!==0?Math.abs(a-b)/Math.abs(b)*100:null;
 const mean=a=>{const v=a.filter(Number.isFinite);return v.length?v.reduce((x,y)=>x+y,0)/v.length:null};
 
