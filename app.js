@@ -1664,7 +1664,8 @@ function renderRoofRegression(data){
    ['DSM facet error',fmtRegression(s.averageDsmFacetErrorPct??s.averageFacetErrorPct,'%')],
    ['Google segment err',fmtRegression(s.averageGoogleSegmentFacetErrorPct,'%')],
    ['Topology face err',fmtRegression(s.averageTopologyFaceErrorPct,'%')],
-   ['Roof-line error',fmtRegression(s.averageEdgeErrorPct,'%')]
+   ['Roof-line error',fmtRegression(s.averageEdgeErrorPct,'%')],
+   ['Line v5 models',(s.lineEngineV5Cases??0)+' / '+(s.geometryProcessedCases??s.processedCases??0)]
   ];
   summary.innerHTML=cards.map(([a,b])=>'<div class="metric"><span>'+escRoof(a)+'</span><strong>'+escRoof(b)+'</strong></div>').join('');
  }
@@ -1761,7 +1762,7 @@ document.querySelector('#bootstrap-roof-training')?.addEventListener('click',asy
   const pendingRows=(rd.rows||[]).filter(r=>(r.scope==='primary-building'||r.scope==='all-structures'||!r.scope)&&(r.status==='not-processed'||String(r.projectId||'').startsWith('training-')));
   const byAddress=new Map();for(const r of pendingRows)if(!byAddress.has(r.address))byAddress.set(r.address,r);
   const queue=[...byAddress.values()];
-  if(!queue.length){if(status)status.textContent='No pending or auto-bootstrap training roofs need rebuilding.';return}
+  if(!queue.length){if(status)status.textContent='All eligible training roofs already use line engine v5.';return}
   const engine=await import('/assets/js/solar-roof-engine.js?v=20261004-line-trace-v5');
   let done=0,failed=0;const failures=[];
   const worker=async()=>{
@@ -1773,10 +1774,12 @@ document.querySelector('#bootstrap-roof-training')?.addEventListener('click',asy
    }
   };
   await Promise.all([worker(),worker()]);
-  if(status)status.innerHTML='<strong>Training bootstrap complete.</strong> '+done+' roofs processed · '+failed+' failed.'+(failures.length?'<br><span class="muted">'+failures.slice(0,6).map(escRoof).join('<br>')+(failures.length>6?'<br>…and '+(failures.length-6)+' more':'')+'</span>':'')+'<br>Running regression now…';
+  const rebuildSummary='<strong>Training rebuild complete.</strong> '+done+' roofs updated to line engine v5 · '+failed+' failed.'+(failures.length?'<br><span class="muted">'+failures.slice(0,8).map(escRoof).join('<br>')+(failures.length>8?'<br>…and '+(failures.length-8)+' more':'')+'</span>':'');
+  if(status)status.innerHTML=rebuildSummary+'<br>Running regression now…';
   const reg=await fetch('/api/training-regression',{cache:'no-store'}),data=await reg.json().catch(()=>({}));
   if(!reg.ok||!data.ok)throw new Error(data.error||'Bootstrap finished, but regression could not run.');
   renderRoofRegression(data);
+  if(status)status.innerHTML=rebuildSummary+'<br><span class="muted">Regression refreshed below.</span>';
  }catch(err){if(status)status.textContent='Training bootstrap failed: '+(err?.message||String(err))}
  finally{if(btn){btn.disabled=false;btn.textContent=old||'Rebuild Training Models'}}
 });
