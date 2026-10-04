@@ -1672,9 +1672,10 @@ function renderRoofRegression(data){
  const scored=rows.filter(r=>r.status==='scored').sort((a,b)=>(a.score?.overall??999)-(b.score?.overall??999));
  const failures=scored.filter(r=>r.gatePass===false);
  if(status){
-  status.innerHTML='<strong>Regression complete.</strong> '+Number(s.processedCases||0)+' of '+Number(s.totalCases||rows.length)+' cases currently have saved Solaris geometry. '+
-   '<br><span class="muted">Facet diagnostics: DSM '+fmtRegression(s.averageDsmFacetErrorPct??s.averageFacetErrorPct,'%')+' · Google segments '+fmtRegression(s.averageGoogleSegmentFacetErrorPct,'%')+' · Topology faces '+fmtRegression(s.averageTopologyFaceErrorPct,'%')+'.</span> '+
-   (failures.length?'<strong>'+failures.length+' processed case'+(failures.length===1?'':'s')+' fail the regression gate.</strong>':'All processed cases pass the current gate.')+
+  status.innerHTML='<strong>Regression complete.</strong> '+Number(s.geometryProcessedCases??s.processedCases||0)+' of '+Number(s.totalCases||rows.length)+' cases currently have saved Solaris geometry; '+Number(s.comparableCases??0)+' are directly comparable single-building references. '+
+   '<br><span class="muted">Facet diagnostics: DSM '+fmtRegression(s.averageDsmFacetErrorPct??s.averageFacetErrorPct,'%')+' · Google segments '+fmtRegression(s.averageGoogleSegmentFacetErrorPct,'%')+' · Topology faces '+fmtRegression(s.averageTopologyFaceErrorPct,'%')+'.</span>'+
+   '<br><span class="muted">Line engine v5: '+Number(s.lineEngineV5Cases||0)+' current · '+Number(s.staleLineEngineCases||0)+' stale.</span> '+
+   (failures.length?'<strong>'+failures.length+' comparable case'+(failures.length===1?'':'s')+' fail the regression gate.</strong>':'All comparable cases pass the current gate.')+
    (Number(s.pendingCases||0)?' '+Number(s.pendingCases)+' case'+(Number(s.pendingCases)===1?'':'s')+' still need an initial Solaris process run.':'');
  }
  if(!results)return;
@@ -1686,7 +1687,7 @@ function renderRoofRegression(data){
    return '<tr>'+
     '<td><strong>'+escRoof(r.address)+'</strong><br><span class="muted">'+escRoof(r.source||'')+'</span></td>'+
     '<td>'+escRoof(r.archetype||'—')+'</td>'+
-    '<td>'+(pending?'—':escRoof(cur.facetEngineVersion||cur.geometryMode||'—'))+'</td>'+
+    '<td>'+(pending?'—':escRoof((cur.facetEngineVersion||cur.geometryMode||'—')+(cur.lineEngineVersion?' / '+cur.lineEngineVersion.replace('plane-dsm-trace-','line-'):'')))+'</td>'+
     '<td>'+escRoof(r.reference?.facetCount??'—')+'</td>'+
     '<td>'+(pending?'—':escRoof(cur.googleSegmentCount??'—'))+'</td>'+
     '<td>'+(pending?'—':escRoof(cur.dsmFacetCount??cur.facetCount??'—'))+'</td>'+
@@ -1759,7 +1760,9 @@ document.querySelector('#bootstrap-roof-training')?.addEventListener('click',asy
  try{
   const rr=await fetch('/api/training-regression',{cache:'no-store'}),rd=await rr.json().catch(()=>({}));
   if(!rr.ok||!rd.ok)throw new Error(rd.error||'Could not load training cases.');
-  const pendingRows=(rd.rows||[]).filter(r=>(r.scope==='primary-building'||r.scope==='all-structures'||!r.scope)&&(r.status==='not-processed'||String(r.projectId||'').startsWith('training-')));
+  const pendingRows=(rd.rows||[]).filter(r=>(r.scope==='primary-building'||r.scope==='all-structures'||!r.scope)&&(
+    r.status==='not-processed' || r.current?.lineEngineVersion!=='plane-dsm-trace-v5'
+  ));
   const byAddress=new Map();for(const r of pendingRows)if(!byAddress.has(r.address))byAddress.set(r.address,r);
   const queue=[...byAddress.values()];
   if(!queue.length){if(status)status.textContent='All eligible training roofs already use line engine v5.';return}
