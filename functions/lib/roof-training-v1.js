@@ -62,6 +62,17 @@ function addressScore(a,b){
  };
  const nh=houseNumber(nt),rh=houseNumber(rt);
  if(nh&&rh&&nh!==rh)return 0;
+ // The first token after the house number is the street identity anchor.
+ // This prevents 1902 Hoover from matching 1902 Badger merely because the
+ // city/state/ZIP and road suffix are identical.
+ const streetAnchor=tokens=>{
+  if(tokens.length<2)return null;
+  let i=houseNumber(tokens)?1:0;
+  while(i<tokens.length&&["n","s","e","w"].includes(tokens[i]))i++;
+  return tokens[i]||null;
+ };
+ const ns=streetAnchor(nt),rs=streetAnchor(rt);
+ if(ns&&rs&&ns!==rs)return 0;
  const aa=new Set(nt),bb=new Set(rt);
  return [...aa].filter(x=>bb.has(x)).length/Math.max(aa.size,bb.size);
 }
