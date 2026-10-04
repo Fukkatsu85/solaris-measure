@@ -90,8 +90,16 @@ function score(cur,ref){
   topologyFaces:ref.facetCount&&cur.topologyFaceCount!=null?Math.abs(cur.topologyFaceCount-ref.facetCount)/ref.facetCount*100:null
  };
  const edgeKeys=(ref.ridgeHipFt!=null?["ridgeHipFt"]:["ridgeFt","hipFt"]).concat(["valleyFt","eaveFt","rakeFt","perimeterFt"]);
- const edgeErrors=edgeKeys.map(k=>ref[k]!=null?pct(cur[k],ref[k]):null).filter(Number.isFinite);
- errors.edges=mean(edgeErrors);
+ const edgePairs=edgeKeys
+   .filter(k=>ref[k]!=null&&Number.isFinite(Number(cur[k])))
+   .map(k=>({k,ref:Number(ref[k]),cur:Number(cur[k])}));
+ // A tiny reference category (for example a 0.5 ft valley) should not dominate
+ // the entire roof-line score by thousands of percent. Score the takeoff as a
+ // total normalized absolute-length error across all available line categories.
+ const edgeRefTotal=edgePairs.reduce((s,x)=>s+Math.abs(x.ref),0);
+ const edgeAbsError=edgePairs.reduce((s,x)=>s+Math.abs(x.cur-x.ref),0);
+ errors.edgeCategoryPct=Object.fromEntries(edgePairs.map(x=>[x.k,pct(x.cur,x.ref)]));
+ errors.edges=edgeRefTotal>0?edgeAbsError/edgeRefTotal*100:null;
  const comp={
   topology:metric(errors.facets,0,35),
   edges:metric(errors.edges,5,30),
