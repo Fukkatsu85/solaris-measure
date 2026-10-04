@@ -1266,6 +1266,82 @@ function planeResultQuality(result){
     -Math.min(15,inflation*1.5)-Math.min(12,lineOverflowPenalty);
 }
 
+
+function traceSupportedPlaneIntersection(mask,component,dsm,frame,roofXY,line,segA,segB){
+  const span=lineSpanInPolygonXY(line,roofXY);
+  if(!span||span.max-span.min<.75)return null;
+  const norm=Math.hypot(line.A,line.B);
+  if(norm<1e-8)return null;
+
+  const ca=frame.toXY(segA.center),cb=frame.toXY(segB.center);
+  const va=line.A*ca.x+line.B*ca.y+line.C;
+  const vb=line.A*cb.x+line.B*cb.y+line.C;
+  if(Math.abs(va)<1e-6||Math.abs(vb)<1e-6||va*vb>=0)return null;
+
+  const nx=line.A/norm,ny=line.B/norm;
+  const sideA=Math.sign(va)||1,sideB=Math.sign(vb)||-1;
+  const total=span.max-span.min;
+  const step=Math.max(.28,Math.min(.48,total/80));
+  const samples=[];
+  const toLL=(x,y)=>frame.toLL({x,y});
+  const onRoof=(xy)=>{
+    if(!pointInPolygonXY(xy,roofXY))return false;
+    const ll=toLL(xy.x,xy.y),p=rasterPixelForLatLng(mask,ll.lat,ll.lng);
+    return component.has(p.y*mask.width+p.x);
+  };
+
+  for(let t=span.min;t<=span.max+step*.25;t+=step){
+    const tt=Math.min(span.max,t);
+    const center={x:span.p0.x+span.dir.x*tt,y:span.p0.y+span.dir.y*tt};
+    let best=null;
+    for(const off of [.55,.8,1.05]){
+      const axy={x:center.x+nx*sideA*off,y:center.y+ny*sideA*off};
+      const bxy={x:center.x+nx*sideB*off,y:center.y+ny*sideB*off};
+      if(!onRoof(axy)||!onRoof(bxy))continue;
+      const all=toLL(axy.x,axy.y),bll=toLL(bxy.x,bxy.y);
+      const az=dsmSampleAt(dsm,all.lat,all.lng)?.z,bz=dsmSampleAt(dsm,bll.lat,bll.lng)?.z;
+      const aOwn=planeHeightAt(segA,all),aOther=planeHeightAt(segB,all);
+      const bOwn=planeHeightAt(segB,bll),bOther=planeHeightAt(segA,bll);
+      if(![az,bz,aOwn,aOther,bOwn,bOther].every(Number.isFinite))continue;
+      const ar=Math.abs(az-aOwn),br=Math.abs(bz-bOwn);
+      const aAdv=Math.abs(az-aOther)-ar,bAdv=Math.abs(bz-bOther)-br;
+      const fit=Math.max(ar,br);
+      const good=fit<=.78&&aAdv>=-.18&&bAdv>=-.18;
+      const strength=Math.max(0,.9-fit)+Math.max(0,aAdv)+Math.max(0,bAdv);
+      if(!best||strength>best.strength)best={good,strength,fit};
+    }
+    samples.push({t:tt,good:Boolean(best?.good),strength:Number(best?.strength||0)});
+    if(tt>=span.max)break;
+  }
+  if(samples.length<3)return null;
+
+  const goodIdx=samples.map((s,i)=>s.good?i:-1).filter(i=>i>=0);
+  if(goodIdx.length<3)return null;
+  const clusters=[];
+  let cur=[goodIdx[0]];
+  for(let k=1;k<goodIdx.length;k++){
+    if(goodIdx[k]-goodIdx[k-1]<=3)cur.push(goodIdx[k]);
+    else{clusters.push(cur);cur=[goodIdx[k]]}
+  }
+  clusters.push(cur);
+  clusters.sort((a,b)=>{
+    const al=samples[a[a.length-1]].t-samples[a[0]].t,bl=samples[b[b.length-1]].t-samples[b[0]].t;
+    return bl-al;
+  });
+  const bestCluster=clusters[0];
+  if(!bestCluster||bestCluster.length<3)return null;
+  const i0=bestCluster[0],i1=bestCluster[bestCluster.length-1];
+  const t0=samples[i0].t,t1=samples[i1].t;
+  if(t1-t0<.75)return null;
+
+  const spanCount=Math.max(1,i1-i0+1);
+  const support=bestCluster.length/spanCount;
+  if(support<.48)return null;
+  const strength=mean(bestCluster.map(i=>samples[i].strength));
+  const p=t=>frame.toLL({x:span.p0.x+span.dir.x*t,y:span.p0.y+span.dir.y*t});
+  return {a:p(t0),b:p(t1),lengthMeters:t1-t0,support,strength};
+}
+
 function detectPlaneIntersectionFacets(mask,component,dsm,solarSegments,rawOutline,rgb=null,{includeDsmRegions=true,bboxPadM=1.25}={}){
   if(!Array.isArray(rawOutline)||rawOutline.length<3)return {valid:false,reason:"outline"};
   const {raw,candidates,googleCandidates=0,dsmRegionCandidates=0}=planeCandidateSet(solarSegments,dsm,rgb,mask,component,{includeDsmRegions});
@@ -1330,20 +1406,34 @@ function detectPlaneIntersectionFacets(mask,component,dsm,solarSegments,rawOutli
   for(const sep of separators){
     const fa=byPlane.get(sep.i),fb=byPlane.get(sep.j);
     if(!fa||!fb)continue;
-    const aXY=fa.outline.map(frame.toXY),bXY=fb.outline.map(frame.toXY);
-    const sa=lineSpanInPolygonXY(sep.line,aXY),sb=lineSpanInPolygonXY(sep.line,bXY);
-    if(!sa||!sb)continue;
-    const lo=Math.max(sa.min,sb.min),hi=Math.min(sa.max,sb.max);
-    if(hi-lo<.75)continue;
-    const p=t=>frame.toLL({x:sa.p0.x+sa.dir.x*t,y:sa.p0.y+sa.dir.y*t});
-    const line={a:p(lo),b:p(hi),lengthMeters:hi-lo};
-    const ca=candidates[sep.i],cb=candidates[sep.j],classified=classifySharedRoofLine(line,ca,cb,dsm);
+    const ca=candidates[sep.i],cb=candidates[sep.j];
+
+    // First trace the mathematical plane intersection across the roof mask using
+    // DSM support on both sides. This recovers full ridges/hips/valleys even
+    // when Google segment bounding boxes or clipped facet cells are conservative.
+    let traced=traceSupportedPlaneIntersection(mask,component,dsm,frame,roofXY,sep.line,ca,cb);
+    let line=null,traceSupport=0,traceStrength=0;
+    if(traced){
+      line={a:traced.a,b:traced.b,lengthMeters:traced.lengthMeters};
+      traceSupport=traced.support;traceStrength=traced.strength;
+    }else{
+      const aXY=fa.outline.map(frame.toXY),bXY=fb.outline.map(frame.toXY);
+      const sa=lineSpanInPolygonXY(sep.line,aXY),sb=lineSpanInPolygonXY(sep.line,bXY);
+      if(!sa||!sb)continue;
+      const lo=Math.max(sa.min,sb.min),hi=Math.min(sa.max,sb.max);
+      if(hi-lo<.75)continue;
+      const p=t=>frame.toLL({x:sa.p0.x+sa.dir.x*t,y:sa.p0.y+sa.dir.y*t});
+      line={a:p(lo),b:p(hi),lengthMeters:hi-lo};
+    }
+
+    const classified=classifySharedRoofLine(line,ca,cb,dsm);
     if(classified.type==="transition")continue;
     const refined=classified.line||line;
     const type=classified.type==="ridge_or_hip"?ridgeOrHipType(ca,cb,dsm):classified.type;
     roofLines.push({type,facetA:fa.index-1,facetB:fb.index-1,a:refined.a,b:refined.b,
       lengthMeters:metersBetween(refined.a,refined.b),length3dMeters:roofLine3dMeters(refined,ca,cb),
-      creaseStrength:classified.creaseStrength||0,planeStrength:classified.planeStrength||0,source:"plane-intersection-v2"});
+      creaseStrength:classified.creaseStrength||0,planeStrength:classified.planeStrength||0,
+      traceSupport,traceStrength,source:traced?"plane-dsm-trace-v5":"plane-cell-intersection"});
   }
 
   const footprintM2=component.size*Math.pow(Math.max(.1,Number(mask.pixelSize)||.1),2);
@@ -1360,6 +1450,7 @@ function detectPlaneIntersectionFacets(mask,component,dsm,solarSegments,rawOutli
     areaCoverage,medianSupport,footprintM2,
     bboxPadM:Number(bboxPadM)||0,
     totalInternalLineMeters:roofLines.reduce((s,l)=>s+Math.max(0,Number(l.length3dMeters||l.lengthMeters||0)),0),
+    tracedLineCount:roofLines.filter(l=>l.source==="plane-dsm-trace-v5").length,
     engine:(Number(bboxPadM)>2?(includeDsmRegions?"plane-v4-wide-dsm":"plane-v4-wide-google"):(includeDsmRegions?"plane-v3-dsm-regions":"plane-v2-google-only")),
     reason:valid?null:"quality"
   };
@@ -1719,6 +1810,7 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
   model.rawCandidatePlaneCount=facetResult.rawCandidateCount??null;
   model.candidatePlaneCount=facetResult.candidateCount??null;
   model.facetCap=facetResult.facetCap??null;
+  model.lineEngineVersion="plane-dsm-trace-v5";
   model.facetEngineVersion=planeFacetResult?(
     planeFacetResult.engine==="plane-v4-wide-dsm"?"plane-v4-wide-dsm-selected":
     planeFacetResult.engine==="plane-v4-wide-google"?"plane-v4-wide-google-selected":
