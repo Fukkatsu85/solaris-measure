@@ -1461,7 +1461,7 @@ async function generateRoofReport(){
     try{
      const cr=await fetch('/api/training-topology-optimizer',{cache:'no-store'}),cd=await cr.json().catch(()=>({}));
      const cfg=cd?.config||null;
-     profileOverrides=(cfg?.version==='topology-opt-2-scope-aware'&&cfg?.scopePolicy==='primary-building-only')?(cfg.profileOverrides||{}):{};
+     profileOverrides=(cfg?.version==='topology-opt-3-holdout'&&cfg?.scopePolicy==='primary-building-only'&&cfg?.validationPolicy==='deterministic-profile-holdout')?(cfg.profileOverrides||{}):{};
     }catch{}
     d.topology=topo.buildRoofTopology(sm,{profileOverrides});
    }catch(err){console.warn('Roof topology engine unavailable',err)}
@@ -1790,8 +1790,11 @@ document.querySelector('#optimize-roof-topology')?.addEventListener('click',asyn
   const d=await r.json().catch(()=>({}));
   if(!r.ok||!d.ok)throw new Error(d.error||'Topology optimization failed.');
   const cfg=d.config||{},rows=(cfg.results||[]).filter(x=>x.best);
-  if(status)status.innerHTML='<strong>Topology optimization complete.</strong> '+Number(cfg.trainingCases||0)+' training roofs evaluated across '+rows.length+' solver profiles.<br>'+
-    rows.map(x=>escRoof(x.profile)+': '+escRoof(x.best.name)+' · score '+Number(x.best.score||0).toFixed(1)+' (baseline '+Number(x.baseline?.score||0).toFixed(1)+')').join('<br>');
+  if(status)status.innerHTML='<strong>Topology optimization complete.</strong> '+Number(cfg.trainingCases||0)+' comparable roofs evaluated with a deterministic holdout set across '+rows.length+' solver profiles.<br>'+
+    rows.map(x=>{
+      const b=x.best||{},base=x.baseline||{},tag=x.promoted?'promoted':'kept baseline';
+      return escRoof(x.profile)+': '+escRoof(b.name||'current')+' · train '+Number(b.score||0).toFixed(1)+' · validation '+Number(b.validationScore??b.score||0).toFixed(1)+' · '+tag+' (baseline validation '+Number(base.validationScore??base.score||0).toFixed(1)+')';
+    }).join('<br>');
   if(regStatus)regStatus.textContent='Optimized topology settings saved. Running regression with the new profile overrides…';
   const rr=await fetch('/api/training-regression',{cache:'no-store'}),rd=await rr.json().catch(()=>({}));
   if(!rr.ok||!rd.ok)throw new Error(rd.error||'Optimizer saved, but regression failed.');
