@@ -195,6 +195,7 @@ export async function onRequestGet({env}){
   pendingCases:rows.filter(r=>r.status==="not-processed").length,scopeSpecificCases:rows.filter(r=>r.status==="scope-specific").length,
   lineEngineV5RestoredCases:geometryRows.filter(r=>r.current?.lineEngineVersion==="plane-dsm-trace-v5-restored").length,
   staleLineEngineCases:geometryRows.filter(r=>r.current?.lineEngineVersion!=="plane-dsm-trace-v5-restored").length,
+  detailBoundaryCases:geometryRows.filter(r=>r.current?.detailBoundaryPerimeterFt!=null).length,
   averageScore:mean(scored.map(r=>r.score.overall)),medianScore:median(scored.map(r=>r.score.overall)),
   averageAreaErrorPct:av("area"),averageFacetErrorPct:av("facets"),averageEdgeErrorPct:av("edges"),
   averageDetailBoundaryEdgeErrorPct:av("detailBoundaryEdges"),
