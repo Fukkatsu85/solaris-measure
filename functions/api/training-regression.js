@@ -44,17 +44,26 @@ function currentMetrics(sm,outline,profileOverrides){
  const modelArea=num(sm?.model?.slopedAreaSqFt);
  const googleWhole=num(sm?.googleWholeRoofAreaFt2);
  const footprint=num(outline?.measurement?.planAreaFt2)||num(sm?.model?.footprintSqFt);
- // Google wholeRoofStats can occasionally attach to a nearby/incorrect building
- // when geocoding is not rooftop-precise. Trust it only when it is physically
- // consistent with the independently decoded DSM roof surface and footprint.
+ const w=modelFacets.map(f=>({p:num(f.rise12),a:num(f.slopedAreaSqFt)||0})).filter(x=>x.p!=null);
+ const aw=w.reduce((s,x)=>s+x.a,0);
+ const avgPitch=w.length?(aw?w.reduce((s,x)=>s+x.p*x.a,0)/aw:w.reduce((s,x)=>s+x.p,0)/w.length):null;
+
+ // Three independent area estimates are available: Google wholeRoofStats, the
+ // decoded DSM facet surface, and footprint × pitch. A robust median consensus
+ // is materially more stable than trusting Google alone when one source is low.
  const areaRatio=(googleWhole&&modelArea)?googleWhole/modelArea:null;
  const googleAreaSane=googleWhole!=null&&googleWhole>0
    &&(areaRatio==null||(areaRatio>=.55&&areaRatio<=1.8))
    &&(!footprint||googleWhole/footprint<=3);
- const slopedArea=googleAreaSane?googleWhole:(modelArea!=null?modelArea:facetAreas.reduce((a,b)=>a+b,0));
- const w=modelFacets.map(f=>({p:num(f.rise12),a:num(f.slopedAreaSqFt)||0})).filter(x=>x.p!=null);
- const aw=w.reduce((s,x)=>s+x.a,0);
- const avgPitch=w.length?(aw?w.reduce((s,x)=>s+x.p*x.a,0)/aw:w.reduce((s,x)=>s+x.p,0)/w.length):null;
+ const footprintPitchArea=(footprint&&avgPitch!=null)
+   ?footprint*Math.sqrt(1+Math.pow(avgPitch/12,2))
+   :null;
+ const areaCandidates=[
+   googleAreaSane?googleWhole:null,
+   modelArea!=null&&modelArea>0?modelArea:null,
+   footprintPitchArea!=null&&footprintPitchArea>0?footprintPitchArea:null
+ ].filter(Number.isFinite);
+ const slopedArea=areaCandidates.length?median(areaCandidates):(facetAreas.reduce((a,b)=>a+b,0));
  const edges=edgeTotals(topology,sm);
  const topologyFaces=(topology?.faces||[]).filter(f=>Number(f.slopedAreaSqFt||0)>0);
  return {
@@ -68,8 +77,10 @@ function currentMetrics(sm,outline,profileOverrides){
   facetAreasFt2:facetAreas,
   googleWholeRoofAreaFt2:googleWhole,
   rasterFacetAreaFt2:modelArea,
-  areaAuthority:googleAreaSane?"google-whole-roof":"dsm-surface-area",
+  areaAuthority:areaCandidates.length>=2?"consensus-median":(googleAreaSane?"google-whole-roof":"dsm-surface-area"),
   googleAreaRejected:googleWhole!=null&&!googleAreaSane,
+  footprintPitchAreaFt2:footprintPitchArea,
+  areaCandidateCount:areaCandidates.length,
   rasterToGoogleAreaRatio:(googleWhole&&modelArea)?modelArea/googleWhole:null,
   learnedProfile:topology?.learnedProfile||null,
   topologyVersion:topology?.version||null,
