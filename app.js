@@ -1672,13 +1672,14 @@ function renderRoofRegression(data){
  }
  if(!results)return;
  const ordered=[...scored,...rows.filter(r=>r.status!=='scored')];
- results.innerHTML='<table><thead><tr><th>Roof</th><th>Type</th><th>Ref</th><th>Google seg</th><th>DSM facets</th><th>Topo faces</th><th>Area err</th><th>Lines err</th><th>Score</th><th>Gate</th></tr></thead><tbody>'+
+ results.innerHTML='<table><thead><tr><th>Roof</th><th>Type</th><th>Engine</th><th>Ref</th><th>Google seg</th><th>DSM facets</th><th>Topo faces</th><th>Area err</th><th>Lines err</th><th>Score</th><th>Gate</th></tr></thead><tbody>'+
   ordered.map(r=>{
    const e=r.score?.errors||{},cur=r.current||{},pending=r.status!=='scored';
    const gate=pending?'Pending':(r.gatePass?'Pass':'Review');
    return '<tr>'+
     '<td><strong>'+escRoof(r.address)+'</strong><br><span class="muted">'+escRoof(r.source||'')+'</span></td>'+
     '<td>'+escRoof(r.archetype||'—')+'</td>'+
+    '<td>'+(pending?'—':escRoof(cur.facetEngineVersion||cur.geometryMode||'—'))+'</td>'+
     '<td>'+escRoof(r.reference?.facetCount??'—')+'</td>'+
     '<td>'+(pending?'—':escRoof(cur.googleSegmentCount??'—'))+'</td>'+
     '<td>'+(pending?'—':escRoof(cur.dsmFacetCount??cur.facetCount??'—'))+'</td>'+
