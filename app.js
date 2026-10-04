@@ -1793,7 +1793,7 @@ document.querySelector('#optimize-roof-topology')?.addEventListener('click',asyn
   if(status)status.innerHTML='<strong>Topology optimization complete.</strong> '+Number(cfg.trainingCases||0)+' comparable roofs evaluated with a deterministic holdout set across '+rows.length+' solver profiles.<br>'+
     rows.map(x=>{
       const b=x.best||{},base=x.baseline||{},tag=x.promoted?'promoted':'kept baseline';
-      return escRoof(x.profile)+': '+escRoof(b.name||'current')+' · train '+Number(b.score||0).toFixed(1)+' · validation '+Number(b.validationScore??b.score||0).toFixed(1)+' · '+tag+' (baseline validation '+Number(base.validationScore??base.score||0).toFixed(1)+')';
+      return escRoof(x.profile)+': '+escRoof(b.name||'current')+' · train '+Number(b.score||0).toFixed(1)+' · validation '+Number((b.validationScore??b.score)||0).toFixed(1)+' · '+tag+' (baseline validation '+Number((base.validationScore??base.score)||0).toFixed(1)+')';
     }).join('<br>');
   if(regStatus)regStatus.textContent='Optimized topology settings saved. Running regression with the new profile overrides…';
   const rr=await fetch('/api/training-regression',{cache:'no-store'}),rd=await rr.json().catch(()=>({}));
