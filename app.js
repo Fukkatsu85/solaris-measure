@@ -1672,7 +1672,7 @@ function renderRoofRegression(data){
  const scored=rows.filter(r=>r.status==='scored').sort((a,b)=>(a.score?.overall??999)-(b.score?.overall??999));
  const failures=scored.filter(r=>r.gatePass===false);
  if(status){
-  status.innerHTML='<strong>Regression complete.</strong> '+Number(s.geometryProcessedCases??s.processedCases||0)+' of '+Number(s.totalCases||rows.length)+' cases currently have saved Solaris geometry; '+Number(s.comparableCases??0)+' are directly comparable single-building references. '+
+  status.innerHTML='<strong>Regression complete.</strong> '+Number((s.geometryProcessedCases??s.processedCases)||0)+' of '+Number(s.totalCases||rows.length)+' cases currently have saved Solaris geometry; '+Number(s.comparableCases??0)+' are directly comparable single-building references. '+
    '<br><span class="muted">Facet diagnostics: DSM '+fmtRegression(s.averageDsmFacetErrorPct??s.averageFacetErrorPct,'%')+' · Google segments '+fmtRegression(s.averageGoogleSegmentFacetErrorPct,'%')+' · Topology faces '+fmtRegression(s.averageTopologyFaceErrorPct,'%')+'.</span>'+
    '<br><span class="muted">Line engine v5: '+Number(s.lineEngineV5Cases||0)+' current · '+Number(s.staleLineEngineCases||0)+' stale.</span> '+
    (failures.length?'<strong>'+failures.length+' comparable case'+(failures.length===1?'':'s')+' fail the regression gate.</strong>':'All comparable cases pass the current gate.')+
