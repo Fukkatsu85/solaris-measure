@@ -1734,6 +1734,9 @@ function renderRoofRegression(data){
    ['Processed',s.processedCases??0],
    ['Average score',fmtRegression(s.averageScore,' /100')],
    ['Area error',fmtRegression(s.averageAreaErrorPct,'%')],
+   ['DSM area +0.25m',fmtRegression(s.averageAreaMargin25ErrorPct,'%')],
+   ['DSM area +0.50m',fmtRegression(s.averageAreaMargin50ErrorPct,'%')],
+   ['DSM area +0.75m',fmtRegression(s.averageAreaMargin75ErrorPct,'%')],
    ['DSM facet error',fmtRegression(s.averageDsmFacetErrorPct??s.averageFacetErrorPct,'%')],
    ['Google segment err',fmtRegression(s.averageGoogleSegmentFacetErrorPct,'%')],
    ['Topology face err',fmtRegression(s.averageTopologyFaceErrorPct,'%')],
@@ -1753,7 +1756,7 @@ function renderRoofRegression(data){
  if(status){
   status.innerHTML='<strong>Regression complete.</strong> '+Number((s.geometryProcessedCases??s.processedCases)||0)+' of '+Number(s.totalCases||rows.length)+' cases currently have saved Solaris geometry; '+Number(s.comparableCases??0)+' are directly comparable single-building references. '+
    '<br><span class="muted">Facet diagnostics: DSM '+fmtRegression(s.averageDsmFacetErrorPct??s.averageFacetErrorPct,'%')+' · Google segments '+fmtRegression(s.averageGoogleSegmentFacetErrorPct,'%')+' · Topology faces '+fmtRegression(s.averageTopologyFaceErrorPct,'%')+'.</span>'+
-   '<br><span class="muted">Line engine v5: '+Number(s.lineEngineV5RestoredCases||0)+' current · '+Number(s.staleLineEngineCases||0)+' stale. Boundary candidates: '+Number(s.detailBoundaryCases||0)+' · Raster-line candidates: '+Number(s.rasterLineCandidateCases||0)+'.</span> '+
+   '<br><span class="muted">Line engine v5: '+Number(s.lineEngineV5RestoredCases||0)+' current · '+Number(s.staleLineEngineCases||0)+' stale. Boundary candidates: '+Number(s.detailBoundaryCases||0)+' · Raster-line candidates: '+Number(s.rasterLineCandidateCases||0)+' · DSM-area candidates: '+Number(s.areaMarginCandidateCases||0)+'.</span> '+
    (failures.length?'<strong>'+failures.length+' comparable case'+(failures.length===1?'':'s')+' fail the regression gate.</strong>':'All comparable cases pass the current gate.')+
    (Number(s.pendingCases||0)?' '+Number(s.pendingCases)+' case'+(Number(s.pendingCases)===1?'':'s')+' still need an initial Solaris process run.':'');
  }
