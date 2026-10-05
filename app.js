@@ -1683,6 +1683,7 @@ function renderRoofRegression(data){
    ['Roof-line error',fmtRegression(s.averageEdgeErrorPct,'%')],
    ['Boundary candidate',fmtRegression(s.averageDetailBoundaryEdgeErrorPct,'%')],
    ['Raster line candidate',fmtRegression(s.averageRasterLineCandidateEdgeErrorPct,'%')],
+   ['Hybrid line candidate',fmtRegression(s.averageHybridRidgeEdgeErrorPct,'%')],
    ['Line v5 restored',(s.lineEngineV5RestoredCases??0)+' / '+(s.geometryProcessedCases??s.processedCases??0)]
   ];
   summary.innerHTML=cards.map(([a,b])=>'<div class="metric"><span>'+escRoof(a)+'</span><strong>'+escRoof(b)+'</strong></div>').join('');
