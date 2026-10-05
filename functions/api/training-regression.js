@@ -172,6 +172,13 @@ function currentMetrics(sm,outline,profileOverrides){
  const areaMargin25=num(areaMargins?.["0.25"]?.slopedAreaSqFt);
  const areaMargin50=num(areaMargins?.["0.5"]?.slopedAreaSqFt);
  const areaMargin75=num(areaMargins?.["0.75"]?.slopedAreaSqFt);
+ const edgeSnaps=sm?.areaEdgeSnapCandidates||{};
+ const edgeSnapConservativeAdj=num(edgeSnaps?.conservative?.areaAdjustmentSqFt);
+ const edgeSnapBalancedAdj=num(edgeSnaps?.balanced?.areaAdjustmentSqFt);
+ const edgeSnapRgbAdj=num(edgeSnaps?.rgb?.areaAdjustmentSqFt);
+ const edgeSnapConservative=slopedArea!=null&&edgeSnapConservativeAdj!=null?Math.max(1,slopedArea+edgeSnapConservativeAdj):null;
+ const edgeSnapBalanced=slopedArea!=null&&edgeSnapBalancedAdj!=null?Math.max(1,slopedArea+edgeSnapBalancedAdj):null;
+ const edgeSnapRgb=slopedArea!=null&&edgeSnapRgbAdj!=null?Math.max(1,slopedArea+edgeSnapRgbAdj):null;
  const rasterRidge=num(rasterLines?.ridgeFt);
  const rasterHip=num(rasterLines?.hipFt);
  const rasterValley=num(rasterLines?.valleyFt);
@@ -203,6 +210,10 @@ function currentMetrics(sm,outline,profileOverrides){
   areaMarginCandidate25Ft2:areaMargin25,
   areaMarginCandidate50Ft2:areaMargin50,
   areaMarginCandidate75Ft2:areaMargin75,
+  edgeSnapConservativeAreaFt2:edgeSnapConservative,
+  edgeSnapBalancedAreaFt2:edgeSnapBalanced,
+  edgeSnapRgbAreaFt2:edgeSnapRgb,
+  areaEdgeSnapDiagnostics:edgeSnaps,
   areaMarginDiagnostics:sm?.areaMarginDiagnostics||null,
   trainingVersion:sm?.trainingVersion||null,
   areaCandidateCount:areaCandidates.length,
@@ -228,7 +239,10 @@ function score(cur,ref){
   topologyFaces:ref.facetCount&&cur.topologyFaceCount!=null?Math.abs(cur.topologyFaceCount-ref.facetCount)/ref.facetCount*100:null,
   areaMargin25:pct(cur.areaMarginCandidate25Ft2,ref.slopedAreaFt2),
   areaMargin50:pct(cur.areaMarginCandidate50Ft2,ref.slopedAreaFt2),
-  areaMargin75:pct(cur.areaMarginCandidate75Ft2,ref.slopedAreaFt2)
+  areaMargin75:pct(cur.areaMarginCandidate75Ft2,ref.slopedAreaFt2),
+  edgeSnapConservative:pct(cur.edgeSnapConservativeAreaFt2,ref.slopedAreaFt2),
+  edgeSnapBalanced:pct(cur.edgeSnapBalancedAreaFt2,ref.slopedAreaFt2),
+  edgeSnapRgb:pct(cur.edgeSnapRgbAreaFt2,ref.slopedAreaFt2)
  };
  const edgeKeys=(ref.ridgeHipFt!=null?["ridgeHipFt"]:["ridgeFt","hipFt"]).concat(["valleyFt","eaveFt","rakeFt"]);
  // Provider perimeter is normally the same exterior roof edge already represented
@@ -396,11 +410,17 @@ export async function onRequestGet({env}){
   areaMargin50CandidateCases:geometryRows.filter(r=>r.current?.areaMarginCandidate50Ft2!=null).length,
   areaMargin75CandidateCases:geometryRows.filter(r=>r.current?.areaMarginCandidate75Ft2!=null).length,
   areaMarginCandidateCases:geometryRows.filter(r=>r.current?.areaMarginCandidate50Ft2!=null).length,
+  edgeSnapConservativeCases:geometryRows.filter(r=>r.current?.edgeSnapConservativeAreaFt2!=null).length,
+  edgeSnapBalancedCases:geometryRows.filter(r=>r.current?.edgeSnapBalancedAreaFt2!=null).length,
+  edgeSnapRgbCases:geometryRows.filter(r=>r.current?.edgeSnapRgbAreaFt2!=null).length,
   averageScore:mean(scored.map(r=>r.score.overall)),medianScore:median(scored.map(r=>r.score.overall)),
   averageAreaErrorPct:av("area"),
   averageAreaMargin25ErrorPct:av("areaMargin25"),
   averageAreaMargin50ErrorPct:av("areaMargin50"),
   averageAreaMargin75ErrorPct:av("areaMargin75"),
+  averageEdgeSnapConservativeErrorPct:av("edgeSnapConservative"),
+  averageEdgeSnapBalancedErrorPct:av("edgeSnapBalanced"),
+  averageEdgeSnapRgbErrorPct:av("edgeSnapRgb"),
   averageFacetErrorPct:av("facets"),averageEdgeErrorPct:av("edges"),
   averageDetailBoundaryEdgeErrorPct:av("detailBoundaryEdges"),
   averageRasterLineCandidateEdgeErrorPct:av("rasterLineCandidateEdges"),
