@@ -1468,6 +1468,8 @@ async function generateRoofReport(){
   }
   const topologyPerimFt=(d.topology?.edges||[]).filter(e=>e.type==='perimeter').reduce((s,e)=>s+Number(e.lengthMeters||0)*3.280839895,0);
   const lines=roofLineTotals(d);
+  const promotedRasterRidge=Number(sm?.measurementCandidates?.rasterLines?.ridgeFt);
+  if(Number.isFinite(promotedRasterRidge)&&promotedRasterRidge>=0)lines.ridge=promotedRasterRidge;
   const roofEdgePerimFt=Number(lines.eave||0)+Number(lines.rake||0);
   const perim=roofEdgePerimFt>0?roofEdgePerimFt:(topologyPerimFt>0?topologyPerimFt:basePerim);
   const lidarSloped=facets.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0);
@@ -1683,7 +1685,7 @@ function renderRoofRegression(data){
    ['Roof-line error',fmtRegression(s.averageEdgeErrorPct,'%')],
    ['Boundary candidate',fmtRegression(s.averageDetailBoundaryEdgeErrorPct,'%')],
    ['Raster line candidate',fmtRegression(s.averageRasterLineCandidateEdgeErrorPct,'%')],
-   ['Hybrid line candidate',fmtRegression(s.averageHybridRidgeEdgeErrorPct,'%')],
+   ['Production hybrid',fmtRegression(s.averageEdgeErrorPct,'%')],
    ['Line v5 restored',(s.lineEngineV5RestoredCases??0)+' / '+(s.geometryProcessedCases??s.processedCases??0)]
   ];
   summary.innerHTML=cards.map(([a,b])=>'<div class="metric"><span>'+escRoof(a)+'</span><strong>'+escRoof(b)+'</strong></div>').join('');
