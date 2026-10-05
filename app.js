@@ -1548,7 +1548,10 @@ function roofDiagramSvg(data){
  const sm=data.solarModel||null;
  if(sm?.outline?.length>=3&&sm?.model?.facets?.length){
   const topology=data.topology||null,outline=sm.outline,facets=sm.model.facets||[],lines=sm.model.roofLines||[],rawExteriorEdges=sm.measurements?.exteriorEdges||[];
-  const all=topology?.vertices?.length?topology.vertices:[...outline,...facets.flatMap(f=>f.outline||[]),...lines.flatMap(l=>[l.a,l.b]).filter(Boolean)];
+  // Production diagram authority: DSM facet mesh. The held-out DSM facet count
+  // is materially more accurate than reconstructed topology face count.
+  const useTopologyFaces=false;
+  const all=useTopologyFaces&&topology?.vertices?.length?topology.vertices:[...outline,...facets.flatMap(f=>f.outline||[]),...lines.flatMap(l=>[l.a,l.b]).filter(Boolean)];
   const lats=all.map(p=>Number(p.lat)).filter(Number.isFinite),lngs=all.map(p=>Number(p.lng)).filter(Number.isFinite);
   const north=Math.max(...lats),south=Math.min(...lats),east=Math.max(...lngs),west=Math.min(...lngs);
   const midLat=(north+south)/2*Math.PI/180,cos=Math.max(.2,Math.cos(midLat));
@@ -1559,7 +1562,7 @@ function roofDiagramSvg(data){
   const fills=['#e8eef5','#dbe7f0','#e6e2f3','#e3efe7','#f2e8dc','#e0ebeb','#eee5e5','#e5e5ef','#edf0df','#e7e7e7'];
   const lc={ridge:'#198754',hip:'#2563eb',valley:'#dc2626'};
   let s='<svg viewBox="0 0 1000 1000" role="img" aria-label="Hybrid 2D roof measurement diagram"><rect width="1000" height="1000" fill="#fff"/>';
-  if(topology?.faces?.length&&topology?.vertices?.length){
+  if(useTopologyFaces&&topology?.faces?.length&&topology?.vertices?.length){
    const vById=new Map(topology.vertices.map(v=>[v.id,v]));
    let visibleFaceNumber=0;
    topology.faces.forEach((face,i)=>{
@@ -1586,8 +1589,8 @@ function roofDiagramSvg(data){
     const poly=f.outline||[];if(poly.length<3)return;
     const q=poly.map(pt),cx=q.reduce((a,p)=>a+p.x,0)/q.length,cy=q.reduce((a,p)=>a+p.y,0)/q.length;
     s+='<polygon points="'+poly.map(P).join(' ')+'" fill="'+fills[i%fills.length]+'" stroke="#444" stroke-width="3"/>';
-    s+='<text x="'+cx.toFixed(1)+'" y="'+cy.toFixed(1)+'" text-anchor="middle" font-size="24" font-weight="700" fill="#111">F'+(i+1)+'</text>';
-    s+='<text x="'+cx.toFixed(1)+'" y="'+(cy+28).toFixed(1)+'" text-anchor="middle" font-size="18" fill="#333">'+Math.round(Number(f.rise12||0))+'/12 · '+Math.round(Number(f.slopedAreaSqFt||0))+' ft²</text>';
+    if(Number(f.slopedAreaSqFt||0)>=8)s+='<text x="'+cx.toFixed(1)+'" y="'+cy.toFixed(1)+'" text-anchor="middle" font-size="22" font-weight="700" fill="#111">F'+(i+1)+'</text>';
+    if(Number(f.slopedAreaSqFt||0)>=28)s+='<text x="'+cx.toFixed(1)+'" y="'+(cy+26).toFixed(1)+'" text-anchor="middle" font-size="17" fill="#333">'+Math.round(Number(f.rise12||0))+'/12 · '+Math.round(Number(f.slopedAreaSqFt||0))+' ft²</text>';
    });
    s+='<polygon points="'+outline.map(P).join(' ')+'" fill="none" stroke="#111" stroke-width="7"/>';
    lines.filter(l=>['ridge','hip','valley'].includes(l.type)).forEach(l=>{
@@ -1595,11 +1598,11 @@ function roofDiagramSvg(data){
     s+='<line x1="'+a.x.toFixed(1)+'" y1="'+a.y.toFixed(1)+'" x2="'+b.x.toFixed(1)+'" y2="'+b.y.toFixed(1)+'" stroke="'+lc[l.type]+'" stroke-width="7"/>';
    });
   }
-  if(!topology?.edges?.length)rawExteriorEdges.forEach(e=>{
+  if(!useTopologyFaces)rawExteriorEdges.forEach(e=>{
    const a=pt(e.a),b=pt(e.b),mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
    s+='<text x="'+mx.toFixed(1)+'" y="'+(my-7).toFixed(1)+'" text-anchor="middle" font-size="15" font-weight="600" fill="#111" stroke="#fff" stroke-width="5" paint-order="stroke">'+Number(e.lengthFt||0).toFixed(1)+' ft</text>';
   });
-  s+='<g transform="translate(28 935)" font-size="17" fill="#111"><text x="0" y="0">Geometry: paired-evidence topology with shared roof-line junctions</text><text x="0" y="26">Shared vertices/edges enforce one connected roof model; LiDAR remains an independent 3D validation source</text></g></svg>';
+  s+='<g transform="translate(28 935)" font-size="17" fill="#111"><text x="0" y="0">Geometry: DSM facet mesh + production roof-line overlay</text><text x="0" y="26">DSM facets drive the visible face model; topology and LiDAR remain independent validation sources</text></g></svg>';
   return s;
  }
  const outline=data.outline,poly=outline.polygon||[],planes=(data.planes?.planes||[]).filter(p=>p.accepted),geom=(data.geometry?.lines||[]).filter(l=>l.type!=='ignore'&&l.type!=='candidate');
@@ -2156,8 +2159,8 @@ function renderRoofRegression(data){
    ['Legacy consensus baseline',fmtAreaCandidate(s.averageLegacyConsensusErrorPct,s.legacyConsensusCases)],
    ['DSM facet error',fmtRegression(s.averageDsmFacetErrorPct??s.averageFacetErrorPct,'%')],
    ['Google segment err',fmtRegression(s.averageGoogleSegmentFacetErrorPct,'%')],
-   ['Topology face err',fmtRegression(s.averageTopologyFaceErrorPct,'%')],
-   ['Topology area err',fmtRegression(s.averageTopologyFaceAreaErrorPct,'%')],
+   ['Legacy topology face err',fmtRegression(s.averageTopologyFaceErrorPct,'%')],
+   ['Legacy topology area err',fmtRegression(s.averageTopologyFaceAreaErrorPct,'%')],
    ['Facet-partition topology',fmtRegression(s.averageFacetPartitionFaceErrorPct,'%')],
    ['Facet-partition area',fmtRegression(s.averageFacetPartitionAreaErrorPct,'%')],
    ['Facet-adjacency lines',fmtRegression(s.averageFacetAdjacencyEdgeErrorPct,'%')],
