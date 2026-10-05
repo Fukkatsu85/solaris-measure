@@ -1513,11 +1513,11 @@ async function generateRoofReport(){
      '<tr><th>Footprint × pitch area</th><td>'+(footprintPitchArea>0?Math.round(footprintPitchArea).toLocaleString()+' ft²':'—')+'</td></tr>'+
      '<tr><th>DSM average pitch</th><td>'+wholePitch(sm.model?.rise12||avgPitch)+'/12</td></tr>'+
      '<tr><th>DSM facets</th><td>'+Number(sm.model?.facets?.length||0)+'</td></tr>'+
-     '<tr><th>Eave</th><td>'+fmtHybridFt(dm.eaveFt)+'</td></tr>'+
-     '<tr><th>Rake</th><td>'+fmtHybridFt(dm.rakeFt)+'</td></tr>'+
-     '<tr><th>Ridge</th><td>'+fmtHybridFt(dm.ridgeFt)+'</td></tr>'+
-     '<tr><th>Hip</th><td>'+fmtHybridFt(dm.hipFt)+'</td></tr>'+
-     '<tr><th>Valley</th><td>'+fmtHybridFt(dm.valleyFt)+'</td></tr>'+
+     '<tr><th>Eave</th><td>'+fmtHybridFt(lines.eave)+'</td></tr>'+
+     '<tr><th>Rake</th><td>'+fmtHybridFt(lines.rake)+'</td></tr>'+
+     '<tr><th>Ridge</th><td>'+fmtHybridFt(lines.ridge)+'</td></tr>'+
+     '<tr><th>Hip</th><td>'+fmtHybridFt(lines.hip)+'</td></tr>'+
+     '<tr><th>Valley</th><td>'+fmtHybridFt(lines.valley)+'</td></tr>'+
      '</tbody></table><p class="roof-report-note">These measurements come from the Google rooftop-mask/DSM geometry used as the primary roof model. LiDAR is retained as an independent 3D cross-check.</p>')
    :'';
   const validationBlock=v.available
@@ -1536,7 +1536,7 @@ async function generateRoofReport(){
    '<div class="roof-report-grid"><div class="roof-report-stat"><span>Plan area</span><strong>'+Math.round(plan).toLocaleString()+' ft²</strong></div><div class="roof-report-stat"><span>Sloped roof area</span><strong>'+Math.round(sloped).toLocaleString()+' ft²</strong></div><div class="roof-report-stat"><span>Roofing squares</span><strong>'+squares.toFixed(2)+'</strong></div><div class="roof-report-stat"><span>Roof perimeter</span><strong>'+perim.toFixed(1)+' ft</strong></div><div class="roof-report-stat"><span>Facets</span><strong>'+reportFacetCount+'</strong></div><div class="roof-report-stat"><span>Average pitch</span><strong>'+avgPitch.toFixed(1)+'/12</strong></div><div class="roof-report-stat"><span>Ridge</span><strong>'+(lines.ridge?lines.ridge.toFixed(1)+' ft':'Not verified')+'</strong></div><div class="roof-report-stat"><span>Valley</span><strong>'+(lines.valley?lines.valley.toFixed(1)+' ft':'Not verified')+'</strong></div></div>'+
    '<h2>2D Roof Diagram</h2><div class="roof-diagram-wrap">'+roofDiagramSvg(d)+'</div>'+
    '<h2>Facet Measurements</h2><table class="roof-report-table"><thead><tr><th>Facet</th><th>Pitch</th><th>Slope</th><th>Plan ft²</th><th>Sloped ft²</th><th>Source / fit</th></tr></thead><tbody>'+facetRows+'</tbody></table>'+
-   '<h2>Linear Measurements</h2><table class="roof-report-table"><tbody><tr><th>Roof perimeter</th><td>'+perim.toFixed(1)+' ft</td></tr><tr><th>Ridge</th><td>'+(lines.ridge?lines.ridge.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Hip</th><td>'+(lines.hip?lines.hip.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Valley</th><td>'+(lines.valley?lines.valley.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Eave / rake split</th><td>Not yet classified</td></tr></tbody></table>'+
+   '<h2>Linear Measurements</h2><table class="roof-report-table"><tbody><tr><th>Roof perimeter</th><td>'+perim.toFixed(1)+' ft</td></tr><tr><th>Ridge</th><td>'+(lines.ridge?lines.ridge.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Hip</th><td>'+(lines.hip?lines.hip.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Valley</th><td>'+(lines.valley?lines.valley.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Eave</th><td>'+(lines.eave?lines.eave.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Rake</th><td>'+(lines.rake?lines.rake.toFixed(1)+' ft':'Not yet verified')+'</td></tr></tbody></table>'+
    '<h2>Waste / Ordering Area</h2><table class="roof-report-table"><thead><tr><th>Waste</th><th>Order area</th><th>Squares</th></tr></thead><tbody><tr><td>0%</td><td>'+Math.round(sloped).toLocaleString()+' ft²</td><td>'+squares.toFixed(2)+'</td></tr>'+waste.map(x=>'<tr><td>'+x.w+'%</td><td>'+Math.round(x.area).toLocaleString()+' ft²</td><td>'+x.sq.toFixed(2)+'</td></tr>').join('')+'</tbody></table>'+
    dsmGeometryBlock+
    validationBlock+
