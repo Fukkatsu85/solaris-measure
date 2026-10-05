@@ -1459,8 +1459,10 @@ function roofDiagramSvg(data){
     const poly=face.vertexIds.map(id=>vById.get(id)).filter(Boolean);if(poly.length<3)return;
     const q=poly.map(pt),cx=q.reduce((a,p)=>a+p.x,0)/q.length,cy=q.reduce((a,p)=>a+p.y,0)/q.length;
     s+='<polygon points="'+poly.map(P).join(' ')+'" fill="'+fills[i%fills.length]+'" stroke="#444" stroke-width="3"/>';
-    s+='<text x="'+cx.toFixed(1)+'" y="'+cy.toFixed(1)+'" text-anchor="middle" font-size="24" font-weight="700" fill="#111">F'+face.id+'</text>';
-    s+='<text x="'+cx.toFixed(1)+'" y="'+(cy+28).toFixed(1)+'" text-anchor="middle" font-size="18" fill="#333">'+Math.round(Number(face.rise12||0))+'/12 · '+Math.round(Number(face.slopedAreaSqFt||0))+' ft²</text>';
+    if(!face.microFace&&Number(face.slopedAreaSqFt||0)>=28){
+      s+='<text x="'+cx.toFixed(1)+'" y="'+cy.toFixed(1)+'" text-anchor="middle" font-size="24" font-weight="700" fill="#111">F'+face.id+'</text>';
+      s+='<text x="'+cx.toFixed(1)+'" y="'+(cy+28).toFixed(1)+'" text-anchor="middle" font-size="18" fill="#333">'+Math.round(Number(face.rise12||0))+'/12 · '+Math.round(Number(face.slopedAreaSqFt||0))+' ft²</text>';
+    }
    });
    topology.edges.forEach(e=>{
     const a=vById.get(e.a),b=vById.get(e.b);if(!a||!b)return;
@@ -1661,14 +1663,25 @@ async function generateRoofReport(){
   const lidarVsProductionPct=lidarQualityGood&&lidarSloped>0
     ?Math.abs(lidarSloped-sloped)/Math.max(1,sloped)*100
     :null;
+  const lidarPitchWeighted=lidarPointTotal>0
+    ?lidarAccepted.reduce((s,p)=>s+Number(p.pitch12||0)*Number(p.pointCount||0),0)/lidarPointTotal
+    :null;
+  const lidarPitchDiff=Number.isFinite(lidarPitchWeighted)&&Number.isFinite(rawAvgPitch)
+    ?Math.abs(lidarPitchWeighted-rawAvgPitch)
+    :null;
+  const lidarFacetDiff=lidarQualityGood?Math.abs(lidarAccepted.length-dsmFacets.length):null;
+  const lidarTopologyAgrees=lidarQualityGood
+    &&Number.isFinite(lidarPitchDiff)&&lidarPitchDiff<=1.5
+    &&Number.isFinite(lidarFacetDiff)&&lidarFacetDiff<=Math.max(2,Math.round(dsmFacets.length*.25));
   const lidarConfirmsProduction=Number.isFinite(lidarVsProductionPct)&&lidarVsProductionPct<=8;
   const reportNeedsReview=(areaConfidence==='Review'
     ||(Number.isFinite(facetCoverage)&&facetCoverage<.80)
-    ||!lineEngineCurrent)
+    ||!lineEngineCurrent
+    ||(lidarQualityGood&&!lidarTopologyAgrees))
     &&!lidarConfirmsProduction;
-  const reportConfidence=lidarConfirmsProduction
-    ?'LiDAR confirmed'
-    :(reportNeedsReview?'Review before ordering':(areaConfidence==='High'?'High':'Moderate'));
+  const reportConfidence=lidarConfirmsProduction&&lidarTopologyAgrees
+    ?'LiDAR area + topology confirmed'
+    :(lidarConfirmsProduction?'LiDAR area confirmed · topology review':(reportNeedsReview?'Review before ordering':(areaConfidence==='High'?'High':'Moderate')));
   const reportFacetCount=Number(dsmFacets.length||facets.length||d.topology?.faces?.length||0);
   const waste=[10,12,15].map(w=>({w,area:sloped*(1+w/100),sq:squares*(1+w/100)}));
   const facetRows=(dsmFacets.length?dsmFacets:facets).map((p,i)=>{
@@ -1683,6 +1696,7 @@ async function generateRoofReport(){
      '<tr><th>Area confidence</th><td>'+areaConfidence+(Number.isFinite(areaSourceSpreadPct)?' · source spread '+areaSourceSpreadPct.toFixed(1)+'%':'')+'</td></tr>'+
      '<tr><th>Report confidence</th><td>'+reportConfidence+'</td></tr>'+
      '<tr><th>LiDAR validation</th><td>'+(lidarQualityGood?(Math.round(lidarSloped).toLocaleString()+' ft² · RMSE '+lidarWeightedRmse.toFixed(2)+' m · '+(lidarConfirmsProduction?'confirms production area':'does not confirm production area')):'Not available / not quality-screened')+'</td></tr>'+
+     '<tr><th>Topology validation</th><td>'+(lidarQualityGood?((lidarTopologyAgrees?'Agrees':'Review')+' · LiDAR '+lidarAccepted.length+' facets vs DSM '+dsmFacets.length+' · pitch Δ '+(Number.isFinite(lidarPitchDiff)?lidarPitchDiff.toFixed(1)+'/12':'—')):'LiDAR topology validation unavailable')+'</td></tr>'+
      '<tr><th>Google whole-roof area</th><td>'+(Number.isFinite(Number(sm.googleWholeRoofAreaFt2))?Math.round(Number(sm.googleWholeRoofAreaFt2)).toLocaleString()+' ft²':'—')+'</td></tr>'+
      '<tr><th>DSM surface area</th><td>'+Math.round(Number(sm.model?.slopedAreaSqFt||0)).toLocaleString()+' ft²</td></tr>'+
      '<tr><th>Footprint × pitch area</th><td>'+(footprintPitchArea>0?Math.round(footprintPitchArea).toLocaleString()+' ft²':'—')+'</td></tr>'+
