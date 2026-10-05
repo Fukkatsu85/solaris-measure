@@ -1258,7 +1258,8 @@ async function runAutomaticLidarValidation(){
   };
   localStorage.setItem('solarisRoofProject',JSON.stringify(saved));
 
-  if(status)status.textContent='Automatic LiDAR validation passed quality screening · '+accepted+' facets · RMSE '+meanRmse.toFixed(2)+' m · '+(Number.isFinite(Number(fitDiag.coverage))?Math.round(Number(fitDiag.coverage)*100)+'% surface assigned · ':'')+'saving validation facets…';
+  const lidarAvgPitch=roofPlaneProposals.filter(p=>p.accepted).reduce((s,p)=>s+Number(p.pitch12||0)*Number(p.pointCount||0),0)/Math.max(1,totalPoints);
+  if(status)status.textContent='Automatic LiDAR validation passed quality screening · '+accepted+' facets · '+lidarAvgPitch.toFixed(1)+'/12 weighted pitch · RMSE '+meanRmse.toFixed(2)+' m · '+(Number.isFinite(Number(fitDiag.coverage))?Math.round(Number(fitDiag.coverage)*100)+'% surface assigned · ':'')+'saving validation facets…';
   document.querySelector('#accept-roof-planes')?.click();
  }catch(err){
   if(status)status.textContent='Automatic LiDAR validation stopped: '+(err?.message||String(err));
@@ -1317,8 +1318,9 @@ function spatialPlaneClusters(points,radius=.72){
  }
  return clusters.sort((a,b)=>b.length-a.length);
 }
-function fitRoofPlanesFromPoints(points){
+function fitRoofPlanesFromPoints(points,latitudeDeg=null){
  if(!points||points.length<100)throw new Error('Not enough roof surface points to fit planes.');
+ const mercatorGroundScale=Number.isFinite(Number(latitudeDeg))?Math.max(.35,Math.cos(Number(latitudeDeg)*Math.PI/180)):1;
  const ox=points.reduce((s,p)=>s+p.x,0)/points.length,oy=points.reduce((s,p)=>s+p.y,0)/points.length;
  const minPlanePts=Math.max(28,Math.min(62,Math.round(points.length*.006)));
  const maxPlanes=16;
@@ -1342,7 +1344,7 @@ function fitRoofPlanesFromPoints(points){
   // One mathematical plane can occur on disconnected roof sections. Split the
   // inliers spatially so a dormer or offset roof section is not merged into a
   // distant coplanar facet simply because pitch/elevation are similar.
-  const clusters=spatialPlaneClusters(candidateInliers,.72).filter(x=>x.length>=minPlanePts);
+  const clusters=spatialPlaneClusters(candidateInliers,.72/mercatorGroundScale).filter(x=>x.length>=minPlanePts);
   if(!clusters.length){
    // Remove only the very strongest inliers to prevent an unproductive loop.
    const fallback=candidateInliers.sort((a,b)=>planeResidual(a,refined,ox,oy)-planeResidual(b,refined,ox,oy)).slice(0,minPlanePts);
@@ -1357,10 +1359,10 @@ function fitRoofPlanesFromPoints(points){
    if(tight.length<minPlanePts)continue;
 
    const xs=tight.map(p=>p.x),ys=tight.map(p=>p.y);
-   const width=Math.max(...xs)-Math.min(...xs),height=Math.max(...ys)-Math.min(...ys);
+   const width=(Math.max(...xs)-Math.min(...xs))*mercatorGroundScale,height=(Math.max(...ys)-Math.min(...ys))*mercatorGroundScale;
    if(Math.hypot(width,height)<1.15)continue;
 
-   const slope=Math.hypot(local.a,local.b),slopeDeg=Math.atan(slope)*180/Math.PI,pitch12=12*slope;
+   const mercatorSlope=Math.hypot(local.a,local.b),slope=mercatorSlope/mercatorGroundScale,slopeDeg=Math.atan(slope)*180/Math.PI,pitch12=12*slope;
    if(slopeDeg>58)continue;
    const az=(Math.atan2(local.a,local.b)*180/Math.PI+360)%360;
    const rmse=Math.sqrt(tight.reduce((s,p)=>{const rr=planeResidual(p,local,ox,oy);return s+rr*rr},0)/tight.length);
@@ -1369,7 +1371,7 @@ function fitRoofPlanesFromPoints(points){
    tight.forEach(p=>removeIds.add(p._i));
    planes.push({
     id:'facet-'+facetId++,accepted:true,pointCount:tight.length,pitch12,slopeDeg,azimuthDeg:az,rmse,
-    originX:ox,originY:oy,coefficients:local,
+    originX:ox,originY:oy,mercatorGroundScale,coefficients:local,
     bounds:{minX:Math.min(...xs),maxX:Math.max(...xs),minY:Math.min(...ys),maxY:Math.max(...ys)},
     spatialWidthM:width,spatialHeightM:height,points:tight
    });
@@ -1389,13 +1391,13 @@ function fitRoofPlanesFromPoints(points){
    let azDiff=Math.abs(Number(A.azimuthDeg)-Number(B.azimuthDeg))%360;azDiff=Math.min(azDiff,360-azDiff);
    const gapX=Math.max(0,Math.max(A.bounds.minX,B.bounds.minX)-Math.min(A.bounds.maxX,B.bounds.maxX));
    const gapY=Math.max(0,Math.max(A.bounds.minY,B.bounds.minY)-Math.min(A.bounds.maxY,B.bounds.maxY));
-   const gap=Math.hypot(gapX,gapY);
+   const gap=Math.hypot(gapX,gapY)*mercatorGroundScale;
    if(pitchDiff>0.65||azDiff>8||gap>.55)continue;
    const pts=[...(A.points||[]),...(B.points||[])],local=refinePlane(pts,ox,oy);
    if(!local)continue;
    const rmse=Math.sqrt(pts.reduce((s,p)=>{const rr=planeResidual(p,local,ox,oy);return s+rr*rr},0)/pts.length);
    if(rmse>.14)continue;
-   const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y),slope=Math.hypot(local.a,local.b);
+   const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y),mercatorSlope=Math.hypot(local.a,local.b),slope=mercatorSlope/mercatorGroundScale;
    planes[i]={...A,pointCount:pts.length,pitch12:12*slope,slopeDeg:Math.atan(slope)*180/Math.PI,azimuthDeg:(Math.atan2(local.a,local.b)*180/Math.PI+360)%360,rmse,coefficients:local,bounds:{minX:Math.min(...xs),maxX:Math.max(...xs),minY:Math.min(...ys),maxY:Math.max(...ys)},points:pts};
    planes.splice(j,1);changed=true;break outer;
   }
@@ -1436,7 +1438,8 @@ function fitRoofPlanes(){
  try{
   const pts=roofLidarDecoded.surfacePoints.map((p,i)=>({...p,_i:i}));
   roofLidarDecoded.surfacePoints=pts;
-  roofPlaneProposals=fitRoofPlanesFromPoints(pts);
+  const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
+  roofPlaneProposals=fitRoofPlanesFromPoints(pts,Number(saved.lat));
   renderRoofPlanePreview();renderRoofPlaneList();
   if(!roofPlaneProposals.length)throw new Error('No stable roof planes were found.');
   if(accept)accept.disabled=false;
@@ -1491,7 +1494,7 @@ document.querySelector('#accept-roof-planes')?.addEventListener('click',async()=
    const share=p.accepted?Math.max(0,hullArea)/totalHullArea:0;
    const planAreaFt2=p.accepted?Number(planMetrics.planAreaFt2)*share:0;
    const slopedAreaFt2=planAreaFt2*Math.sqrt(1+Math.pow(Number(p.pitch12||0)/12,2));
-   return{id:p.id,accepted:p.accepted,pointCount:p.pointCount,pitch12:p.pitch12,slopeDeg:p.slopeDeg,azimuthDeg:p.azimuthDeg,rmse:p.rmse,originX:p.originX,originY:p.originY,coefficients:p.coefficients,bounds:p.bounds,polygon,planAreaFt2,slopedAreaFt2};
+   return{id:p.id,accepted:p.accepted,pointCount:p.pointCount,pitch12:p.pitch12,slopeDeg:p.slopeDeg,azimuthDeg:p.azimuthDeg,rmse:p.rmse,originX:p.originX,originY:p.originY,mercatorGroundScale:p.mercatorGroundScale,coefficients:p.coefficients,bounds:p.bounds,polygon,planAreaFt2,slopedAreaFt2};
   });
 
   if(status)status.textContent='Saving accepted LiDAR roof facets…';
@@ -1703,7 +1706,8 @@ function lidarPlaneIntersectionCandidates(lidarFacets){
   const dzA=zAt(A,centers[0].x,centers[0].y)-z;
   const dzB=zAt(B,centers[1].x,centers[1].y)-z;
   const creaseKind=(dzA<-.08&&dzB<-.08)?"convex":(dzA>.08&&dzB>.08)?"concave":"mixed";
-  out.push({facetA:i,facetB:j,a,b,mid,lengthMeters:Math.hypot(b.x-a.x,b.y-a.y),creaseKind});
+  const scale=Number(A.mercatorGroundScale||B.mercatorGroundScale||1);
+  out.push({facetA:i,facetB:j,a,b,mid,lengthMeters:Math.hypot(b.x-a.x,b.y-a.y)*scale,creaseKind});
  }
  return out;
 }
@@ -1748,7 +1752,8 @@ function lidarInternalLineValidation(sm,lidarFacets,outline){
   if(hasPhysical){
    for(const p of physical){
     const diff=ad(la,ang(p.a,p.b));if(diff>22)continue;
-    const d=segDist(mid,p.a,p.b);if(d>2.2)continue;
+    const scale=Number(facets[0]?.mercatorGroundScale||Math.cos(lat0*Math.PI/180)||1);
+    const d=segDist(mid,p.a,p.b)*scale;if(d>2.2)continue;
     const convexOk=(l.type==='ridge'||l.type==='hip')?p.creaseKind!=='concave':p.creaseKind!=='convex';
     if(!convexOk)continue;
     const score=d+diff/22;
