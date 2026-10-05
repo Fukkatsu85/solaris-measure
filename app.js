@@ -1190,6 +1190,81 @@ async function decodeRoofLidar(){
 }
 document.querySelector('#decode-roof-lidar')?.addEventListener('click',decodeRoofLidar);
 
+async function runAutomaticLidarValidation(){
+ const btn=document.querySelector('#auto-validate-roof-lidar'),status=document.querySelector('#roof-lidar-status'),advanced=document.querySelector('#roof-advanced-tools');
+ if(btn)btn.disabled=true;
+ if(advanced)advanced.open=true;
+ try{
+  let saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
+  if(!Number.isFinite(Number(saved.lat))||!Number.isFinite(Number(saved.lng)))throw new Error('Property coordinates are missing.');
+  if(status)status.textContent='Automatic LiDAR validation: finding coverage…';
+
+  if(!saved.lidarSource){
+   await findRoofLidar();
+   saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
+   if(!saved.lidarSource)throw new Error('No usable USGS LiDAR coverage was found for this roof.');
+  }
+
+  if(!saved.lidarEpt?.url||!saved.lidarSubset?.nodes?.length){
+   if(status)status.textContent='Automatic LiDAR validation: extracting the roof point-cloud window…';
+   await extractRoofLidar();
+   saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
+   if(!saved.lidarEpt?.url||!saved.lidarSubset?.nodes?.length)throw new Error('LiDAR coverage was found, but the roof subset could not be resolved.');
+  }
+
+  if(status)status.textContent='Automatic LiDAR validation: decoding roof points…';
+  await decodeRoofLidar();
+  if(!roofLidarDecoded?.surfacePoints?.length)throw new Error('LiDAR points could not be decoded for this roof.');
+
+  if(status)status.textContent='Automatic LiDAR validation: fitting independent roof planes…';
+  fitRoofPlanes();
+  if(!roofPlaneProposals.length)throw new Error('No stable LiDAR roof planes were found.');
+
+  // Validation mode is deliberately conservative. Exclude weak planes before
+  // saving so a noisy tree/chimney cluster cannot masquerade as a roof facet.
+  let accepted=0,totalPoints=0,weightedRmse=0;
+  for(const p of roofPlaneProposals){
+   const good=Number(p.pointCount||0)>=90
+     &&Number(p.rmse||99)<=.25
+     &&Number(p.slopeDeg||0)>=0
+     &&Number(p.slopeDeg||0)<=55;
+   p.accepted=good;
+   if(good){
+    accepted++;
+    totalPoints+=Number(p.pointCount||0);
+    weightedRmse+=Number(p.rmse||0)*Number(p.pointCount||0);
+   }
+  }
+  if(!accepted){
+   roofPlaneProposals.sort((a,b)=>Number(b.pointCount||0)-Number(a.pointCount||0));
+   const best=roofPlaneProposals[0];
+   if(best&&Number(best.pointCount||0)>=120&&Number(best.rmse||99)<=.32){best.accepted=true;accepted=1;totalPoints=Number(best.pointCount||0);weightedRmse=Number(best.rmse||0)*totalPoints;}
+  }
+  renderRoofPlanePreview();renderRoofPlaneList();
+  if(!accepted)throw new Error('LiDAR was decoded, but its roof planes were too noisy for automatic validation.');
+
+  const meanRmse=weightedRmse/Math.max(1,totalPoints);
+  saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
+  saved.lidarValidation={
+   status:'quality-screened',
+   acceptedFacets:accepted,
+   totalPoints,
+   weightedRmse:+meanRmse.toFixed(3),
+   validatedAt:new Date().toISOString()
+  };
+  localStorage.setItem('solarisRoofProject',JSON.stringify(saved));
+
+  if(status)status.textContent='Automatic LiDAR validation passed quality screening · '+accepted+' facets · RMSE '+meanRmse.toFixed(2)+' m. Saving validation facets…';
+  document.querySelector('#accept-roof-planes')?.click();
+ }catch(err){
+  if(status)status.textContent='Automatic LiDAR validation stopped: '+(err?.message||String(err));
+ }finally{
+  if(btn)btn.disabled=false;
+ }
+}
+document.querySelector('#auto-validate-roof-lidar')?.addEventListener('click',runAutomaticLidarValidation);
+
+
 let roofPlaneProposals=[];
 function fitPlane3(p1,p2,p3,ox,oy){
  const x1=p1.x-ox,y1=p1.y-oy,z1=p1.z,x2=p2.x-ox,y2=p2.y-oy,z2=p2.z,x3=p3.x-ox,y3=p3.y-oy,z3=p3.z;
