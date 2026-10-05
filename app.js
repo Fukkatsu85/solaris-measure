@@ -1586,7 +1586,7 @@ async function generateRoofReport(){
   const sm=d.solarModel||null,dm=sm?.measurements||{},dsmFacets=sm?.model?.facets||[];
   if(sm?.model?.facets?.length){
    try{
-    const topo=await import('/assets/js/roof-topology.js?v=20261002-opt1');
+    const topo=await import('/assets/js/roof-topology.js?v=20261005-face-dedupe2');
     let profileOverrides={};
     try{
      const cr=await fetch('/api/training-topology-optimizer',{cache:'no-store'}),cd=await cr.json().catch(()=>({}));
@@ -1886,6 +1886,7 @@ function renderRoofRegression(data){
    ['DSM facet error',fmtRegression(s.averageDsmFacetErrorPct??s.averageFacetErrorPct,'%')],
    ['Google segment err',fmtRegression(s.averageGoogleSegmentFacetErrorPct,'%')],
    ['Topology face err',fmtRegression(s.averageTopologyFaceErrorPct,'%')],
+   ['Topology area err',fmtRegression(s.averageTopologyFaceAreaErrorPct,'%')],
    ['Roof-line error',fmtRegression(s.averageEdgeErrorPct,'%')],
    ['Boundary candidate',fmtRegression(s.averageDetailBoundaryEdgeErrorPct,'%')],
    ['Raster line candidate',fmtRegression(s.averageRasterLineCandidateEdgeErrorPct,'%')],
