@@ -57,6 +57,20 @@ function physicalExteriorTotals(sm){
  }
  return used?{eaveFt,rakeFt,perimeterFt:eaveFt+rakeFt}:null;
 }
+function confidenceFilteredHipFt(sm){
+ let total=0;
+ for(const l of sm?.model?.roofLines||[]){
+  if(l?.type!=="hip")continue;
+  const lenFt=Number(l.length3dMeters||l.lengthMeters||0)*3.280839895;
+  const plane=Math.abs(Number(l.planeStrength||0));
+  const crease=Math.abs(Number(l.creaseStrength||0));
+  // Shadow rule selected by deterministic 5-fold validation. Require a
+  // meaningful hip length plus strong plane and crease evidence.
+  if(lenFt<5||plane<.45||crease<.06)continue;
+  total+=lenFt;
+ }
+ return total;
+}
 function topologyInternalTotals(topology){
  const out={ridgeFt:0,hipFt:0,valleyFt:0};
  for(const e of topology?.edges||[]){
@@ -125,6 +139,7 @@ function currentMetrics(sm,outline,profileOverrides){
  const slopedArea=areaCandidates.length?median(areaCandidates):(facetAreas.reduce((a,b)=>a+b,0));
  const edges=edgeTotals(topology,sm);
  const topologyInternal=topologyInternalTotals(topology);
+ const confidenceHip=confidenceFilteredHipFt(sm);
  const promotedRasterRidge=num(sm?.measurementCandidates?.rasterLines?.ridgeFt);
  if(promotedRasterRidge!=null&&promotedRasterRidge>=0){
   edges.ridgeFt=promotedRasterRidge;
@@ -152,6 +167,7 @@ function currentMetrics(sm,outline,profileOverrides){
   rasterLineCandidateValleyFt:rasterValley,
   topologyInternalHipFt:num(topologyInternal.hipFt),
   topologyInternalValleyFt:num(topologyInternal.valleyFt),
+  confidenceHipCandidateFt:num(confidenceHip),
   footprintAreaFt2:footprint,
   footprintPerimeterFt:num(outline?.measurement?.perimeterFt),
   facetAreasFt2:facetAreas,
@@ -254,6 +270,20 @@ function score(cur,ref){
  const topoInternalAbsError=topoInternalPairs.reduce((s,x)=>s+Math.abs(x.cur-x.ref),0);
  errors.topologyInternalEdges=topoInternalRefTotal>0?topoInternalAbsError/topoInternalRefTotal*100:null;
 
+ // Shadow candidate: retain raster ridge, current valleys and physical
+ // eave/rake, but discard weak/short hip detections using line-confidence data.
+ const hipConfidencePairs=edgeKeys
+  .filter(k=>ref[k]!=null)
+  .map(k=>{
+    let cv=cur[k];
+    if(k==="hipFt"&&cur.confidenceHipCandidateFt!=null)cv=cur.confidenceHipCandidateFt;
+    if(k==="ridgeHipFt"&&cur.confidenceHipCandidateFt!=null)cv=Number(cur.ridgeFt||0)+Number(cur.confidenceHipCandidateFt||0);
+    return Number.isFinite(Number(cv))?{k,ref:Number(ref[k]),cur:Number(cv)}:null;
+  }).filter(Boolean);
+ const hipConfidenceRefTotal=hipConfidencePairs.reduce((s,x)=>s+Math.abs(x.ref),0);
+ const hipConfidenceAbsError=hipConfidencePairs.reduce((s,x)=>s+Math.abs(x.cur-x.ref),0);
+ errors.hipConfidenceEdges=hipConfidenceRefTotal>0?hipConfidenceAbsError/hipConfidenceRefTotal*100:null;
+
  const comp={
   topology:metric(errors.facets,0,35),
   edges:metric(errors.edges,5,30),
@@ -321,6 +351,7 @@ export async function onRequestGet({env}){
   averageRasterLineCandidateEdgeErrorPct:av("rasterLineCandidateEdges"),
   averageHybridRidgeEdgeErrorPct:av("hybridRidgeEdges"),
   averageTopologyInternalEdgeErrorPct:av("topologyInternalEdges"),
+  averageHipConfidenceEdgeErrorPct:av("hipConfidenceEdges"),
   averagePitchErrorPct:av("pitch"),averageFootprintAreaErrorPct:av("footprintArea"),averageFootprintPerimeterErrorPct:av("footprintPerimeter"),
   averageGoogleSegmentFacetErrorPct:av("googleSegments"),averageDsmFacetErrorPct:av("dsmFacets"),averageTopologyFaceErrorPct:av("topologyFaces"),
   regressionGate:{maxAreaErrorPct:8,maxFacetErrorPct:25,maxEdgeErrorPct:25,minOverallScore:70},
