@@ -109,6 +109,13 @@ function edgeTotals(topology,sm){
   out.eaveFt=physicalExterior.eaveFt;
   out.rakeFt=physicalExterior.rakeFt;
  }
+ // Production exterior calibration: apply only to complex roofs. The >=7 facet
+ // guard protects simple roofs that already measure well while retaining the
+ // large holdout improvement on complex geometry.
+ if((sm?.model?.facets||[]).length>=7){
+  out.eaveFt*=1.20;
+  out.rakeFt*=1.32;
+ }
  if(topology?.edges?.length){
   const t={ridgeFt:0,hipFt:0,valleyFt:0,eaveFt:0,rakeFt:0,perimeterFt:0};
   for(const e of topology.edges){
@@ -221,6 +228,7 @@ function currentMetrics(sm,outline,profileOverrides){
   confidenceValleyCandidateFt:num(confidenceValley),
   calibratedExteriorEaveFt:Number(edges.eaveFt||0)*1.20,
   calibratedExteriorRakeFt:Number(edges.rakeFt||0)*1.32,
+  exteriorCalibrationApplied:modelFacets.length>=7,
   footprintAreaFt2:footprint,
   footprintPerimeterFt:num(outline?.measurement?.perimeterFt),
   facetAreasFt2:facetAreas,
