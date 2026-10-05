@@ -2330,34 +2330,45 @@ document.querySelector('#optimize-roof-topology')?.addEventListener('click',asyn
 
 document.querySelector('#run-roof-regression')?.addEventListener('click',async()=>{
  const btn=document.querySelector('#run-roof-regression'),status=document.querySelector('#roof-regression-status'),optStatus=document.querySelector('#roof-optimizer-status');
- const old=btn?.textContent;if(btn){btn.disabled=true;btn.textContent='Optimizing + running 40 cases…'}
- if(status)status.textContent='Running deterministic holdout topology optimization on the current rebuilt geometry…';
+ const old=btn?.textContent;if(btn){btn.disabled=true;btn.textContent='Running 40 cases…'}
+ let optimizerWarning=null;
  try{
-  // Always rebuild optimizer results from the CURRENT saved roof models.
-  // This avoids stale profile decisions surviving a geometry-engine rebuild.
-  const or=await fetch('/api/training-topology-optimizer',{method:'POST',headers:{'content-type':'application/json'}});
-  const od=await or.json().catch(()=>({}));
-  if(!or.ok||!od.ok)throw new Error(od.error||'Topology optimization failed.');
-  const cfg=od.config||{},promoted=(cfg.results||[]).filter(x=>x.promoted).length;
-  const blocked=(cfg.results||[]).filter(x=>x.promotionEligible===false).length;
-  if(optStatus){
-    optStatus.innerHTML='<strong>Topology optimizer ran on current geometry.</strong> '+
-      Number(cfg.trainingCases||0)+' comparable primary-building roofs · '+
-      promoted+' profile'+(promoted===1?'':'s')+' promoted after deterministic holdout validation.'+
-      (blocked?' '+blocked+' sparse profile'+(blocked===1?' was':'s were')+' held at baseline because there was not enough holdout data.':'')+
-      (promoted===0?' Baseline topology retained because no validated variant cleared the promotion gate.':'');
+  if(status)status.textContent='Refreshing deterministic holdout topology optimization…';
+
+  // Optimizer failure must never block the regression suite. If Cloudflare hits a
+  // transient CPU/resource limit, keep the last validated optimizer config and
+  // continue scoring the current production geometry.
+  try{
+    const or=await fetch('/api/training-topology-optimizer',{method:'POST',headers:{'content-type':'application/json'}});
+    const od=await or.json().catch(()=>({}));
+    if(!or.ok||!od.ok)throw new Error(od.error||('HTTP '+or.status));
+    const cfg=od.config||{},promoted=(cfg.results||[]).filter(x=>x.promoted).length;
+    const blocked=(cfg.results||[]).filter(x=>x.promotionEligible===false).length;
+    if(optStatus){
+      optStatus.innerHTML='<strong>Topology optimizer ran on current geometry.</strong> '+
+        Number(cfg.trainingCases||0)+' comparable primary-building roofs · '+
+        promoted+' profile'+(promoted===1?'':'s')+' promoted after deterministic holdout validation.'+
+        (blocked?' '+blocked+' sparse profile'+(blocked===1?' was':'s were')+' held at baseline because there was not enough holdout data.':'')+
+        (promoted===0?' Baseline topology retained because no validated variant cleared the promotion gate.':'');
+    }
+  }catch(err){
+    optimizerWarning=err?.message||String(err);
+    if(optStatus)optStatus.innerHTML='<strong>Topology optimizer warning:</strong> '+escRoof(optimizerWarning)+'. Regression continued using the last validated baseline/config.';
   }
 
-  if(status)status.textContent='Topology optimization complete. Running the verified 40-case regression…';
+  if(status)status.textContent=optimizerWarning
+    ?'Topology optimizer unavailable; running regression with the last validated configuration…'
+    :'Topology optimization complete. Running the verified 40-case regression…';
+
   const r=await fetch('/api/training-regression',{cache:'no-store'}),d=await r.json().catch(()=>({}));
   if(!r.ok||!d.ok)throw new Error(d.error||'Regression runner failed.');
   renderRoofRegression(d);
 
-  // renderRoofRegression intentionally does not overwrite optimizer detail.
-  if(status)status.textContent='Regression complete. Topology optimizer was refreshed immediately before this run.';
+  if(status)status.textContent=optimizerWarning
+    ?'Regression complete. Optimizer refresh failed, so the last validated topology configuration was retained.'
+    :'Regression complete. Topology optimizer was refreshed immediately before this run.';
  }catch(err){
   if(status)status.textContent='Regression failed: '+(err?.message||String(err));
-  if(optStatus)optStatus.textContent='Topology optimization/regression failed: '+(err?.message||String(err));
  }finally{
   if(btn){btn.disabled=false;btn.textContent=old||'Run Regression'}
  }
