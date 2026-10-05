@@ -1116,6 +1116,67 @@ function exteriorEdge3dMeters(a,b,facet){
   return Number.isFinite(z1)&&Number.isFinite(z2)?Math.hypot(plan,z2-z1):plan;
 }
 
+function smallFeatureExteriorMeasurements(outline,facets=[],roofLines=[]){
+  const base=buildRoofMeasurements(outline,facets,roofLines);
+  const small=facets.filter(f=>f?.smallFacet&&Array.isArray(f.outline)&&f.outline.length>=3);
+  if(!small.length)return {...base,addedEaveFt:0,addedRakeFt:0,addedEdges:0};
+
+  const main=Array.isArray(outline)?outline:[];
+  const allEdges=[];
+  facets.forEach((f,fi)=>{
+    const poly=f.outline||[];
+    for(let i=0;i<poly.length;i++){
+      const a=poly[i],b=poly[(i+1)%poly.length];
+      if(!a||!b)continue;
+      const len=metersBetween(a,b);if(len<.35)continue;
+      allEdges.push({fi,f,a,b,len,mid:{lat:(a.lat+b.lat)/2,lng:(a.lng+b.lng)/2}});
+    }
+  });
+
+  const angleLL=e=>{
+    const F=polygonLocalFrame([e.a,e.b]),a=F.toXY(e.a),b=F.toXY(e.b);
+    let d=Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI%180;if(d<0)d+=180;return d;
+  };
+  const ad=(a,b)=>{let d=Math.abs(a-b)%180;return Math.min(d,180-d)};
+  const onMainBoundary=e=>{
+    for(let i=0;i<main.length;i++){
+      const a=main[i],b=main[(i+1)%main.length];
+      if(pointSegmentDistanceMetersLL(e.mid,a,b)<=.65)return true;
+    }
+    return false;
+  };
+  const paired=e=>{
+    const ea=angleLL(e);
+    return allEdges.some(o=>{
+      if(o===e||o.fi===e.fi)return false;
+      if(ad(ea,angleLL(o))>12)return false;
+      if(pointSegmentDistanceMetersLL(e.mid,o.a,o.b)>.55)return false;
+      if(pointSegmentDistanceMetersLL(o.mid,e.a,e.b)>.55)return false;
+      return true;
+    });
+  };
+
+  let addedEaveFt=0,addedRakeFt=0,addedEdges=0;
+  for(const e of allEdges){
+    if(!e.f?.smallFacet)continue;
+    if(onMainBoundary(e)||paired(e))continue;
+    // Reject very weak tiny edges; these are usually segmentation stair-steps.
+    if(e.len<.65)continue;
+    const type=exteriorEdgeType(e.a,e.b,e.f);
+    const ft=exteriorEdge3dMeters(e.a,e.b,e.f)*METERS_TO_FEET;
+    if(!Number.isFinite(ft)||ft<=0||ft>35)continue;
+    if(type==="rake")addedRakeFt+=ft;else addedEaveFt+=ft;
+    addedEdges++;
+  }
+  return {
+    ...base,
+    eaveFt:base.eaveFt+addedEaveFt,
+    rakeFt:base.rakeFt+addedRakeFt,
+    perimeterFt:base.perimeterFt+addedEaveFt+addedRakeFt,
+    addedEaveFt,addedRakeFt,addedEdges
+  };
+}
+
 function buildRoofMeasurements(outline,facets=[],roofLines=[]){
   const exterior=[];
   let perimeterFt=0,eaveFt=0,rakeFt=0;
@@ -2111,7 +2172,12 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
     rasterFacetResult.facets||[],
     rasterFacetResult.roofLines||[]
   );
-  return {outline,measurementOutlineCandidate,rasterLineMeasurements,areaMarginCandidates,areaMarginDiagnostics,areaEdgeSnapCandidates,rawCornerCount,quality:mask.quality||dsm.quality,model};
+  const smallFeatureExteriorCandidate=smallFeatureExteriorMeasurements(
+    outline,
+    rasterFacetResult.facets||[],
+    finalRoofLines||[]
+  );
+  return {outline,measurementOutlineCandidate,rasterLineMeasurements,smallFeatureExteriorCandidate,areaMarginCandidates,areaMarginDiagnostics,areaEdgeSnapCandidates,rawCornerCount,quality:mask.quality||dsm.quality,model};
 }
 
 
