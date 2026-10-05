@@ -1836,7 +1836,16 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
     dsmAugmented:{valid:Boolean(planeV3.valid),qualityScore:Number.isFinite(Number(planeV3.qualityScore))?Number(planeV3.qualityScore):null,facets:Array.isArray(planeV3.facets)?planeV3.facets.length:0,lines:Array.isArray(planeV3.roofLines)?planeV3.roofLines.length:0},
     wide:{valid:Boolean(planeWide.valid),engine:planeWide.engine||null,qualityScore:Number.isFinite(Number(planeWide.qualityScore))?Number(planeWide.qualityScore):null,facets:Array.isArray(planeWide.facets)?planeWide.facets.length:0,lines:Array.isArray(planeWide.roofLines)?planeWide.roofLines.length:0,totalInternalLineMeters:Number(planeWide.totalInternalLineMeters||0)}
   };
-  return {outline,measurementOutlineCandidate,rawCornerCount,quality:mask.quality||dsm.quality,model};
+
+  // Shadow candidate: the raster adjacency solver sees only boundaries between
+  // touching labels, so it is a useful independent check on plane-intersection
+  // ridge/hip/valley totals. Keep it out of production until regression wins.
+  const rasterLineMeasurements=buildRoofMeasurements(
+    outline,
+    rasterFacetResult.facets||[],
+    rasterFacetResult.roofLines||[]
+  );
+  return {outline,measurementOutlineCandidate,rasterLineMeasurements,rawCornerCount,quality:mask.quality||dsm.quality,model};
 }
 
 
