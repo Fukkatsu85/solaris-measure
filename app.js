@@ -2314,7 +2314,8 @@ document.querySelector('#optimize-roof-topology')?.addEventListener('click',asyn
   const cfg=d.config||{},rows=(cfg.results||[]).filter(x=>x.best);
   if(status)status.innerHTML='<strong>Topology optimization complete.</strong> '+Number(cfg.trainingCases||0)+' comparable roofs evaluated with a deterministic holdout set across '+rows.length+' solver profiles.<br>'+
     rows.map(x=>{
-      const b=x.best||{},base=x.baseline||{},tag=x.promoted?'promoted':'kept baseline';
+      const b=x.best||{},base=x.baseline||{};
+      const tag=x.promoted?'promoted':(x.promotionEligible===false?'kept baseline · insufficient holdout':'kept baseline');
       return escRoof(x.profile)+': '+escRoof(b.name||'current')+' · train '+Number(b.score||0).toFixed(1)+' · validation '+Number((b.validationScore??b.score)||0).toFixed(1)+' · '+tag+' (baseline validation '+Number((base.validationScore??base.score)||0).toFixed(1)+')';
     }).join('<br>');
   if(regStatus)regStatus.textContent='Optimized topology settings saved. Running regression with the new profile overrides…';
@@ -2336,11 +2337,13 @@ document.querySelector('#run-roof-regression')?.addEventListener('click',async()
   const od=await or.json().catch(()=>({}));
   if(!or.ok||!od.ok)throw new Error(od.error||'Topology optimization failed.');
   const cfg=od.config||{},promoted=(cfg.results||[]).filter(x=>x.promoted).length;
+  const blocked=(cfg.results||[]).filter(x=>x.promotionEligible===false).length;
   if(optStatus){
     optStatus.innerHTML='<strong>Topology optimizer ran on current geometry.</strong> '+
       Number(cfg.trainingCases||0)+' comparable primary-building roofs · '+
       promoted+' profile'+(promoted===1?'':'s')+' promoted after deterministic holdout validation.'+
-      (promoted===0?' Baseline topology retained because no variant cleared the holdout promotion gate.':'');
+      (blocked?' '+blocked+' sparse profile'+(blocked===1?' was':'s were')+' held at baseline because there was not enough holdout data.':'')+
+      (promoted===0?' Baseline topology retained because no validated variant cleared the promotion gate.':'');
   }
 
   if(status)status.textContent='Topology optimization complete. Running the verified 40-case regression…';
