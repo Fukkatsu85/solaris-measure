@@ -21,6 +21,42 @@ async function listSolarModels(env){
  }while(cursor);
  return keys;
 }
+function localOffsetMeters(p,c){
+ const plat=num(p?.lat??p?.latitude),plng=num(p?.lng??p?.longitude),clat=num(c?.lat??c?.latitude),clng=num(c?.lng??c?.longitude);
+ if([plat,plng,clat,clng].some(v=>v==null))return null;
+ const lat0=clat*Math.PI/180;
+ return {east:(plng-clng)*111320*Math.cos(lat0),north:(plat-clat)*111320};
+}
+function facetHeightAtSaved(f,p){
+ const o=localOffsetMeters(p,f?.center);
+ if(!o)return null;
+ const z=num(f?.z0),ge=num(f?.gradientEast),gn=num(f?.gradientNorth);
+ if(z==null||ge==null||gn==null)return null;
+ return z-ge*o.east-gn*o.north;
+}
+function physicalExteriorTotals(sm){
+ const edges=sm?.measurements?.exteriorEdges||[],facets=sm?.model?.facets||[];
+ if(!edges.length||!facets.length)return null;
+ let eaveFt=0,rakeFt=0,used=0;
+ for(const ed of edges){
+  const len=num(ed?.lengthFt); if(!(len>=0))continue;
+  const facet=facets.find(f=>Number(f?.index)===Number(ed?.facetIndex));
+  let type=ed?.type==="rake"?"rake":"eave";
+  if(facet&&ed?.a&&ed?.b){
+   const zs=(facet.outline||[]).map(p=>facetHeightAtSaved(facet,p)).filter(Number.isFinite);
+   const za=facetHeightAtSaved(facet,ed.a),zb=facetHeightAtSaved(facet,ed.b);
+   if(zs.length>=2&&Number.isFinite(za)&&Number.isFinite(zb)){
+    const mn=Math.min(...zs),mx=Math.max(...zs),range=Math.max(.05,mx-mn);
+    const verticalSpan=Math.abs(zb-za)/range;
+    const midpointLevel=(((za+zb)/2)-mn)/range;
+    type=verticalSpan>=.15&&midpointLevel>=.05?"rake":"eave";
+   }
+  }
+  if(type==="rake")rakeFt+=len;else eaveFt+=len;
+  used++;
+ }
+ return used?{eaveFt,rakeFt,perimeterFt:eaveFt+rakeFt}:null;
+}
 function edgeTotals(topology,sm){
  const out={ridgeFt:0,hipFt:0,valleyFt:0,eaveFt:0,rakeFt:0,perimeterFt:0};
  // Match the actual production report: saved Solar/DSM measurements are the
@@ -29,6 +65,11 @@ function edgeTotals(topology,sm){
  const m=sm?.measurements||{};
  for(const k of ["ridgeFt","hipFt","valleyFt","eaveFt","rakeFt"]){
   const v=num(m[k]); if(v!=null)out[k]=v;
+ }
+ const physicalExterior=physicalExteriorTotals(sm);
+ if(physicalExterior){
+  out.eaveFt=physicalExterior.eaveFt;
+  out.rakeFt=physicalExterior.rakeFt;
  }
  if(topology?.edges?.length){
   const t={ridgeFt:0,hipFt:0,valleyFt:0,eaveFt:0,rakeFt:0,perimeterFt:0};
