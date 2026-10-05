@@ -1742,6 +1742,9 @@ function renderRoofRegression(data){
    ['DSM area +0.25m',fmtAreaCandidate(s.averageAreaMargin25ErrorPct,s.areaMargin25CandidateCases)],
    ['DSM area +0.50m',fmtAreaCandidate(s.averageAreaMargin50ErrorPct,s.areaMargin50CandidateCases)],
    ['DSM area +0.75m',fmtAreaCandidate(s.averageAreaMargin75ErrorPct,s.areaMargin75CandidateCases)],
+   ['Edge snap conservative',fmtAreaCandidate(s.averageEdgeSnapConservativeErrorPct,s.edgeSnapConservativeCases)],
+   ['Edge snap balanced',fmtAreaCandidate(s.averageEdgeSnapBalancedErrorPct,s.edgeSnapBalancedCases)],
+   ['Edge snap + RGB',fmtAreaCandidate(s.averageEdgeSnapRgbErrorPct,s.edgeSnapRgbCases)],
    ['DSM facet error',fmtRegression(s.averageDsmFacetErrorPct??s.averageFacetErrorPct,'%')],
    ['Google segment err',fmtRegression(s.averageGoogleSegmentFacetErrorPct,'%')],
    ['Topology face err',fmtRegression(s.averageTopologyFaceErrorPct,'%')],
@@ -1824,7 +1827,7 @@ async function bootstrapTrainingCase(row,engine){
  const solarModel={
   source:'google-solar-dsm',
   trainingAuto:true,
-  trainingVersion:'r39-browser-rooftop-v3-area-continuity',
+  trainingVersion:'r39-browser-rooftop-v4-edge-snap',
   geocodeSource:geo.source||null,
   geocodePrecision:geo.precision||null,
   geocodeRooftop:Boolean(geo.rooftop),
@@ -1840,6 +1843,7 @@ async function bootstrapTrainingCase(row,engine){
   measurements,
   areaMarginCandidates:result.areaMarginCandidates||null,
   areaMarginDiagnostics:result.areaMarginDiagnostics||null,
+  areaEdgeSnapCandidates:result.areaEdgeSnapCandidates||null,
   measurementCandidates:{detailBoundary:detailBoundaryMeasurements,rasterLines:rasterLineMeasurements}
  };
  const sr=await fetch('/api/roof-solar-model',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId,address,accepted:false,model:solarModel})});
@@ -1860,12 +1864,12 @@ document.querySelector('#bootstrap-roof-training')?.addEventListener('click',asy
     r.current?.detailBoundaryPerimeterFt==null ||
     r.current?.rasterLineCandidateRidgeFt==null ||
     r.current?.areaMarginCandidate50Ft2==null ||
-    r.current?.trainingVersion!=='r39-browser-rooftop-v3-area-continuity'
+    r.current?.trainingVersion!=='r39-browser-rooftop-v4-edge-snap'
   ));
   const byAddress=new Map();for(const r of pendingRows)if(!byAddress.has(r.address))byAddress.set(r.address,r);
   const queue=[...byAddress.values()];
   if(!queue.length){if(status)status.textContent='All eligible training roofs already have the restored v5 engine plus line and DSM-area shadow candidates.';return}
-  const engine=await import('/assets/js/solar-roof-engine.js?v=20261005-area-margin-shadow2');
+  const engine=await import('/assets/js/solar-roof-engine.js?v=20261005-edge-snap-shadow1');
   let done=0,failed=0;const failures=[];
   const worker=async()=>{
    while(queue.length){
