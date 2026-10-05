@@ -1554,6 +1554,54 @@ function physicalExteriorTotalsForReport(sm){
  return used?{eave,rake}:null;
 }
 
+function lidarInternalLineValidation(sm,lidarFacets,outline){
+ const lines=(sm?.model?.roofLines||[]).filter(l=>['ridge','hip','valley'].includes(l?.type)&&l?.a&&l?.b);
+ const facets=(lidarFacets||[]).filter(f=>f?.accepted!==false&&Array.isArray(f?.polygon)&&f.polygon.length>=3&&Number(f?.pointCount||0)>=80&&Number(f?.rmse||99)<=.32);
+ if(!lines.length||facets.length<2||!outline)return null;
+ const lat0=Number(outline.lat),lng0=Number(outline.lng),half=Number(outline.cropHalfMeters||42),size=half*2;
+ if(!Number.isFinite(lat0)||!Number.isFinite(lng0)||!Number.isFinite(size))return null;
+ const cos=Math.max(.2,Math.cos(lat0*Math.PI/180));
+ const llxy=p=>({x:(Number(p.lng)-lng0)*111320*cos,y:(Number(p.lat)-lat0)*111320});
+ const nxy=p=>({x:(Number(p.x)-.5)*size,y:(.5-Number(p.y))*size});
+ const ang=(a,b)=>{let d=Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI%180;if(d<0)d+=180;return d};
+ const ad=(a,b)=>{let d=Math.abs(a-b)%180;return Math.min(d,180-d)};
+ const segDist=(p,a,b)=>{
+  const dx=b.x-a.x,dy=b.y-a.y,l2=dx*dx+dy*dy||1;
+  const t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/l2));
+  return Math.hypot(p.x-(a.x+t*dx),p.y-(a.y+t*dy));
+ };
+ const edgeSets=facets.map((f,fi)=>{
+  const p=f.polygon.map(nxy),edges=[];
+  for(let i=0;i<p.length;i++)edges.push({fi,a:p[i],b:p[(i+1)%p.length],angle:ang(p[i],p[(i+1)%p.length])});
+  return edges;
+ }).flat();
+ const verified=[],unverified=[];
+ for(const l of lines){
+  const a=llxy(l.a),b=llxy(l.b),mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2},la=ang(a,b);
+  const byFacet=new Map();
+  for(const e of edgeSets){
+   const diff=ad(la,e.angle);if(diff>30)continue;
+   const d=segDist(mid,e.a,e.b);if(d>2.4)continue;
+   const prev=byFacet.get(e.fi);
+   if(!prev||d<prev.distance)byFacet.set(e.fi,{distance:d,angleDiff:diff});
+  }
+  const support=[...byFacet.entries()].sort((x,y)=>x[1].distance-y[1].distance);
+  const lenFt=Number(l.length3dMeters||l.lengthMeters||0)*3.280839895;
+  const ok=support.length>=2 && support[0][1].distance<=1.8 && support[1][1].distance<=2.4;
+  const item={type:l.type,lengthFt:lenFt,supportFacets:support.length,meanDistanceM:support.length?(support.slice(0,2).reduce((s,x)=>s+x[1].distance,0)/Math.min(2,support.length)):null};
+  (ok?verified:unverified).push(item);
+ }
+ const totals={ridge:0,hip:0,valley:0};
+ for(const x of verified)totals[x.type]+=Number(x.lengthFt||0);
+ const totalLen=lines.reduce((s,l)=>s+Number(l.length3dMeters||l.lengthMeters||0)*3.280839895,0);
+ const verifiedLen=verified.reduce((s,l)=>s+Number(l.lengthFt||0),0);
+ return {
+  totalLines:lines.length,verifiedLines:verified.length,
+  supportRatio:totalLen>0?verifiedLen/totalLen:0,
+  verifiedTotals:totals,verified,unverified
+ };
+}
+
 function confidenceInternalTotalsForReport(sm){
  const roofLines=sm?.model?.roofLines;
  if(!Array.isArray(roofLines))return null;
@@ -1586,7 +1634,7 @@ async function generateRoofReport(){
   const sm=d.solarModel||null,dm=sm?.measurements||{},dsmFacets=sm?.model?.facets||[];
   if(sm?.model?.facets?.length){
    try{
-    const topo=await import('/assets/js/roof-topology.js?v=20261005-exterior-face-fix1');
+    const topo=await import('/assets/js/roof-topology.js?v=20261005-lidar-line-verify1');
     let profileOverrides={};
     try{
      const cr=await fetch('/api/training-topology-optimizer',{cache:'no-store'}),cd=await cr.json().catch(()=>({}));
@@ -1602,6 +1650,7 @@ async function generateRoofReport(){
   if(Number.isFinite(promotedRasterRidge)&&promotedRasterRidge>=0)lines.ridge=promotedRasterRidge;
   const confidenceInternal=confidenceInternalTotalsForReport(sm);
   if(confidenceInternal){lines.hip=confidenceInternal.hip;lines.valley=confidenceInternal.valley;}
+  const lidarLineValidation=lidarInternalLineValidation(sm,facets,d.outline);
   const physicalExterior=physicalExteriorTotalsForReport(sm);
   if(physicalExterior){lines.eave=physicalExterior.eave;lines.rake=physicalExterior.rake;}
   const roofEdgePerimFt=Number(lines.eave||0)+Number(lines.rake||0);
@@ -1672,9 +1721,11 @@ async function generateRoofReport(){
     ?Math.abs(lidarPitchWeighted-rawAvgPitch)
     :null;
   const lidarFacetDiff=lidarQualityGood?Math.abs(lidarAccepted.length-dsmFacets.length):null;
+  const lidarLineSupportOk=!lidarLineValidation||lidarLineValidation.totalLines===0||lidarLineValidation.supportRatio>=.60;
   const lidarTopologyAgrees=lidarQualityGood
     &&Number.isFinite(lidarPitchDiff)&&lidarPitchDiff<=1.5
-    &&Number.isFinite(lidarFacetDiff)&&lidarFacetDiff<=Math.max(2,Math.round(dsmFacets.length*.25));
+    &&Number.isFinite(lidarFacetDiff)&&lidarFacetDiff<=Math.max(2,Math.round(dsmFacets.length*.25))
+    &&lidarLineSupportOk;
   const lidarConfirmsProduction=Number.isFinite(lidarVsProductionPct)&&lidarVsProductionPct<=8;
   const reportNeedsReview=(areaConfidence==='Review'
     ||(Number.isFinite(facetCoverage)&&facetCoverage<.80)
@@ -1699,6 +1750,8 @@ async function generateRoofReport(){
      '<tr><th>Report confidence</th><td>'+reportConfidence+'</td></tr>'+
      '<tr><th>LiDAR validation</th><td>'+(lidarQualityGood?(Math.round(lidarSloped).toLocaleString()+' ft² · RMSE '+lidarWeightedRmse.toFixed(2)+' m · '+(lidarConfirmsProduction?'confirms production area':'does not confirm production area')):'Not available / not quality-screened')+'</td></tr>'+
      '<tr><th>Topology validation</th><td>'+(lidarQualityGood?((lidarTopologyAgrees?'Agrees':'Review')+' · LiDAR '+lidarAccepted.length+' facets vs DSM '+dsmFacets.length+' · pitch Δ '+(Number.isFinite(lidarPitchDiff)?lidarPitchDiff.toFixed(1)+'/12':'—')):'LiDAR topology validation unavailable')+'</td></tr>'+
+     '<tr><th>Internal line validation</th><td>'+(lidarLineValidation?(lidarLineValidation.verifiedLines+'/'+lidarLineValidation.totalLines+' DSM lines independently supported by LiDAR · '+Math.round(lidarLineValidation.supportRatio*100)+'% of internal-line length'):'LiDAR line validation unavailable')+'</td></tr>'+
+     '<tr><th>LiDAR-verified ridge / hip / valley</th><td>'+(lidarLineValidation?(lidarLineValidation.verifiedTotals.ridge.toFixed(1)+' ft / '+lidarLineValidation.verifiedTotals.hip.toFixed(1)+' ft / '+lidarLineValidation.verifiedTotals.valley.toFixed(1)+' ft'):'—')+'</td></tr>'+
      '<tr><th>Google whole-roof area</th><td>'+(Number.isFinite(Number(sm.googleWholeRoofAreaFt2))?Math.round(Number(sm.googleWholeRoofAreaFt2)).toLocaleString()+' ft²':'—')+'</td></tr>'+
      '<tr><th>DSM surface area</th><td>'+Math.round(Number(sm.model?.slopedAreaSqFt||0)).toLocaleString()+' ft²</td></tr>'+
      '<tr><th>Footprint × pitch area</th><td>'+(footprintPitchArea>0?Math.round(footprintPitchArea).toLocaleString()+' ft²':'—')+'</td></tr>'+
@@ -1710,7 +1763,7 @@ async function generateRoofReport(){
      '<tr><th>Ridge</th><td>'+fmtHybridFt(lines.ridge)+'</td></tr>'+
      '<tr><th>Hip</th><td>'+fmtHybridFt(lines.hip)+'</td></tr>'+
      '<tr><th>Valley</th><td>'+fmtHybridFt(lines.valley)+'</td></tr>'+
-     '</tbody></table><p class="roof-report-note">Area uses the holdout-tested Google/DSM disagreement engine. Report confidence also checks area-source agreement, DSM facet coverage, and the current production line engine. Roofs marked Review before ordering should not be used for material ordering until visually checked. LiDAR is retained as an independent 3D cross-check.</p>')
+     '</tbody></table><p class="roof-report-note">Area uses the holdout-tested Google/DSM disagreement engine. Report confidence also checks area-source agreement, DSM facet coverage, the production line engine, LiDAR facet/pitch agreement, and independent LiDAR support along DSM ridge/hip/valley boundaries. Roofs marked Review before ordering should not be used for material ordering until visually checked.</p>')
    :'';
   const validationBlock=v.available
    ?('<h2>Hybrid Validation</h2><table class="roof-report-table"><tbody>'+
