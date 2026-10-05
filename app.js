@@ -2154,6 +2154,7 @@ function renderRoofRegression(data){
    ['Boundary candidate',fmtRegression(s.averageDetailBoundaryEdgeErrorPct,'%')],
    ['Raster line candidate',fmtRegression(s.averageRasterLineCandidateEdgeErrorPct,'%')],
    ['Small-feature edge candidate',fmtRegression(s.averageSmallFeatureExteriorEdgeErrorPct,'%')],
+   ['Exterior calibration candidate',fmtRegression(s.averageCalibratedExteriorEdgeErrorPct,'%')],
    ['Production confidence lines',fmtRegression(s.averageEdgeErrorPct,'%')],
    ['Topology internal candidate',fmtRegression(s.averageTopologyInternalEdgeErrorPct,'%')],
    ['Hip-only candidate',fmtRegression(s.averageHipConfidenceEdgeErrorPct,'%')],
