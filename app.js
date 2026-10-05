@@ -1442,6 +1442,38 @@ function roofLineTotals(data){
  for(const l of lines){if(out[l.type]==null)continue;out[l.type]+=roofNormLengthFt(l.a,l.b,data.outline)}
  return out;
 }
+function physicalExteriorTotalsForReport(sm){
+ const edges=sm?.measurements?.exteriorEdges||[],facets=sm?.model?.facets||[];
+ if(!edges.length||!facets.length)return null;
+ const ll=(p,k)=>Number(p?.[k]??p?.[k==="lat"?"latitude":"longitude"]);
+ const zAt=(f,p)=>{
+  const lat=ll(p,"lat"),lng=ll(p,"lng"),clat=ll(f?.center,"lat"),clng=ll(f?.center,"lng");
+  if(![lat,lng,clat,clng].every(Number.isFinite))return NaN;
+  const lat0=clat*Math.PI/180,east=(lng-clng)*111320*Math.cos(lat0),north=(lat-clat)*111320;
+  const z=Number(f?.z0),ge=Number(f?.gradientEast),gn=Number(f?.gradientNorth);
+  return [z,ge,gn].every(Number.isFinite)?z-ge*east-gn*north:NaN;
+ };
+ let eave=0,rake=0,used=0;
+ for(const ed of edges){
+  const len=Number(ed?.lengthFt);
+  if(!Number.isFinite(len))continue;
+  const facet=facets.find(f=>Number(f?.index)===Number(ed?.facetIndex));
+  let type=ed?.type==="rake"?"rake":"eave";
+  if(facet&&ed?.a&&ed?.b){
+   const zs=(facet.outline||[]).map(p=>zAt(facet,p)).filter(Number.isFinite);
+   const za=zAt(facet,ed.a),zb=zAt(facet,ed.b);
+   if(zs.length>=2&&Number.isFinite(za)&&Number.isFinite(zb)){
+    const mn=Math.min(...zs),mx=Math.max(...zs),range=Math.max(.05,mx-mn);
+    const verticalSpan=Math.abs(zb-za)/range;
+    const midpointLevel=(((za+zb)/2)-mn)/range;
+    type=verticalSpan>=.15&&midpointLevel>=.05?"rake":"eave";
+   }
+  }
+  if(type==="rake")rake+=len;else eave+=len;
+  used++;
+ }
+ return used?{eave,rake}:null;
+}
 async function generateRoofReport(){
  const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{},panel=document.querySelector('#roof-report-panel'),content=document.querySelector('#roof-report-content'),state=document.querySelector('#roof-state'),topBtn=document.querySelector('#roof-takeoff'),inlineBtn=document.querySelector('#roof-report-inline');
  const projectId=saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
@@ -1470,6 +1502,8 @@ async function generateRoofReport(){
   const lines=roofLineTotals(d);
   const promotedRasterRidge=Number(sm?.measurementCandidates?.rasterLines?.ridgeFt);
   if(Number.isFinite(promotedRasterRidge)&&promotedRasterRidge>=0)lines.ridge=promotedRasterRidge;
+  const physicalExterior=physicalExteriorTotalsForReport(sm);
+  if(physicalExterior){lines.eave=physicalExterior.eave;lines.rake=physicalExterior.rake;}
   const roofEdgePerimFt=Number(lines.eave||0)+Number(lines.rake||0);
   const perim=roofEdgePerimFt>0?roofEdgePerimFt:(topologyPerimFt>0?topologyPerimFt:basePerim);
   const lidarSloped=facets.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0);
@@ -1795,7 +1829,7 @@ document.querySelector('#bootstrap-roof-training')?.addEventListener('click',asy
   const byAddress=new Map();for(const r of pendingRows)if(!byAddress.has(r.address))byAddress.set(r.address,r);
   const queue=[...byAddress.values()];
   if(!queue.length){if(status)status.textContent='All eligible training roofs already have the restored v5 engine plus both shadow candidates.';return}
-  const engine=await import('/assets/js/solar-roof-engine.js?v=20261004-raster-line-shadow1');
+  const engine=await import('/assets/js/solar-roof-engine.js?v=20261004-exterior-z-v1');
   let done=0,failed=0;const failures=[];
   const worker=async()=>{
    while(queue.length){
@@ -1911,7 +1945,7 @@ async function runRoofSolarAnalysis(){
  try{
   const br=await fetch('/api/solar-building?lat='+encodeURIComponent(lat)+'&lng='+encodeURIComponent(lng)),building=await br.json();
   if(!br.ok||!building.ok)throw new Error(building.error||'Google Solar Building Insights is unavailable for this roof.');
-  const engine=await import('/assets/js/solar-roof-engine.js?v=20261004-raster-line-shadow1');
+  const engine=await import('/assets/js/solar-roof-engine.js?v=20261004-exterior-z-v1');
   const result=await engine.buildSolarRoofModel(lat,lng,building.roofSegments||[]);
   const measurements=engine.buildRoofMeasurements(result.outline,result.model.facets||[],result.model.roofLines||[]);
   const detailBoundaryMeasurements=Array.isArray(result.measurementOutlineCandidate)&&result.measurementOutlineCandidate.length>=3
