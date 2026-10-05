@@ -469,6 +469,113 @@ function nearestFacetMeta(c,facets,F){
   return best;
 }
 
+export function buildFacetAdjacencyGraph(solarModel,options={}){
+  const sm=solarModel||{},facets=sm.model?.facets||[],outlineLL=sm.outline||[];
+  if(outlineLL.length<3||facets.length<2)return null;
+
+  const all=[...outlineLL,...facets.flatMap(f=>f.outline||[])],F=frame(all);
+  let perimeter=regularizePerimeter(outlineLL.map(F.toXY));
+  if(polygonArea(perimeter)<0)perimeter.reverse();
+
+  const edgeRows=[];
+  facets.forEach((facet,fi)=>{
+    const poly=(facet.outline||[]).map(F.toXY);
+    for(let i=0;i<poly.length;i++){
+      const a=poly[i],b=poly[(i+1)%poly.length],len=dist(a,b);
+      if(len<.65)continue;
+      const mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+      // Shared facet boundaries should be interior, not roof perimeter edges.
+      if(nearestPointOnPerimeter(mid,perimeter).distance<.55)continue;
+      edgeRows.push({fi,a,b,len,angle:angle180(a,b),mid});
+    }
+  });
+
+  const raw=[];
+  for(let i=0;i<edgeRows.length;i++)for(let j=i+1;j<edgeRows.length;j++){
+    const A=edgeRows[i],B=edgeRows[j];
+    if(A.fi===B.fi||angleDiff(A.angle,B.angle)>13)continue;
+
+    const r=rad((A.angle+B.angle)/2),ux=Math.cos(r),uy=Math.sin(r),nx=-uy,ny=ux;
+    const proj=p=>p.x*ux+p.y*uy,nproj=p=>p.x*nx+p.y*ny;
+    const a0=Math.min(proj(A.a),proj(A.b)),a1=Math.max(proj(A.a),proj(A.b));
+    const b0=Math.min(proj(B.a),proj(B.b)),b1=Math.max(proj(B.a),proj(B.b));
+    const lo=Math.max(a0,b0),hi=Math.min(a1,b1),overlap=hi-lo;
+    if(overlap<.75)continue;
+    const na=(nproj(A.a)+nproj(A.b))/2,nb=(nproj(B.a)+nproj(B.b))/2;
+    const separation=Math.abs(na-nb);
+    if(separation>.95)continue;
+
+    const n=(na+nb)/2;
+    const a={x:ux*lo+nx*n,y:uy*lo+ny*n},b={x:ux*hi+nx*n,y:uy*hi+ny*n};
+    const fa=facets[A.fi],fb=facets[B.fi];
+    const ca=fa?.center?F.toXY(fa.center):null,cb=fb?.center?F.toXY(fb.center):null;
+    if(!ca||!cb)continue;
+
+    const dx=b.x-a.x,dy=b.y-a.y,ll=Math.hypot(dx,dy)||1;
+    const lnx=-dy/ll,lny=dx/ll;
+    const sideA=(ca.x-a.x)*lnx+(ca.y-a.y)*lny;
+    const sideB=(cb.x-a.x)*lnx+(cb.y-a.y)*lny;
+    if(sideA*sideB>=0)continue;
+
+    // Stored gradientEast/North is downhill because planeHeightAt uses
+    // z = z0 - gradientEast*east - gradientNorth*north.
+    const ga={x:Number(fa.gradientEast||0),y:Number(fa.gradientNorth||0)};
+    const gb={x:Number(fb.gradientEast||0),y:Number(fb.gradientNorth||0)};
+    const gla=Math.hypot(ga.x,ga.y),glb=Math.hypot(gb.x,gb.y);
+    if(gla<.03||glb<.03)continue;
+    ga.x/=gla;ga.y/=gla;gb.x/=glb;gb.y/=glb;
+
+    const towardA={x:-Math.sign(sideA)*lnx,y:-Math.sign(sideA)*lny};
+    const towardB={x:-Math.sign(sideB)*lnx,y:-Math.sign(sideB)*lny};
+    const ta=ga.x*towardA.x+ga.y*towardA.y;
+    const tb=gb.x*towardB.x+gb.y*towardB.y;
+    const strength=Math.min(Math.abs(ta),Math.abs(tb));
+
+    let type="transition";
+    if(ta>.16&&tb>.16)type="valley";
+    else if(ta<-.16&&tb<-.16){
+      const dot=Math.max(-1,Math.min(1,ga.x*gb.x+ga.y*gb.y));
+      const sep=Math.acos(dot)*180/Math.PI;
+      type=sep>=135?"ridge":"hip";
+    }
+    if(type==="transition")continue;
+
+    raw.push({
+      a,b,type,facetA:A.fi,facetB:B.fi,
+      lengthMeters:dist(a,b),
+      supportStrength:strength,
+      edgeSeparationM:separation,
+      source:"facet-adjacency-gradient"
+    });
+  }
+
+  // Deduplicate repeated boundary fragments from simplified facet polygons.
+  const kept=[];
+  raw.sort((a,b)=>(b.supportStrength-a.supportStrength)||(b.lengthMeters-a.lengthMeters));
+  for(const seg of raw){
+    const mid={x:(seg.a.x+seg.b.x)/2,y:(seg.a.y+seg.b.y)/2},ang=angle180(seg.a,seg.b);
+    const dup=kept.some(k=>{
+      if(k.type!==seg.type)return false;
+      const km={x:(k.a.x+k.b.x)/2,y:(k.a.y+k.b.y)/2};
+      return dist(mid,km)<1.0&&angleDiff(ang,angle180(k.a,k.b))<10;
+    });
+    if(!dup)kept.push(seg);
+  }
+
+  const minStrength=Number(options.minStrength||.20);
+  const edges=kept.filter(e=>e.supportStrength>=minStrength);
+  const totals={ridgeFt:0,hipFt:0,valleyFt:0};
+  for(const e of edges)totals[e.type+"Ft"]+=e.lengthMeters*3.280839895;
+
+  return {
+    version:1,
+    source:"dsm-facet-adjacency-gradient",
+    edges:edges.map((e,i)=>({...e,id:i+1,aLL:F.toLL(e.a),bLL:F.toLL(e.b)})),
+    totals,
+    stats:{rawPairs:raw.length,acceptedEdges:edges.length,minStrength}
+  };
+}
+
 export function buildFacetPartitionTopology(solarModel,options={}){
   const sm=solarModel||{},facets=sm.model?.facets||[],roofLines=sm.model?.roofLines||[],outlineLL=sm.outline||[];
   if(outlineLL.length<3||facets.length<2)return null;
