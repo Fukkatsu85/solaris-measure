@@ -885,6 +885,20 @@ function facetHeightAt(facet,point){
 
 function exteriorEdgeType(a,b,facet){
   if(!facet)return "eave";
+
+  // Physical classification: an eave hugs the low edge of a roof plane while a
+  // rake climbs a meaningful portion of that plane's vertical range. This is
+  // more stable across roof orientations than one global direction threshold.
+  const zs=(facet.outline||[]).map(p=>facetHeightAt(facet,p)).filter(Number.isFinite);
+  const za=facetHeightAt(facet,a),zb=facetHeightAt(facet,b);
+  if(zs.length>=2&&Number.isFinite(za)&&Number.isFinite(zb)){
+    const mn=Math.min(...zs),mx=Math.max(...zs),range=Math.max(.05,mx-mn);
+    const verticalSpan=Math.abs(zb-za)/range;
+    const midpointLevel=(((za+zb)/2)-mn)/range;
+    return verticalSpan>=.15&&midpointLevel>=.05?"rake":"eave";
+  }
+
+  // Fallback for incomplete legacy facets.
   const frame=polygonLocalFrame([a,b]);
   const aa=frame.toXY(a),bb=frame.toXY(b);
   let ex=bb.x-aa.x,ey=bb.y-aa.y;
