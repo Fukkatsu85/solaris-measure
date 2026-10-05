@@ -1724,7 +1724,12 @@ document.querySelector('#score-roof-benchmark')?.addEventListener('click',async(
 });
 
 function fmtRegression(v,suffix=''){
+ if(v===null||v===undefined||v==='')return '—';
  const n=Number(v);return Number.isFinite(n)?n.toFixed(1)+suffix:'—';
+}
+function fmtAreaCandidate(errorValue,count){
+ if(!Number(count))return 'N/A — 0 cases';
+ return fmtRegression(errorValue,'%')+' · '+Number(count)+' cases';
 }
 function renderRoofRegression(data){
  const s=data?.summary||{},rows=data?.rows||[],summary=document.querySelector('#roof-regression-summary'),status=document.querySelector('#roof-regression-status'),results=document.querySelector('#roof-regression-results');
@@ -1734,9 +1739,9 @@ function renderRoofRegression(data){
    ['Processed',s.processedCases??0],
    ['Average score',fmtRegression(s.averageScore,' /100')],
    ['Area error',fmtRegression(s.averageAreaErrorPct,'%')],
-   ['DSM area +0.25m',fmtRegression(s.averageAreaMargin25ErrorPct,'%')],
-   ['DSM area +0.50m',fmtRegression(s.averageAreaMargin50ErrorPct,'%')],
-   ['DSM area +0.75m',fmtRegression(s.averageAreaMargin75ErrorPct,'%')],
+   ['DSM area +0.25m',fmtAreaCandidate(s.averageAreaMargin25ErrorPct,s.areaMargin25CandidateCases)],
+   ['DSM area +0.50m',fmtAreaCandidate(s.averageAreaMargin50ErrorPct,s.areaMargin50CandidateCases)],
+   ['DSM area +0.75m',fmtAreaCandidate(s.averageAreaMargin75ErrorPct,s.areaMargin75CandidateCases)],
    ['DSM facet error',fmtRegression(s.averageDsmFacetErrorPct??s.averageFacetErrorPct,'%')],
    ['Google segment err',fmtRegression(s.averageGoogleSegmentFacetErrorPct,'%')],
    ['Topology face err',fmtRegression(s.averageTopologyFaceErrorPct,'%')],
@@ -1819,7 +1824,7 @@ async function bootstrapTrainingCase(row,engine){
  const solarModel={
   source:'google-solar-dsm',
   trainingAuto:true,
-  trainingVersion:'r39-browser-rooftop-v2',
+  trainingVersion:'r39-browser-rooftop-v3-area-continuity',
   geocodeSource:geo.source||null,
   geocodePrecision:geo.precision||null,
   geocodeRooftop:Boolean(geo.rooftop),
@@ -1834,6 +1839,7 @@ async function bootstrapTrainingCase(row,engine){
   model:result.model,
   measurements,
   areaMarginCandidates:result.areaMarginCandidates||null,
+  areaMarginDiagnostics:result.areaMarginDiagnostics||null,
   measurementCandidates:{detailBoundary:detailBoundaryMeasurements,rasterLines:rasterLineMeasurements}
  };
  const sr=await fetch('/api/roof-solar-model',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId,address,accepted:false,model:solarModel})});
@@ -1853,12 +1859,13 @@ document.querySelector('#bootstrap-roof-training')?.addEventListener('click',asy
     r.current?.lineEngineVersion!=='plane-dsm-trace-v5-restored' ||
     r.current?.detailBoundaryPerimeterFt==null ||
     r.current?.rasterLineCandidateRidgeFt==null ||
-    r.current?.areaMarginCandidate50Ft2==null
+    r.current?.areaMarginCandidate50Ft2==null ||
+    r.current?.trainingVersion!=='r39-browser-rooftop-v3-area-continuity'
   ));
   const byAddress=new Map();for(const r of pendingRows)if(!byAddress.has(r.address))byAddress.set(r.address,r);
   const queue=[...byAddress.values()];
   if(!queue.length){if(status)status.textContent='All eligible training roofs already have the restored v5 engine plus line and DSM-area shadow candidates.';return}
-  const engine=await import('/assets/js/solar-roof-engine.js?v=20261005-area-margin-shadow1');
+  const engine=await import('/assets/js/solar-roof-engine.js?v=20261005-area-margin-shadow2');
   let done=0,failed=0;const failures=[];
   const worker=async()=>{
    while(queue.length){
