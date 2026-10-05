@@ -469,6 +469,78 @@ function nearestFacetMeta(c,facets,F){
   return best;
 }
 
+export function buildFacetPartitionTopology(solarModel,options={}){
+  const sm=solarModel||{},facets=sm.model?.facets||[],roofLines=sm.model?.roofLines||[],outlineLL=sm.outline||[];
+  if(outlineLL.length<3||facets.length<2)return null;
+
+  const all=[...outlineLL,...roofLines.flatMap(l=>[l.a,l.b]).filter(Boolean),...facets.flatMap(f=>f.outline||[])],F=frame(all);
+  let perimeter=regularizePerimeter(outlineLL.map(F.toXY));
+  if(polygonArea(perimeter)<0)perimeter.reverse();
+
+  let longest={len:0,ang:0};
+  for(let i=0;i<perimeter.length;i++){
+    const a=perimeter[i],b=perimeter[(i+1)%perimeter.length],len=dist(a,b);
+    if(len>longest.len)longest={len,ang:angle180(a,b)};
+  }
+  const families=[longest.ang,(longest.ang+90)%180,(longest.ang+45)%180,(longest.ang+135)%180];
+
+  const segments=[];
+  for(let i=0;i<perimeter.length;i++)segments.push({a:perimeter[i],b:perimeter[(i+1)%perimeter.length],type:"perimeter",source:"perimeter"});
+
+  // Keep physically classified DSM lines first.
+  const acceptedInternal=[];
+  roofLines.filter(l=>["ridge","hip","valley"].includes(l.type)&&l.a&&l.b).forEach(l=>{
+    const clean=trimOrSnapInternalLine({...l,a:F.toXY(l.a),b:F.toXY(l.b)},perimeter,families);
+    const mid={x:(clean.a.x+clean.b.x)/2,y:(clean.a.y+clean.b.y)/2};
+    if(!pointInPoly(mid,perimeter))return;
+    const ang=angle180(clean.a,clean.b);
+    const duplicate=acceptedInternal.some(d=>{
+      const dm={x:(d.a.x+d.b.x)/2,y:(d.a.y+d.b.y)/2};
+      return dist(mid,dm)<1.0&&angleDiff(ang,angle180(d.a,d.b))<9;
+    });
+    if(!duplicate)acceptedInternal.push({...clean,source:"dsm-line"});
+  });
+  const connected=extendInternalLinesToJunctions(acceptedInternal,perimeter,Number(options.maxLineExtensionM||4.6));
+  segments.push(...connected);
+
+  // Main difference from the legacy solver: DSM facet-pair boundaries are the
+  // structural evidence source, not a secondary optional hint.
+  const paired=facetEdgeCandidates(facets,F,perimeter,families,connected);
+  const learned=chooseLearnedRoofProfile(sm);
+  const opts={
+    maxCandidateAdds:Math.min(40,Math.max(8,facets.length*2)),
+    candidateConnectM:Number(options.candidateConnectM||Math.max(2.4,Math.min(4.2,learned.candidateConnectM||3.4))),
+    minFaceAreaM2:Number(options.minFaceAreaM2||.22),
+    nodeSnapM:Number(options.nodeSnapM||.24)
+  };
+  const augmented=addFaceImprovingCandidates(segments,connected,paired,perimeter,opts);
+  const solved=augmented.solved,graph=solved.graph;
+  const faces=solved.faces.map((ids,i)=>{
+    const ctr=faceCentroid(ids,graph.nodes),meta=nearestFacetMeta(ctr,facets,F)||{};
+    const poly=ids.map(id=>graph.nodes[id]),flatAreaM2=Math.abs(polygonArea(poly));
+    const pitchDegrees=Number(meta.pitchDegrees||0);
+    return {
+      id:i+1,vertexIds:ids,rise12:Number(meta.rise12||0),pitchDegrees,
+      flatAreaSqFt:flatAreaM2*10.7639104167,
+      slopedAreaSqFt:flatAreaM2/Math.max(.35,Math.cos(rad(Math.max(0,Math.min(55,pitchDegrees)))))*10.7639104167,
+      sourceFacetAreaSqFt:Number(meta.slopedAreaSqFt||0),
+      microFace:false
+    };
+  });
+  const vertices=graph.nodes.map((n,i)=>({id:i,xy:{x:n.x,y:n.y},...F.toLL(n)}));
+  const edges=graph.edges.map((e,i)=>({id:i+1,a:e.a,b:e.b,type:e.type||"internal",source:e.source||"unknown",lengthMeters:dist(graph.nodes[e.a],graph.nodes[e.b])}));
+  return {
+    version:1.0,
+    source:"dsm-facet-partition-topology",
+    vertices,edges,faces,outline:perimeter.map(F.toLL),
+    stats:{
+      vertices:vertices.length,edges:edges.length,faces:faces.length,
+      acceptedCandidateEdges:augmented.adds,
+      pairedFacetCandidates:paired.length
+    }
+  };
+}
+
 export function buildRoofTopology(solarModel,options={}){
   const sm=solarModel||{},facets=sm.model?.facets||[],roofLines=sm.model?.roofLines||[],outlineLL=sm.outline||[];
   if(outlineLL.length<3)return null;
