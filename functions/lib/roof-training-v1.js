@@ -40,6 +40,7 @@ export const ROOF_TRAINING_V1 = [
   {caseId:"juniper-45-hover",address:"45 Juniper Street, Saint Paul, MN 55115",source:"Hover",scope:"primary-building",structureGroup:"45-juniper",slopedAreaFt2:2629,facetCount:8,avgPitch12:2,eaveFt:236.3333,valleyFt:0,ridgeHipFt:140.5,rakeFt:3.5,perimeterFt:239.8333,footprintAreaFt2:2013,footprintPerimeterFt:199.9167,flatAreaFt2:0,pitchAreas:{"2":2599,"7":23,"6":5,"9":2},archetype:"low-slope-hip"},
   {caseId:"acorn-1172-hover",address:"1172 Acorn Way, Waconia, MN 55387",source:"Hover",scope:"primary-building",slopedAreaFt2:2421,facetCount:10,avgPitch12:6,eaveFt:123.25,valleyFt:76.75,ridgeHipFt:101.1667,rakeFt:152.75,perimeterFt:276,footprintAreaFt2:1930,footprintPerimeterFt:196.25,flatAreaFt2:0,pitchAreas:{"6":1285,"5":1136},archetype:"compound-valley-multipitch"},
   {caseId:"juniper-45-roofr",address:"45 Juniper Street, Saint Paul, MN 55115",source:"Roofr",scope:"all-structures",structureGroup:"45-juniper",slopedAreaFt2:4382,facetCount:12,avgPitch12:2,eaveFt:324.5833,valleyFt:0,hipFt:104.6667,ridgeFt:79.5,rakeFt:120.3333,flatAreaFt2:2635,facetAreasFt2:[],archetype:"multi-structure-low-slope-flat"},
+  {caseId:"forest-1324-roofr",address:"1324 Forest Circle, Burnsville, MN 55306",source:"Roofr",scope:"primary-building",slopedAreaFt2:2580,facetCount:15,avgPitch12:8,eaveFt:156.25,valleyFt:26.6667,hipFt:20.75,ridgeFt:69.5833,rakeFt:136.1667,flatAreaFt2:0,facetAreasFt2:[707,612,521,538,53,53,31,26,25,9,3,3,3,2,2],pitchAreas:{"4":5,"8":2575},archetype:"compound-dormer-small-facets"},
   {caseId:"pond-view-626-roofr",address:"626 Pond View Drive, Mendota Heights, MN 55120",source:"Roofr",scope:"all-structures",slopedAreaFt2:3246,facetCount:20,avgPitch12:9,eaveFt:183.0833,valleyFt:66.25,hipFt:6.3333,ridgeFt:99.3333,rakeFt:231.5833,flatAreaFt2:35,pitchAreas:{"1":35,"9":3212},archetype:"steep-compound-mixed-flat"}
 ];
 
@@ -94,8 +95,8 @@ export function findTrainingBenchmark(address,{scope}={}){
 }
 
 export const LEARNED_PRIORS_V1 = {
- version:"2026-10-02-r39",
- sampleCount:39,
+ version:"2026-10-05-r40-forest",
+ sampleCount:40,
  summary:{
   medianFacetCount:7,
   complexFacetThreshold:10,
