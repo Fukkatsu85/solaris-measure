@@ -1,6 +1,6 @@
 export const LEARNED_ROOF_PRIORS = {
- version:"2026-10-02-r39",
- sampleCount:39,
+ version:"2026-10-05-r40-hidden-complexity",
+ sampleCount:40,
  profiles:{
   simple:{maxCandidateAdds:2,maxLineExtensionM:4.0,candidateConnectM:3.2,minFaceAreaM2:2.8,nodeSnapM:.44},
   compound:{maxCandidateAdds:6,maxLineExtensionM:5.8,candidateConnectM:4.2,minFaceAreaM2:1.7,nodeSnapM:.36},
@@ -21,6 +21,8 @@ export function chooseLearnedRoofProfile(solarModel){
  const micro=facets.filter(f=>Number(f.slopedAreaSqFt||f.flatAreaSqFt||0)>0&&Number(f.slopedAreaSqFt||f.flatAreaSqFt||0)<35).length;
  const hips=lines.filter(l=>l.type==="hip").length, valleys=lines.filter(l=>l.type==="valley").length;
  const hipFt=Number(m.hipFt||0),rakeFt=Number(m.rakeFt||0);
+ const augmentedFacetCount=Number(sm?.model?.planeIntersectionDiagnostics?.dsmAugmented?.facets||0);
+ const hiddenFacetEvidence=Math.max(0,augmentedFacetCount-facetCount);
  const pitchVals=facets.map(f=>Number(f.rise12||0)).filter(Number.isFinite);
  const avgPitch=pitchVals.length?pitchVals.reduce((a,b)=>a+b,0)/pitchVals.length:0;
  let name="general";
@@ -29,6 +31,7 @@ export function chooseLearnedRoofProfile(solarModel){
  if((micro>=4||facetCount>=20)&&avgPitch>=8)name="steepMicro";
  else if(flat>0)name="mixedFlat";
  else if((hips>=2||hipFt>Math.max(30,rakeFt*.7))&&avgPitch<=3.25)name="lowSlopeHip";
+ else if(hiddenFacetEvidence>=3&&augmentedFacetCount>=8)name="smallFacet";
  else if(micro>=2||tiny>=3||facetCount>=10)name="smallFacet";
  else if(hips>=2||hipFt>Math.max(30,rakeFt*.7))name="hip";
  else if(facetCount<=4&&valleys===0&&hips===0)name="simple";
