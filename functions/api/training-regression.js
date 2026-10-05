@@ -57,6 +57,16 @@ function physicalExteriorTotals(sm){
  }
  return used?{eaveFt,rakeFt,perimeterFt:eaveFt+rakeFt}:null;
 }
+function topologyInternalTotals(topology){
+ const out={ridgeFt:0,hipFt:0,valleyFt:0};
+ for(const e of topology?.edges||[]){
+  const ft=Number(e.lengthMeters||0)*3.280839895;
+  if(e.type==="ridge")out.ridgeFt+=ft;
+  else if(e.type==="hip")out.hipFt+=ft;
+  else if(e.type==="valley")out.valleyFt+=ft;
+ }
+ return out;
+}
 function edgeTotals(topology,sm){
  const out={ridgeFt:0,hipFt:0,valleyFt:0,eaveFt:0,rakeFt:0,perimeterFt:0};
  // Match the actual production report: saved Solar/DSM measurements are the
@@ -114,6 +124,7 @@ function currentMetrics(sm,outline,profileOverrides){
  ].filter(Number.isFinite);
  const slopedArea=areaCandidates.length?median(areaCandidates):(facetAreas.reduce((a,b)=>a+b,0));
  const edges=edgeTotals(topology,sm);
+ const topologyInternal=topologyInternalTotals(topology);
  const promotedRasterRidge=num(sm?.measurementCandidates?.rasterLines?.ridgeFt);
  if(promotedRasterRidge!=null&&promotedRasterRidge>=0){
   edges.ridgeFt=promotedRasterRidge;
@@ -139,6 +150,8 @@ function currentMetrics(sm,outline,profileOverrides){
   rasterLineCandidateRidgeFt:rasterRidge,
   rasterLineCandidateHipFt:rasterHip,
   rasterLineCandidateValleyFt:rasterValley,
+  topologyInternalHipFt:num(topologyInternal.hipFt),
+  topologyInternalValleyFt:num(topologyInternal.valleyFt),
   footprintAreaFt2:footprint,
   footprintPerimeterFt:num(outline?.measurement?.perimeterFt),
   facetAreasFt2:facetAreas,
@@ -226,6 +239,21 @@ function score(cur,ref){
  const hybridAbsError=hybridPairs.reduce((s,x)=>s+Math.abs(x.cur-x.ref),0);
  errors.hybridRidgeEdges=hybridRefTotal>0?hybridAbsError/hybridRefTotal*100:null;
 
+ // Shadow candidate: keep the validated raster ridge and physical exterior split,
+ // but swap only hips and valleys to the independent planar-topology solver.
+ const topoInternalPairs=edgeKeys
+   .filter(k=>ref[k]!=null)
+   .map(k=>{
+     let cv=cur[k];
+     if(k==="hipFt"&&cur.topologyInternalHipFt!=null)cv=cur.topologyInternalHipFt;
+     if(k==="valleyFt"&&cur.topologyInternalValleyFt!=null)cv=cur.topologyInternalValleyFt;
+     if(k==="ridgeHipFt"&&cur.topologyInternalHipFt!=null)cv=Number(cur.ridgeFt||0)+Number(cur.topologyInternalHipFt||0);
+     return Number.isFinite(Number(cv))?{k,ref:Number(ref[k]),cur:Number(cv)}:null;
+   }).filter(Boolean);
+ const topoInternalRefTotal=topoInternalPairs.reduce((s,x)=>s+Math.abs(x.ref),0);
+ const topoInternalAbsError=topoInternalPairs.reduce((s,x)=>s+Math.abs(x.cur-x.ref),0);
+ errors.topologyInternalEdges=topoInternalRefTotal>0?topoInternalAbsError/topoInternalRefTotal*100:null;
+
  const comp={
   topology:metric(errors.facets,0,35),
   edges:metric(errors.edges,5,30),
@@ -292,6 +320,7 @@ export async function onRequestGet({env}){
   averageDetailBoundaryEdgeErrorPct:av("detailBoundaryEdges"),
   averageRasterLineCandidateEdgeErrorPct:av("rasterLineCandidateEdges"),
   averageHybridRidgeEdgeErrorPct:av("hybridRidgeEdges"),
+  averageTopologyInternalEdgeErrorPct:av("topologyInternalEdges"),
   averagePitchErrorPct:av("pitch"),averageFootprintAreaErrorPct:av("footprintArea"),averageFootprintPerimeterErrorPct:av("footprintPerimeter"),
   averageGoogleSegmentFacetErrorPct:av("googleSegments"),averageDsmFacetErrorPct:av("dsmFacets"),averageTopologyFaceErrorPct:av("topologyFaces"),
   regressionGate:{maxAreaErrorPct:8,maxFacetErrorPct:25,maxEdgeErrorPct:25,minOverallScore:70},
