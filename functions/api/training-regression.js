@@ -168,6 +168,10 @@ function currentMetrics(sm,outline,profileOverrides){
  const detailRake=num(detailBoundary?.rakeFt);
  const detailPerimeter=(detailEave!=null||detailRake!=null)?Number(detailEave||0)+Number(detailRake||0):null;
  const rasterLines=sm?.measurementCandidates?.rasterLines||null;
+ const areaMargins=sm?.areaMarginCandidates||{};
+ const areaMargin25=num(areaMargins?.["0.25"]?.slopedAreaSqFt);
+ const areaMargin50=num(areaMargins?.["0.5"]?.slopedAreaSqFt);
+ const areaMargin75=num(areaMargins?.["0.75"]?.slopedAreaSqFt);
  const rasterRidge=num(rasterLines?.ridgeFt);
  const rasterHip=num(rasterLines?.hipFt);
  const rasterValley=num(rasterLines?.valleyFt);
@@ -196,6 +200,9 @@ function currentMetrics(sm,outline,profileOverrides){
   areaAuthority:areaCandidates.length>=2?"consensus-median":(googleAreaSane?"google-whole-roof":"dsm-surface-area"),
   googleAreaRejected:googleWhole!=null&&!googleAreaSane,
   footprintPitchAreaFt2:footprintPitchArea,
+  areaMarginCandidate25Ft2:areaMargin25,
+  areaMarginCandidate50Ft2:areaMargin50,
+  areaMarginCandidate75Ft2:areaMargin75,
   areaCandidateCount:areaCandidates.length,
   rasterToGoogleAreaRatio:(googleWhole&&modelArea)?modelArea/googleWhole:null,
   learnedProfile:topology?.learnedProfile||null,
@@ -216,7 +223,10 @@ function score(cur,ref){
   footprintPerimeter:pct(cur.footprintPerimeterFt,ref.footprintPerimeterFt),
   googleSegments:ref.facetCount&&cur.googleSegmentCount!=null?Math.abs(cur.googleSegmentCount-ref.facetCount)/ref.facetCount*100:null,
   dsmFacets:ref.facetCount&&cur.dsmFacetCount!=null?Math.abs(cur.dsmFacetCount-ref.facetCount)/ref.facetCount*100:null,
-  topologyFaces:ref.facetCount&&cur.topologyFaceCount!=null?Math.abs(cur.topologyFaceCount-ref.facetCount)/ref.facetCount*100:null
+  topologyFaces:ref.facetCount&&cur.topologyFaceCount!=null?Math.abs(cur.topologyFaceCount-ref.facetCount)/ref.facetCount*100:null,
+  areaMargin25:pct(cur.areaMarginCandidate25Ft2,ref.slopedAreaFt2),
+  areaMargin50:pct(cur.areaMarginCandidate50Ft2,ref.slopedAreaFt2),
+  areaMargin75:pct(cur.areaMarginCandidate75Ft2,ref.slopedAreaFt2)
  };
  const edgeKeys=(ref.ridgeHipFt!=null?["ridgeHipFt"]:["ridgeFt","hipFt"]).concat(["valleyFt","eaveFt","rakeFt"]);
  // Provider perimeter is normally the same exterior roof edge already represented
@@ -380,8 +390,13 @@ export async function onRequestGet({env}){
   staleLineEngineCases:geometryRows.filter(r=>r.current?.lineEngineVersion!=="plane-dsm-trace-v5-restored").length,
   detailBoundaryCases:geometryRows.filter(r=>r.current?.detailBoundaryPerimeterFt!=null).length,
   rasterLineCandidateCases:geometryRows.filter(r=>r.current?.rasterLineCandidateRidgeFt!=null).length,
+  areaMarginCandidateCases:geometryRows.filter(r=>r.current?.areaMarginCandidate50Ft2!=null).length,
   averageScore:mean(scored.map(r=>r.score.overall)),medianScore:median(scored.map(r=>r.score.overall)),
-  averageAreaErrorPct:av("area"),averageFacetErrorPct:av("facets"),averageEdgeErrorPct:av("edges"),
+  averageAreaErrorPct:av("area"),
+  averageAreaMargin25ErrorPct:av("areaMargin25"),
+  averageAreaMargin50ErrorPct:av("areaMargin50"),
+  averageAreaMargin75ErrorPct:av("areaMargin75"),
+  averageFacetErrorPct:av("facets"),averageEdgeErrorPct:av("edges"),
   averageDetailBoundaryEdgeErrorPct:av("detailBoundaryEdges"),
   averageRasterLineCandidateEdgeErrorPct:av("rasterLineCandidateEdges"),
   averageHybridRidgeEdgeErrorPct:av("hybridRidgeEdges"),
