@@ -160,7 +160,7 @@ function score(cur,ref){
  const rasterRefTotal=rasterPairs.reduce((s,x)=>s+Math.abs(x.ref),0);
  const rasterAbsError=rasterPairs.reduce((s,x)=>s+Math.abs(x.cur-x.ref),0);
  errors.rasterLineCandidateEdges=rasterRefTotal>0?rasterAbsError/rasterRefTotal*100:null;
- const comp=
+ const comp={
   topology:metric(errors.facets,0,35),
   edges:metric(errors.edges,5,30),
   pitch:metric(errors.pitch,4,25),
