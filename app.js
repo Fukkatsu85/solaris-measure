@@ -1223,11 +1223,15 @@ async function runAutomaticLidarValidation(){
   // Validation mode is deliberately conservative. Exclude weak planes before
   // saving so a noisy tree/chimney cluster cannot masquerade as a roof facet.
   let accepted=0,totalPoints=0,weightedRmse=0;
+  const fitDiag=roofPlaneProposals.fitDiagnostics||{};
+  const autoMinPts=Math.max(28,Math.min(60,Number(fitDiag.minPlanePts||36)));
   for(const p of roofPlaneProposals){
-   const good=Number(p.pointCount||0)>=90
-     &&Number(p.rmse||99)<=.25
+   const extent=Math.hypot(Number(p.bounds?.maxX||0)-Number(p.bounds?.minX||0),Number(p.bounds?.maxY||0)-Number(p.bounds?.minY||0));
+   const good=Number(p.pointCount||0)>=autoMinPts
+     &&Number(p.rmse||99)<=.20
+     &&extent>=1.15
      &&Number(p.slopeDeg||0)>=0
-     &&Number(p.slopeDeg||0)<=55;
+     &&Number(p.slopeDeg||0)<=58;
    p.accepted=good;
    if(good){
     accepted++;
@@ -1254,7 +1258,7 @@ async function runAutomaticLidarValidation(){
   };
   localStorage.setItem('solarisRoofProject',JSON.stringify(saved));
 
-  if(status)status.textContent='Automatic LiDAR validation passed quality screening · '+accepted+' facets · RMSE '+meanRmse.toFixed(2)+' m. Saving validation facets…';
+  if(status)status.textContent='Automatic LiDAR validation passed quality screening · '+accepted+' facets · RMSE '+meanRmse.toFixed(2)+' m · '+(Number.isFinite(Number(fitDiag.coverage))?Math.round(Number(fitDiag.coverage)*100)+'% surface assigned · ':'')+'saving validation facets…';
   document.querySelector('#accept-roof-planes')?.click();
  }catch(err){
   if(status)status.textContent='Automatic LiDAR validation stopped: '+(err?.message||String(err));
@@ -1286,32 +1290,127 @@ function refinePlane(points,ox,oy){
  return{a:B[0],b:B[1],c:B[2]};
 }
 function lcg(seed){let s=seed>>>0;return()=>((s=(1664525*s+1013904223)>>>0)/4294967296)}
+function spatialPlaneClusters(points,radius=.72){
+ if(!points?.length)return [];
+ const cell=radius,buckets=new Map();
+ const key=(x,y)=>Math.floor(x/cell)+','+Math.floor(y/cell);
+ points.forEach((p,i)=>{
+  const k=key(p.x,p.y);if(!buckets.has(k))buckets.set(k,[]);buckets.get(k).push(i);
+ });
+ const seen=new Uint8Array(points.length),clusters=[];
+ for(let seed=0;seed<points.length;seed++){
+  if(seen[seed])continue;
+  const q=[seed],cluster=[];seen[seed]=1;
+  while(q.length){
+   const i=q.pop(),p=points[i];cluster.push(p);
+   const gx=Math.floor(p.x/cell),gy=Math.floor(p.y/cell);
+   for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++){
+    const list=buckets.get((gx+dx)+','+(gy+dy));if(!list)continue;
+    for(const j of list){
+     if(seen[j])continue;
+     const o=points[j];
+     if(Math.hypot(o.x-p.x,o.y-p.y)<=radius){seen[j]=1;q.push(j);}
+    }
+   }
+  }
+  clusters.push(cluster);
+ }
+ return clusters.sort((a,b)=>b.length-a.length);
+}
 function fitRoofPlanesFromPoints(points){
- if(!points||points.length<120)throw new Error('Not enough roof surface points to fit planes.');
+ if(!points||points.length<100)throw new Error('Not enough roof surface points to fit planes.');
  const ox=points.reduce((s,p)=>s+p.x,0)/points.length,oy=points.reduce((s,p)=>s+p.y,0)/points.length;
- let remaining=points.map((p,i)=>({...p,_i:i})),planes=[],rand=lcg(24681357),facetId=1;
- while(remaining.length>=90&&planes.length<10){
+ const minPlanePts=Math.max(28,Math.min(62,Math.round(points.length*.006)));
+ const maxPlanes=16;
+ let remaining=points.map((p,i)=>({...p,_i:i})),planes=[],rand=lcg(24681357),facetId=1,guard=0;
+ while(remaining.length>=minPlanePts&&planes.length<maxPlanes&&guard++<24){
   let best=null,bestInliers=[];
-  const iterations=Math.min(900,Math.max(350,remaining.length));
+  const iterations=Math.min(1200,Math.max(500,Math.round(remaining.length*.8)));
   for(let it=0;it<iterations;it++){
    const p1=remaining[Math.floor(rand()*remaining.length)],p2=remaining[Math.floor(rand()*remaining.length)],p3=remaining[Math.floor(rand()*remaining.length)];
    const pl=fitPlane3(p1,p2,p3,ox,oy);if(!pl)continue;
-   const slope=Math.hypot(pl.a,pl.b);if(slope>.95)continue;
-   const ins=[];for(const p of remaining)if(planeResidual(p,pl,ox,oy)<.18)ins.push(p);
+   const slope=Math.hypot(pl.a,pl.b);if(slope>1.35)continue;
+   const ins=[];for(const p of remaining)if(planeResidual(p,pl,ox,oy)<.14)ins.push(p);
    if(ins.length>bestInliers.length){best=pl;bestInliers=ins}
   }
-  if(!best||bestInliers.length<80)break;
+  if(!best||bestInliers.length<minPlanePts)break;
+
   const refined=refinePlane(bestInliers,ox,oy)||best;
-  const inliers=remaining.filter(p=>planeResidual(p,refined,ox,oy)<.20);
-  if(inliers.length<80)break;
-  const set=new Set(inliers.map(p=>p._i));remaining=remaining.filter(p=>!set.has(p._i));
-  const slope=Math.hypot(refined.a,refined.b),slopeDeg=Math.atan(slope)*180/Math.PI,pitch12=12*slope;
-  let az=(Math.atan2(refined.a,refined.b)*180/Math.PI+360)%360;
-  let rmse=Math.sqrt(inliers.reduce((s,p)=>{const r=planeResidual(p,refined,ox,oy);return s+r*r},0)/inliers.length);
-  const xs=inliers.map(p=>p.x),ys=inliers.map(p=>p.y);
-  planes.push({id:'facet-'+facetId++,accepted:true,pointCount:inliers.length,pitch12,slopeDeg,azimuthDeg:az,rmse,originX:ox,originY:oy,coefficients:refined,bounds:{minX:Math.min(...xs),maxX:Math.max(...xs),minY:Math.min(...ys),maxY:Math.max(...ys)},points:inliers});
+  const candidateInliers=remaining.filter(p=>planeResidual(p,refined,ox,oy)<.16);
+  if(candidateInliers.length<minPlanePts)break;
+
+  // One mathematical plane can occur on disconnected roof sections. Split the
+  // inliers spatially so a dormer or offset roof section is not merged into a
+  // distant coplanar facet simply because pitch/elevation are similar.
+  const clusters=spatialPlaneClusters(candidateInliers,.72).filter(x=>x.length>=minPlanePts);
+  if(!clusters.length){
+   // Remove only the very strongest inliers to prevent an unproductive loop.
+   const fallback=candidateInliers.sort((a,b)=>planeResidual(a,refined,ox,oy)-planeResidual(b,refined,ox,oy)).slice(0,minPlanePts);
+   const rm=new Set(fallback.map(p=>p._i));remaining=remaining.filter(p=>!rm.has(p._i));continue;
+  }
+
+  const removeIds=new Set();
+  for(const cluster of clusters){
+   if(planes.length>=maxPlanes)break;
+   const local=refinePlane(cluster,ox,oy)||refined;
+   const tight=cluster.filter(p=>planeResidual(p,local,ox,oy)<.145);
+   if(tight.length<minPlanePts)continue;
+
+   const xs=tight.map(p=>p.x),ys=tight.map(p=>p.y);
+   const width=Math.max(...xs)-Math.min(...xs),height=Math.max(...ys)-Math.min(...ys);
+   if(Math.hypot(width,height)<1.15)continue;
+
+   const slope=Math.hypot(local.a,local.b),slopeDeg=Math.atan(slope)*180/Math.PI,pitch12=12*slope;
+   if(slopeDeg>58)continue;
+   const az=(Math.atan2(local.a,local.b)*180/Math.PI+360)%360;
+   const rmse=Math.sqrt(tight.reduce((s,p)=>{const rr=planeResidual(p,local,ox,oy);return s+rr*rr},0)/tight.length);
+   if(!Number.isFinite(rmse)||rmse>.20)continue;
+
+   tight.forEach(p=>removeIds.add(p._i));
+   planes.push({
+    id:'facet-'+facetId++,accepted:true,pointCount:tight.length,pitch12,slopeDeg,azimuthDeg:az,rmse,
+    originX:ox,originY:oy,coefficients:local,
+    bounds:{minX:Math.min(...xs),maxX:Math.max(...xs),minY:Math.min(...ys),maxY:Math.max(...ys)},
+    spatialWidthM:width,spatialHeightM:height,points:tight
+   });
+  }
+  if(!removeIds.size)break;
+  remaining=remaining.filter(p=>!removeIds.has(p._i));
  }
- return planes.sort((a,b)=>b.pointCount-a.pointCount);
+
+ // Merge only fragments that are both adjacent and nearly the same plane.
+ // This removes segmentation shards without collapsing genuinely separate facets.
+ let changed=true;
+ while(changed){
+  changed=false;
+  outer:for(let i=0;i<planes.length;i++)for(let j=i+1;j<planes.length;j++){
+   const A=planes[i],B=planes[j];
+   const pitchDiff=Math.abs(Number(A.pitch12)-Number(B.pitch12));
+   let azDiff=Math.abs(Number(A.azimuthDeg)-Number(B.azimuthDeg))%360;azDiff=Math.min(azDiff,360-azDiff);
+   const gapX=Math.max(0,Math.max(A.bounds.minX,B.bounds.minX)-Math.min(A.bounds.maxX,B.bounds.maxX));
+   const gapY=Math.max(0,Math.max(A.bounds.minY,B.bounds.minY)-Math.min(A.bounds.maxY,B.bounds.maxY));
+   const gap=Math.hypot(gapX,gapY);
+   if(pitchDiff>0.65||azDiff>8||gap>.55)continue;
+   const pts=[...(A.points||[]),...(B.points||[])],local=refinePlane(pts,ox,oy);
+   if(!local)continue;
+   const rmse=Math.sqrt(pts.reduce((s,p)=>{const rr=planeResidual(p,local,ox,oy);return s+rr*rr},0)/pts.length);
+   if(rmse>.14)continue;
+   const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y),slope=Math.hypot(local.a,local.b);
+   planes[i]={...A,pointCount:pts.length,pitch12:12*slope,slopeDeg:Math.atan(slope)*180/Math.PI,azimuthDeg:(Math.atan2(local.a,local.b)*180/Math.PI+360)%360,rmse,coefficients:local,bounds:{minX:Math.min(...xs),maxX:Math.max(...xs),minY:Math.min(...ys),maxY:Math.max(...ys)},points:pts};
+   planes.splice(j,1);changed=true;break outer;
+  }
+ }
+
+ planes.sort((a,b)=>b.pointCount-a.pointCount);
+ planes.forEach((p,i)=>p.id='facet-'+(i+1));
+ planes.fitDiagnostics={
+  sourcePoints:points.length,
+  assignedPoints:planes.reduce((s,p)=>s+p.pointCount,0),
+  unassignedPoints:Math.max(0,points.length-planes.reduce((s,p)=>s+p.pointCount,0)),
+  minPlanePts,
+  coverage:planes.reduce((s,p)=>s+p.pointCount,0)/Math.max(1,points.length)
+ };
+ return planes;
 }
 function renderRoofPlanePreview(){
  if(!roofLidarDecoded?.surfacePoints?.length)return;
@@ -1381,11 +1480,15 @@ document.querySelector('#accept-roof-planes')?.addEventListener('click',async()=
    planMetrics=rd.outline.measurement;
   }
 
-  const totalPts=acceptedPlanes.reduce((s,p)=>s+Number(p.pointCount||0),0)||1;
-  const payload=roofPlaneProposals.map(p=>{
+  const hullAreaM2=pts=>{if(!pts?.length)return 0;let a=0;for(let i=0;i<pts.length;i++){const p=pts[i],q=pts[(i+1)%pts.length];a+=p.x*q.y-q.x*p.y}return Math.abs(a/2)};
+  const prepared=roofPlaneProposals.map(p=>{
    const hull=convexHullRoof((p.points||[]).map(q=>({x:q.x,y:q.y})));
+   return {p,hull,hullArea:p.accepted?hullAreaM2(hull):0};
+  });
+  const totalHullArea=prepared.reduce((s,x)=>s+Number(x.hullArea||0),0)||1;
+  const payload=prepared.map(({p,hull,hullArea})=>{
    const polygon=hull.map(q=>lidarPointToAerialNorm(q,saved)).filter(q=>Number.isFinite(q.x)&&Number.isFinite(q.y));
-   const share=p.accepted?Number(p.pointCount||0)/totalPts:0;
+   const share=p.accepted?Math.max(0,hullArea)/totalHullArea:0;
    const planAreaFt2=p.accepted?Number(planMetrics.planAreaFt2)*share:0;
    const slopedAreaFt2=planAreaFt2*Math.sqrt(1+Math.pow(Number(p.pitch12||0)/12,2));
    return{id:p.id,accepted:p.accepted,pointCount:p.pointCount,pitch12:p.pitch12,slopeDeg:p.slopeDeg,azimuthDeg:p.azimuthDeg,rmse:p.rmse,originX:p.originX,originY:p.originY,coefficients:p.coefficients,bounds:p.bounds,polygon,planAreaFt2,slopedAreaFt2};
