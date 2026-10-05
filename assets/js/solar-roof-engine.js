@@ -335,6 +335,50 @@ function connectedRoofComponent(raster,width,height,startIndex){
   return seen;
 }
 
+function expandRoofComponentByDsmContinuity(mask,component,dsm,marginMeters){
+  const out=new Set(component);
+  const pixelMeters=Math.max(.05,Number(mask.pixelSize)||.1);
+  const rings=Math.max(0,Math.min(12,Math.round(Number(marginMeters||0)/pixelMeters)));
+  if(!rings)return out;
+
+  const zCache=new Map();
+  const zAtMaskIndex=idx=>{
+    if(zCache.has(idx))return zCache.get(idx);
+    const x=idx%mask.width,y=Math.floor(idx/mask.width);
+    const ll=rasterLatLng(mask,x+.5,y+.5);
+    const p=rasterPixelForLatLng(dsm,ll.lat,ll.lng);
+    const z=Number(dsm.raster[p.y*dsm.width+p.x]);
+    const v=Number.isFinite(z)&&z>-1000?z:null;
+    zCache.set(idx,v); return v;
+  };
+
+  let frontier=[...component];
+  const maxStepDz=.45; // neighboring roof pixels should remain locally continuous
+  for(let ring=0;ring<rings;ring++){
+    const next=[];
+    const seenCandidate=new Set();
+    for(const idx of frontier){
+      const x=idx%mask.width,y=Math.floor(idx/mask.width),z0=zAtMaskIndex(idx);
+      if(z0==null)continue;
+      const ns=[];
+      if(x>0)ns.push(idx-1);if(x<mask.width-1)ns.push(idx+1);
+      if(y>0)ns.push(idx-mask.width);if(y<mask.height-1)ns.push(idx+mask.width);
+      for(const n of ns){
+        if(out.has(n)||seenCandidate.has(n))continue;
+        seenCandidate.add(n);
+        const zn=zAtMaskIndex(n);
+        if(zn==null||Math.abs(zn-z0)>maxStepDz)continue;
+        const slope=dsmSlopeAt(mask,dsm,n);
+        if(!slope||slope.pitch>58)continue;
+        out.add(n);next.push(n);
+      }
+    }
+    if(!next.length)break;
+    frontier=next;
+  }
+  return out;
+}
+
 function traceComponentBoundary(component,width,height){
   if(!component.size)return [];
   const edges=[];
@@ -1779,6 +1823,31 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
   const rawOutline=pixelOutline.map(([x,y])=>rasterLatLng(mask,x,y));
 
   const model=analyzeDsmRoof(mask,component,dsm);
+
+  // Shadow area experiment: Google Solar's mask can occasionally stop inside a
+  // visually continuous roof edge. Grow only into neighboring DSM pixels whose
+  // elevation/slope remains roof-like. These candidates are benchmarked only;
+  // production area is unchanged until holdout regression proves a winner.
+  const areaMarginCandidates={};
+  for(const marginMeters of [.25,.5,.75]){
+    try{
+      const expanded=expandRoofComponentByDsmContinuity(mask,component,dsm,marginMeters);
+      if(expanded.size>component.size){
+        const m=analyzeDsmRoof(mask,expanded,dsm);
+        areaMarginCandidates[String(marginMeters)]={
+          marginMeters,
+          pixelCount:expanded.size,
+          addedPixels:expanded.size-component.size,
+          footprintSqFt:m.footprintSqFt,
+          slopedAreaSqFt:m.slopedAreaSqFt,
+          pitchDegrees:m.pitchDegrees,
+          rise12:m.rise12,
+          coverage:m.coverage
+        };
+      }
+    }catch{}
+  }
+
   const rasterFacetResult=detectRoofFacets(mask,component,dsm,solarSegments,rgb);
   const planeV2=detectPlaneIntersectionFacets(mask,component,dsm,solarSegments,rawOutline,rgb,{includeDsmRegions:false,bboxPadM:1.25});
   const planeV3=detectPlaneIntersectionFacets(mask,component,dsm,solarSegments,rawOutline,rgb,{includeDsmRegions:true,bboxPadM:1.25});
@@ -1859,7 +1928,7 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
     rasterFacetResult.facets||[],
     rasterFacetResult.roofLines||[]
   );
-  return {outline,measurementOutlineCandidate,rasterLineMeasurements,rawCornerCount,quality:mask.quality||dsm.quality,model};
+  return {outline,measurementOutlineCandidate,rasterLineMeasurements,areaMarginCandidates,rawCornerCount,quality:mask.quality||dsm.quality,model};
 }
 
 
