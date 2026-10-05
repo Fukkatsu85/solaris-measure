@@ -160,6 +160,22 @@ function score(cur,ref){
  const rasterRefTotal=rasterPairs.reduce((s,x)=>s+Math.abs(x.ref),0);
  const rasterAbsError=rasterPairs.reduce((s,x)=>s+Math.abs(x.cur-x.ref),0);
  errors.rasterLineCandidateEdges=rasterRefTotal>0?rasterAbsError/rasterRefTotal*100:null;
+
+ // Hybrid shadow candidate: raster adjacency is substantially better at ridge
+ // length, while plane-v5 remains better for hips and valleys. This combines
+ // those source strengths without consulting reference truth at runtime.
+ const hybridPairs=edgeKeys
+   .filter(k=>ref[k]!=null)
+   .map(k=>{
+     let cv=cur[k];
+     if(k==="ridgeFt"&&cur.rasterLineCandidateRidgeFt!=null)cv=cur.rasterLineCandidateRidgeFt;
+     if(k==="ridgeHipFt"&&cur.rasterLineCandidateRidgeFt!=null)cv=Number(cur.rasterLineCandidateRidgeFt||0)+Number(cur.hipFt||0);
+     return Number.isFinite(Number(cv))?{k,ref:Number(ref[k]),cur:Number(cv)}:null;
+   }).filter(Boolean);
+ const hybridRefTotal=hybridPairs.reduce((s,x)=>s+Math.abs(x.ref),0);
+ const hybridAbsError=hybridPairs.reduce((s,x)=>s+Math.abs(x.cur-x.ref),0);
+ errors.hybridRidgeEdges=hybridRefTotal>0?hybridAbsError/hybridRefTotal*100:null;
+
  const comp={
   topology:metric(errors.facets,0,35),
   edges:metric(errors.edges,5,30),
@@ -225,6 +241,7 @@ export async function onRequestGet({env}){
   averageAreaErrorPct:av("area"),averageFacetErrorPct:av("facets"),averageEdgeErrorPct:av("edges"),
   averageDetailBoundaryEdgeErrorPct:av("detailBoundaryEdges"),
   averageRasterLineCandidateEdgeErrorPct:av("rasterLineCandidateEdges"),
+  averageHybridRidgeEdgeErrorPct:av("hybridRidgeEdges"),
   averagePitchErrorPct:av("pitch"),averageFootprintAreaErrorPct:av("footprintArea"),averageFootprintPerimeterErrorPct:av("footprintPerimeter"),
   averageGoogleSegmentFacetErrorPct:av("googleSegments"),averageDsmFacetErrorPct:av("dsmFacets"),averageTopologyFaceErrorPct:av("topologyFaces"),
   regressionGate:{maxAreaErrorPct:8,maxFacetErrorPct:25,maxEdgeErrorPct:25,minOverallScore:70},
