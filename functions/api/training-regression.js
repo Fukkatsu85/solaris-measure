@@ -1,5 +1,5 @@
 import { ROOF_TRAINING_V1, findTrainingBenchmarks, LEARNED_PRIORS_V1 } from "../lib/roof-training-v1.js";
-import { buildRoofTopology, buildFacetPartitionTopology } from "../../assets/js/roof-topology.js";
+import { buildRoofTopology, buildFacetPartitionTopology, buildFacetAdjacencyGraph } from "../../assets/js/roof-topology.js";
 
 const json=(d,s=200)=>new Response(JSON.stringify(d),{status:s,headers:{"content-type":"application/json; charset=utf-8","cache-control":"no-store"}});
 const num=v=>(v===null||v===undefined||v==='')?null:(Number.isFinite(Number(v))?Number(v):null);
@@ -128,10 +128,11 @@ function edgeTotals(topology,sm){
  return out;
 }
 function currentMetrics(sm,outline,profileOverrides,{evaluateTopology=true}={}){
- let topology=null,facetPartitionTopology=null;
+ let topology=null,facetPartitionTopology=null,facetAdjacency=null;
  if(evaluateTopology){
   try{topology=buildRoofTopology(sm,{profileOverrides:profileOverrides||{}})}catch{}
   try{facetPartitionTopology=buildFacetPartitionTopology(sm)}catch{}
+  try{facetAdjacency=buildFacetAdjacencyGraph(sm)}catch{}
  }
  const modelFacets=(sm?.model?.facets||[]).filter(f=>Number(f.slopedAreaSqFt||0)>0);
  // Match production reporting: Google DSM model is authoritative for area,
@@ -217,6 +218,10 @@ function currentMetrics(sm,outline,profileOverrides,{evaluateTopology=true}={}){
   facetPartitionFaceCount:facetPartitionFaces.length,
   facetPartitionFaceAreaFt2,
   facetPartitionCandidateEdges:Number(facetPartitionTopology?.stats?.acceptedCandidateEdges||0),
+  facetAdjacencyRidgeFt:num(facetAdjacency?.totals?.ridgeFt),
+  facetAdjacencyHipFt:num(facetAdjacency?.totals?.hipFt),
+  facetAdjacencyValleyFt:num(facetAdjacency?.totals?.valleyFt),
+  facetAdjacencyEdgeCount:Number(facetAdjacency?.stats?.acceptedEdges||0),
   ...edges,ridgeHipFt:Number(edges.ridgeFt||0)+Number(edges.hipFt||0),
   detailBoundaryEaveFt:detailEave,
   detailBoundaryRakeFt:detailRake,
@@ -424,6 +429,23 @@ function score(cur,ref){
  const internalConfidenceAbsError=internalConfidencePairs.reduce((s,x)=>s+Math.abs(x.cur-x.ref),0);
  errors.internalConfidenceEdges=internalConfidenceRefTotal>0?internalConfidenceAbsError/internalConfidenceRefTotal*100:null;
 
+ // Facet-adjacency shadow candidate: replace only ridge/hip/valley with the
+ // direct neighboring-plane graph, while retaining production eave/rake.
+ const adjacencyPairs=edgeKeys
+   .filter(k=>ref[k]!=null)
+   .map(k=>{
+     let cv=cur[k];
+     if(k==="ridgeFt"&&cur.facetAdjacencyRidgeFt!=null)cv=cur.facetAdjacencyRidgeFt;
+     if(k==="hipFt"&&cur.facetAdjacencyHipFt!=null)cv=cur.facetAdjacencyHipFt;
+     if(k==="valleyFt"&&cur.facetAdjacencyValleyFt!=null)cv=cur.facetAdjacencyValleyFt;
+     if(k==="ridgeHipFt"&&(cur.facetAdjacencyRidgeFt!=null||cur.facetAdjacencyHipFt!=null))
+       cv=Number(cur.facetAdjacencyRidgeFt||0)+Number(cur.facetAdjacencyHipFt||0);
+     return Number.isFinite(Number(cv))?{k,ref:Number(ref[k]),cur:Number(cv)}:null;
+   }).filter(Boolean);
+ const adjacencyRefTotal=adjacencyPairs.reduce((s,x)=>s+Math.abs(x.ref),0);
+ const adjacencyAbsError=adjacencyPairs.reduce((s,x)=>s+Math.abs(x.cur-x.ref),0);
+ errors.facetAdjacencyEdges=adjacencyRefTotal>0?adjacencyAbsError/adjacencyRefTotal*100:null;
+
  const comp={
   topology:metric(errors.facets,0,35),
   edges:metric(errors.edges,5,30),
@@ -516,6 +538,7 @@ export async function onRequestGet({env}){
   averageTopologyInternalEdgeErrorPct:av("topologyInternalEdges"),
   averageHipConfidenceEdgeErrorPct:av("hipConfidenceEdges"),
   averageInternalConfidenceEdgeErrorPct:av("internalConfidenceEdges"),
+  averageFacetAdjacencyEdgeErrorPct:av("facetAdjacencyEdges"),
   averagePitchErrorPct:av("pitch"),averageFootprintAreaErrorPct:av("footprintArea"),averageFootprintPerimeterErrorPct:av("footprintPerimeter"),
   averageGoogleSegmentFacetErrorPct:av("googleSegments"),averageDsmFacetErrorPct:av("dsmFacets"),averageTopologyFaceErrorPct:av("topologyFaces"),
   averageTopologyFaceAreaErrorPct:av("topologyFaceArea"),
