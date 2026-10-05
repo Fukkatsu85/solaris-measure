@@ -1,5 +1,5 @@
 import { ROOF_TRAINING_V1, findTrainingBenchmarks, LEARNED_PRIORS_V1 } from "../lib/roof-training-v1.js";
-import { buildRoofTopology } from "../../assets/js/roof-topology.js";
+import { buildRoofTopology, buildFacetPartitionTopology } from "../../assets/js/roof-topology.js";
 
 const json=(d,s=200)=>new Response(JSON.stringify(d),{status:s,headers:{"content-type":"application/json; charset=utf-8","cache-control":"no-store"}});
 const num=v=>(v===null||v===undefined||v==='')?null:(Number.isFinite(Number(v))?Number(v):null);
@@ -128,8 +128,9 @@ function edgeTotals(topology,sm){
  return out;
 }
 function currentMetrics(sm,outline,profileOverrides){
- let topology=null;
+ let topology=null,facetPartitionTopology=null;
  try{topology=buildRoofTopology(sm,{profileOverrides:profileOverrides||{}})}catch{}
+ try{facetPartitionTopology=buildFacetPartitionTopology(sm)}catch{}
  const modelFacets=(sm?.model?.facets||[]).filter(f=>Number(f.slopedAreaSqFt||0)>0);
  // Match production reporting: Google DSM model is authoritative for area,
  // pitch and facet count. Topology faces are derived geometry used for line
@@ -203,12 +204,17 @@ function currentMetrics(sm,outline,profileOverrides){
  const rasterValley=num(rasterLines?.valleyFt);
  const topologyFaces=(topology?.faces||[]).filter(f=>Number(f.slopedAreaSqFt||0)>0);
  const topologyFaceAreaFt2=topologyFaces.reduce((s,f)=>s+Number(f.slopedAreaSqFt||0),0);
+ const facetPartitionFaces=(facetPartitionTopology?.faces||[]).filter(f=>Number(f.slopedAreaSqFt||0)>0);
+ const facetPartitionFaceAreaFt2=facetPartitionFaces.reduce((s,f)=>s+Number(f.slopedAreaSqFt||0),0);
  return {
   facetCount:modelFacets.length,slopedAreaFt2:slopedArea,avgPitch12:avgPitch,
   googleSegmentCount:num(sm?.googleRoofSegmentCount),
   dsmFacetCount:modelFacets.length,
   topologyFaceCount:topologyFaces.length,
   topologyFaceAreaFt2,
+  facetPartitionFaceCount:facetPartitionFaces.length,
+  facetPartitionFaceAreaFt2,
+  facetPartitionCandidateEdges:Number(facetPartitionTopology?.stats?.acceptedCandidateEdges||0),
   ...edges,ridgeHipFt:Number(edges.ridgeFt||0)+Number(edges.hipFt||0),
   detailBoundaryEaveFt:detailEave,
   detailBoundaryRakeFt:detailRake,
@@ -270,6 +276,8 @@ function score(cur,ref){
   dsmFacets:ref.facetCount&&cur.dsmFacetCount!=null?Math.abs(cur.dsmFacetCount-ref.facetCount)/ref.facetCount*100:null,
   topologyFaces:ref.facetCount&&cur.topologyFaceCount!=null?Math.abs(cur.topologyFaceCount-ref.facetCount)/ref.facetCount*100:null,
   topologyFaceArea:pct(cur.topologyFaceAreaFt2,ref.slopedAreaFt2),
+  facetPartitionFaces:ref.facetCount&&cur.facetPartitionFaceCount!=null?Math.abs(cur.facetPartitionFaceCount-ref.facetCount)/ref.facetCount*100:null,
+  facetPartitionFaceArea:pct(cur.facetPartitionFaceAreaFt2,ref.slopedAreaFt2),
   areaMargin25:pct(cur.areaMarginCandidate25Ft2,ref.slopedAreaFt2),
   areaMargin50:pct(cur.areaMarginCandidate50Ft2,ref.slopedAreaFt2),
   areaMargin75:pct(cur.areaMarginCandidate75Ft2,ref.slopedAreaFt2),
@@ -500,6 +508,8 @@ export async function onRequestGet({env}){
   averagePitchErrorPct:av("pitch"),averageFootprintAreaErrorPct:av("footprintArea"),averageFootprintPerimeterErrorPct:av("footprintPerimeter"),
   averageGoogleSegmentFacetErrorPct:av("googleSegments"),averageDsmFacetErrorPct:av("dsmFacets"),averageTopologyFaceErrorPct:av("topologyFaces"),
   averageTopologyFaceAreaErrorPct:av("topologyFaceArea"),
+  averageFacetPartitionFaceErrorPct:av("facetPartitionFaces"),
+  averageFacetPartitionAreaErrorPct:av("facetPartitionFaceArea"),
   regressionGate:{maxAreaErrorPct:8,maxFacetErrorPct:25,maxEdgeErrorPct:25,minOverallScore:70},
   topologyOptimizerVersion:optimizerValid?optimizer.version:null,
   ignoredTopologyOptimizerVersion:!optimizerValid?(optimizer?.version||null):null,
