@@ -406,10 +406,20 @@ function extractFaces(nodes,edges,outerPoly){
     faces.push(ids);
   }
   const unique=new Map();
+  const canonicalCycle=ids=>{
+    const variants=[];
+    for(const seq of [ids,[...ids].reverse()]){
+      for(let i=0;i<seq.length;i++){
+        const rot=seq.slice(i).concat(seq.slice(0,i));
+        variants.push(rot);
+      }
+    }
+    variants.sort((a,b)=>a.join("-").localeCompare(b.join("-"),undefined,{numeric:true}));
+    return variants[0];
+  };
   for(const ids of faces){
-    const min=Math.min(...ids),i=ids.indexOf(min),rot=ids.slice(i).concat(ids.slice(0,i));
-    const rev=[...rot].reverse(),k1=rot.join("-"),k2=rev.join("-"),key=k1<k2?k1:k2;
-    unique.set(key,rot);
+    const canon=canonicalCycle(ids),key=canon.join("-");
+    if(!unique.has(key))unique.set(key,canon);
   }
   return [...unique.values()];
 }
