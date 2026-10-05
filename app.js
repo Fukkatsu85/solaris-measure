@@ -2327,33 +2327,36 @@ document.querySelector('#optimize-roof-topology')?.addEventListener('click',asyn
 
 document.querySelector('#run-roof-regression')?.addEventListener('click',async()=>{
  const btn=document.querySelector('#run-roof-regression'),status=document.querySelector('#roof-regression-status'),optStatus=document.querySelector('#roof-optimizer-status');
- const old=btn?.textContent;if(btn){btn.disabled=true;btn.textContent='Running 40 cases…'}if(status)status.textContent='Checking holdout topology optimization before regression…';
+ const old=btn?.textContent;if(btn){btn.disabled=true;btn.textContent='Optimizing + running 40 cases…'}
+ if(status)status.textContent='Running deterministic holdout topology optimization on the current rebuilt geometry…';
  try{
-  // Keep the topology optimizer synchronized with the current corpus. It is
-  // deterministic and promotes a profile override only when its holdout set
-  // improves enough without materially regressing facets or lines.
-  let optimizerCurrent=false;
-  try{
-   const cr=await fetch('/api/training-topology-optimizer',{cache:'no-store'}),cd=await cr.json().catch(()=>({}));
-   const cfg=cd?.config||null;
-   optimizerCurrent=Boolean(cfg?.version==='topology-opt-3-holdout'&&cfg?.scopePolicy==='primary-building-only'&&cfg?.validationPolicy==='deterministic-profile-holdout'&&Number(cfg?.trainingCases||0)>=26);
-  }catch{}
-  if(!optimizerCurrent){
-   if(status)status.textContent='Topology optimizer is missing or stale. Running deterministic holdout optimization first…';
-   const or=await fetch('/api/training-topology-optimizer',{method:'POST',headers:{'content-type':'application/json'}});
-   const od=await or.json().catch(()=>({}));
-   if(!or.ok||!od.ok)throw new Error(od.error||'Topology optimization failed.');
-   const promoted=(od.config?.results||[]).filter(x=>x.promoted).length;
-   if(optStatus)optStatus.textContent='Automatic topology optimization complete · '+promoted+' profile'+(promoted===1?'':'s')+' promoted after holdout validation.';
+  // Always rebuild optimizer results from the CURRENT saved roof models.
+  // This avoids stale profile decisions surviving a geometry-engine rebuild.
+  const or=await fetch('/api/training-topology-optimizer',{method:'POST',headers:{'content-type':'application/json'}});
+  const od=await or.json().catch(()=>({}));
+  if(!or.ok||!od.ok)throw new Error(od.error||'Topology optimization failed.');
+  const cfg=od.config||{},promoted=(cfg.results||[]).filter(x=>x.promoted).length;
+  if(optStatus){
+    optStatus.innerHTML='<strong>Topology optimizer ran on current geometry.</strong> '+
+      Number(cfg.trainingCases||0)+' comparable primary-building roofs · '+
+      promoted+' profile'+(promoted===1?'':'s')+' promoted after deterministic holdout validation.'+
+      (promoted===0?' Baseline topology retained because no variant cleared the holdout promotion gate.':'');
   }
-  if(status)status.textContent='Running the current solver against the verified 40-case corpus…';
+
+  if(status)status.textContent='Topology optimization complete. Running the verified 40-case regression…';
   const r=await fetch('/api/training-regression',{cache:'no-store'}),d=await r.json().catch(()=>({}));
   if(!r.ok||!d.ok)throw new Error(d.error||'Regression runner failed.');
   renderRoofRegression(d);
- }catch(err){if(status)status.textContent='Regression failed: '+(err?.message||String(err))}
- finally{if(btn){btn.disabled=false;btn.textContent=old||'Run Regression'}}
-});
 
+  // renderRoofRegression intentionally does not overwrite optimizer detail.
+  if(status)status.textContent='Regression complete. Topology optimizer was refreshed immediately before this run.';
+ }catch(err){
+  if(status)status.textContent='Regression failed: '+(err?.message||String(err));
+  if(optStatus)optStatus.textContent='Topology optimization/regression failed: '+(err?.message||String(err));
+ }finally{
+  if(btn){btn.disabled=false;btn.textContent=old||'Run Regression'}
+ }
+});
 async function restoreRoofReportReadyState(){
  const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
  if(!Number.isFinite(Number(saved.lat))||!Number.isFinite(Number(saved.lng)))return;
