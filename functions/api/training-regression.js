@@ -179,6 +179,7 @@ function currentMetrics(sm,outline,profileOverrides){
  const detailRake=num(detailBoundary?.rakeFt);
  const detailPerimeter=(detailEave!=null||detailRake!=null)?Number(detailEave||0)+Number(detailRake||0):null;
  const rasterLines=sm?.measurementCandidates?.rasterLines||null;
+ const smallFeatureExterior=sm?.smallFeatureExteriorCandidate||null;
  const areaMargins=sm?.areaMarginCandidates||{};
  const areaMargin25=num(areaMargins?.["0.25"]?.slopedAreaSqFt);
  const areaMargin50=num(areaMargins?.["0.5"]?.slopedAreaSqFt);
@@ -208,6 +209,12 @@ function currentMetrics(sm,outline,profileOverrides){
   rasterLineCandidateRidgeFt:rasterRidge,
   rasterLineCandidateHipFt:rasterHip,
   rasterLineCandidateValleyFt:rasterValley,
+  smallFeatureExteriorEaveFt:num(smallFeatureExterior?.eaveFt),
+  smallFeatureExteriorRakeFt:num(smallFeatureExterior?.rakeFt),
+  smallFeatureExteriorPerimeterFt:num(smallFeatureExterior?.perimeterFt),
+  smallFeatureExteriorAddedEaveFt:num(smallFeatureExterior?.addedEaveFt),
+  smallFeatureExteriorAddedRakeFt:num(smallFeatureExterior?.addedRakeFt),
+  smallFeatureExteriorAddedEdges:num(smallFeatureExterior?.addedEdges),
   topologyInternalHipFt:num(topologyInternal.hipFt),
   topologyInternalValleyFt:num(topologyInternal.valleyFt),
   confidenceHipCandidateFt:num(confidenceHip),
@@ -303,6 +310,18 @@ function score(cur,ref){
  const rasterRefTotal=rasterPairs.reduce((s,x)=>s+Math.abs(x.ref),0);
  const rasterAbsError=rasterPairs.reduce((s,x)=>s+Math.abs(x.cur-x.ref),0);
  errors.rasterLineCandidateEdges=rasterRefTotal>0?rasterAbsError/rasterRefTotal*100:null;
+
+ const smallExteriorPairs=edgeKeys
+   .filter(k=>ref[k]!=null)
+   .map(k=>{
+     let cv=cur[k];
+     if(k==="eaveFt"&&cur.smallFeatureExteriorEaveFt!=null)cv=cur.smallFeatureExteriorEaveFt;
+     if(k==="rakeFt"&&cur.smallFeatureExteriorRakeFt!=null)cv=cur.smallFeatureExteriorRakeFt;
+     return Number.isFinite(Number(cv))?{k,ref:Number(ref[k]),cur:Number(cv)}:null;
+   }).filter(Boolean);
+ const smallExteriorRefTotal=smallExteriorPairs.reduce((s,x)=>s+Math.abs(x.ref),0);
+ const smallExteriorAbsError=smallExteriorPairs.reduce((s,x)=>s+Math.abs(x.cur-x.ref),0);
+ errors.smallFeatureExteriorEdges=smallExteriorRefTotal>0?smallExteriorAbsError/smallExteriorRefTotal*100:null;
 
  // Hybrid shadow candidate: raster adjacency is substantially better at ridge
  // length, while plane-v5 remains better for hips and valleys. This combines
@@ -424,6 +443,7 @@ export async function onRequestGet({env}){
   staleLineEngineCases:geometryRows.filter(r=>r.current?.lineEngineVersion!=="plane-dsm-trace-v5-restored").length,
   detailBoundaryCases:geometryRows.filter(r=>r.current?.detailBoundaryPerimeterFt!=null).length,
   rasterLineCandidateCases:geometryRows.filter(r=>r.current?.rasterLineCandidateRidgeFt!=null).length,
+  smallFeatureExteriorCases:geometryRows.filter(r=>r.current?.smallFeatureExteriorEaveFt!=null).length,
   areaMargin25CandidateCases:geometryRows.filter(r=>r.current?.areaMarginCandidate25Ft2!=null).length,
   areaMargin50CandidateCases:geometryRows.filter(r=>r.current?.areaMarginCandidate50Ft2!=null).length,
   areaMargin75CandidateCases:geometryRows.filter(r=>r.current?.areaMarginCandidate75Ft2!=null).length,
@@ -446,6 +466,7 @@ export async function onRequestGet({env}){
   averageFacetErrorPct:av("facets"),averageEdgeErrorPct:av("edges"),
   averageDetailBoundaryEdgeErrorPct:av("detailBoundaryEdges"),
   averageRasterLineCandidateEdgeErrorPct:av("rasterLineCandidateEdges"),
+  averageSmallFeatureExteriorEdgeErrorPct:av("smallFeatureExteriorEdges"),
   averageHybridRidgeEdgeErrorPct:av("hybridRidgeEdges"),
   averageTopologyInternalEdgeErrorPct:av("topologyInternalEdges"),
   averageHipConfidenceEdgeErrorPct:av("hipConfidenceEdges"),
