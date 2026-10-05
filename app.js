@@ -1309,7 +1309,7 @@ function fitRoofPlanesFromPoints(points){
   let az=(Math.atan2(refined.a,refined.b)*180/Math.PI+360)%360;
   let rmse=Math.sqrt(inliers.reduce((s,p)=>{const r=planeResidual(p,refined,ox,oy);return s+r*r},0)/inliers.length);
   const xs=inliers.map(p=>p.x),ys=inliers.map(p=>p.y);
-  planes.push({id:'facet-'+facetId++,accepted:true,pointCount:inliers.length,pitch12,slopeDeg,azimuthDeg:az,rmse,coefficients:refined,bounds:{minX:Math.min(...xs),maxX:Math.max(...xs),minY:Math.min(...ys),maxY:Math.max(...ys)},points:inliers});
+  planes.push({id:'facet-'+facetId++,accepted:true,pointCount:inliers.length,pitch12,slopeDeg,azimuthDeg:az,rmse,originX:ox,originY:oy,coefficients:refined,bounds:{minX:Math.min(...xs),maxX:Math.max(...xs),minY:Math.min(...ys),maxY:Math.max(...ys)},points:inliers});
  }
  return planes.sort((a,b)=>b.pointCount-a.pointCount);
 }
@@ -1388,7 +1388,7 @@ document.querySelector('#accept-roof-planes')?.addEventListener('click',async()=
    const share=p.accepted?Number(p.pointCount||0)/totalPts:0;
    const planAreaFt2=p.accepted?Number(planMetrics.planAreaFt2)*share:0;
    const slopedAreaFt2=planAreaFt2*Math.sqrt(1+Math.pow(Number(p.pitch12||0)/12,2));
-   return{id:p.id,accepted:p.accepted,pointCount:p.pointCount,pitch12:p.pitch12,slopeDeg:p.slopeDeg,azimuthDeg:p.azimuthDeg,rmse:p.rmse,coefficients:p.coefficients,bounds:p.bounds,polygon,planAreaFt2,slopedAreaFt2};
+   return{id:p.id,accepted:p.accepted,pointCount:p.pointCount,pitch12:p.pitch12,slopeDeg:p.slopeDeg,azimuthDeg:p.azimuthDeg,rmse:p.rmse,originX:p.originX,originY:p.originY,coefficients:p.coefficients,bounds:p.bounds,polygon,planAreaFt2,slopedAreaFt2};
   });
 
   if(status)status.textContent='Saving accepted LiDAR roof facets…';
