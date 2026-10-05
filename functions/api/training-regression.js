@@ -158,7 +158,10 @@ function currentMetrics(sm,outline,profileOverrides){
    modelArea!=null&&modelArea>0?modelArea:null,
    footprintPitchArea!=null&&footprintPitchArea>0?footprintPitchArea:null
  ].filter(Number.isFinite);
- const slopedArea=areaCandidates.length?median(areaCandidates):(facetAreas.reduce((a,b)=>a+b,0));
+ const legacyConsensusArea=areaCandidates.length?median(areaCandidates):(facetAreas.reduce((a,b)=>a+b,0));
+ const slopedArea=disagreementBlendArea!=null&&disagreementBlendArea>0
+   ?disagreementBlendArea
+   :legacyConsensusArea;
  const edges=edgeTotals(topology,sm);
  const topologyInternal=topologyInternalTotals(topology);
  const confidenceHip=confidenceFilteredHipFt(sm);
@@ -212,10 +215,11 @@ function currentMetrics(sm,outline,profileOverrides){
   facetAreasFt2:facetAreas,
   googleWholeRoofAreaFt2:googleWhole,
   rasterFacetAreaFt2:modelArea,
-  areaAuthority:areaCandidates.length>=2?"consensus-median":(googleAreaSane?"google-whole-roof":"dsm-surface-area"),
+  areaAuthority:disagreementBlendArea!=null&&disagreementBlendArea>0?"source-disagreement-blend-v1":(areaCandidates.length>=2?"consensus-median-fallback":(googleAreaSane?"google-whole-roof":"dsm-surface-area")),
   googleAreaRejected:googleWhole!=null&&!googleAreaSane,
   footprintPitchAreaFt2:footprintPitchArea,
   disagreementBlendAreaFt2:disagreementBlendArea,
+  legacyConsensusAreaFt2:legacyConsensusArea,
   areaMarginCandidate25Ft2:areaMargin25,
   areaMarginCandidate50Ft2:areaMargin50,
   areaMarginCandidate75Ft2:areaMargin75,
@@ -252,7 +256,8 @@ function score(cur,ref){
   edgeSnapConservative:pct(cur.edgeSnapConservativeAreaFt2,ref.slopedAreaFt2),
   edgeSnapBalanced:pct(cur.edgeSnapBalancedAreaFt2,ref.slopedAreaFt2),
   edgeSnapRgb:pct(cur.edgeSnapRgbAreaFt2,ref.slopedAreaFt2),
-  disagreementBlend:pct(cur.disagreementBlendAreaFt2,ref.slopedAreaFt2)
+  disagreementBlend:pct(cur.disagreementBlendAreaFt2,ref.slopedAreaFt2),
+  legacyConsensus:pct(cur.legacyConsensusAreaFt2,ref.slopedAreaFt2)
  };
  const edgeKeys=(ref.ridgeHipFt!=null?["ridgeHipFt"]:["ridgeFt","hipFt"]).concat(["valleyFt","eaveFt","rakeFt"]);
  // Provider perimeter is normally the same exterior roof edge already represented
@@ -424,6 +429,7 @@ export async function onRequestGet({env}){
   edgeSnapBalancedCases:geometryRows.filter(r=>r.current?.edgeSnapBalancedAreaFt2!=null).length,
   edgeSnapRgbCases:geometryRows.filter(r=>r.current?.edgeSnapRgbAreaFt2!=null).length,
   disagreementBlendCases:geometryRows.filter(r=>r.current?.disagreementBlendAreaFt2!=null).length,
+  legacyConsensusCases:geometryRows.filter(r=>r.current?.legacyConsensusAreaFt2!=null).length,
   averageScore:mean(scored.map(r=>r.score.overall)),medianScore:median(scored.map(r=>r.score.overall)),
   averageAreaErrorPct:av("area"),
   averageAreaMargin25ErrorPct:av("areaMargin25"),
@@ -433,6 +439,7 @@ export async function onRequestGet({env}){
   averageEdgeSnapBalancedErrorPct:av("edgeSnapBalanced"),
   averageEdgeSnapRgbErrorPct:av("edgeSnapRgb"),
   averageDisagreementBlendErrorPct:av("disagreementBlend"),
+  averageLegacyConsensusErrorPct:av("legacyConsensus"),
   averageFacetErrorPct:av("facets"),averageEdgeErrorPct:av("edges"),
   averageDetailBoundaryEdgeErrorPct:av("detailBoundaryEdges"),
   averageRasterLineCandidateEdgeErrorPct:av("rasterLineCandidateEdges"),
