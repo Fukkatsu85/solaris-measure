@@ -1554,9 +1554,60 @@ function physicalExteriorTotalsForReport(sm){
  return used?{eave,rake}:null;
 }
 
+function lidarPlaneIntersectionCandidates(lidarFacets){
+ const facets=(lidarFacets||[]).filter(f=>f?.accepted!==false&&f?.coefficients&&f?.bounds&&Number.isFinite(Number(f.originX))&&Number.isFinite(Number(f.originY)));
+ const out=[];
+ const zAt=(f,x,y)=>Number(f.coefficients.a)*(x-Number(f.originX))+Number(f.coefficients.b)*(y-Number(f.originY))+Number(f.coefficients.c);
+ for(let i=0;i<facets.length;i++)for(let j=i+1;j<facets.length;j++){
+  const A=facets[i],B=facets[j],da=Number(A.coefficients.a)-Number(B.coefficients.a),db=Number(A.coefficients.b)-Number(B.coefficients.b);
+  if(Math.hypot(da,db)<.03)continue;
+  // Convert each plane to global XY form: z = a*x + b*y + k.
+  const ka=Number(A.coefficients.c)-Number(A.coefficients.a)*Number(A.originX)-Number(A.coefficients.b)*Number(A.originY);
+  const kb=Number(B.coefficients.c)-Number(B.coefficients.a)*Number(B.originX)-Number(B.coefficients.b)*Number(B.originY);
+  const dc=ka-kb;
+  // da*x + db*y + dc = 0. Direction lies perpendicular to its normal.
+  const norm=Math.hypot(da,db),nx=da/norm,ny=db/norm,ux=-ny,uy=nx;
+  const p0={x:-dc*nx/norm,y:-dc*ny/norm};
+
+  // Clip to the overlapping/nearby support window of the two fitted facets.
+  const pad=1.8;
+  const minX=Math.max(Number(A.bounds.minX)-pad,Number(B.bounds.minX)-pad);
+  const maxX=Math.min(Number(A.bounds.maxX)+pad,Number(B.bounds.maxX)+pad);
+  const minY=Math.max(Number(A.bounds.minY)-pad,Number(B.bounds.minY)-pad);
+  const maxY=Math.min(Number(A.bounds.maxY)+pad,Number(B.bounds.maxY)+pad);
+  if(minX>=maxX||minY>=maxY)continue;
+
+  const ts=[];
+  const addT=(t,x,y)=>{if(x>=minX-.01&&x<=maxX+.01&&y>=minY-.01&&y<=maxY+.01)ts.push(t)};
+  if(Math.abs(ux)>1e-8){
+   let t=(minX-p0.x)/ux;addT(t,minX,p0.y+t*uy);
+   t=(maxX-p0.x)/ux;addT(t,maxX,p0.y+t*uy);
+  }
+  if(Math.abs(uy)>1e-8){
+   let t=(minY-p0.y)/uy;addT(t,p0.x+t*ux,minY);
+   t=(maxY-p0.y)/uy;addT(t,p0.x+t*ux,maxY);
+  }
+  if(ts.length<2)continue;
+  ts.sort((a,b)=>a-b);
+  const t0=ts[0],t1=ts[ts.length-1];
+  if(t1-t0<1.0)continue;
+  const a={x:p0.x+t0*ux,y:p0.y+t0*uy},b={x:p0.x+t1*ux,y:p0.y+t1*uy};
+  const mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2},z=zAt(A,mid.x,mid.y);
+
+  // Convex/concave classification from whether each facet falls away from or
+  // rises away from the crease at its fitted-bounds center.
+  const centers=[A,B].map(f=>({x:(Number(f.bounds.minX)+Number(f.bounds.maxX))/2,y:(Number(f.bounds.minY)+Number(f.bounds.maxY))/2}));
+  const dzA=zAt(A,centers[0].x,centers[0].y)-z;
+  const dzB=zAt(B,centers[1].x,centers[1].y)-z;
+  const creaseKind=(dzA<-.08&&dzB<-.08)?"convex":(dzA>.08&&dzB>.08)?"concave":"mixed";
+  out.push({facetA:i,facetB:j,a,b,mid,lengthMeters:Math.hypot(b.x-a.x,b.y-a.y),creaseKind});
+ }
+ return out;
+}
+
 function lidarInternalLineValidation(sm,lidarFacets,outline){
  const lines=(sm?.model?.roofLines||[]).filter(l=>['ridge','hip','valley'].includes(l?.type)&&l?.a&&l?.b);
- const facets=(lidarFacets||[]).filter(f=>f?.accepted!==false&&Array.isArray(f?.polygon)&&f.polygon.length>=3&&Number(f?.pointCount||0)>=80&&Number(f?.rmse||99)<=.32);
+ const facets=(lidarFacets||[]).filter(f=>f?.accepted!==false&&Number(f?.pointCount||0)>=80&&Number(f?.rmse||99)<=.32);
  if(!lines.length||facets.length<2||!outline)return null;
  const lat0=Number(outline.lat),lng0=Number(outline.lng),half=Number(outline.cropHalfMeters||42),size=half*2;
  if(!Number.isFinite(lat0)||!Number.isFinite(lng0)||!Number.isFinite(size))return null;
@@ -1570,34 +1621,58 @@ function lidarInternalLineValidation(sm,lidarFacets,outline){
   const t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/l2));
   return Math.hypot(p.x-(a.x+t*dx),p.y-(a.y+t*dy));
  };
- const edgeSets=facets.map((f,fi)=>{
+
+ const physical=lidarPlaneIntersectionCandidates(facets);
+ const hasPhysical=physical.length>0;
+
+ // Legacy polygon-edge fallback for LiDAR planes saved before origin coordinates.
+ const edgeSets=!hasPhysical?facets.filter(f=>Array.isArray(f?.polygon)&&f.polygon.length>=3).flatMap((f,fi)=>{
   const p=f.polygon.map(nxy),edges=[];
   for(let i=0;i<p.length;i++)edges.push({fi,a:p[i],b:p[(i+1)%p.length],angle:ang(p[i],p[(i+1)%p.length])});
   return edges;
- }).flat();
+ }):[];
+
  const verified=[],unverified=[];
  for(const l of lines){
   const a=llxy(l.a),b=llxy(l.b),mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2},la=ang(a,b);
-  const byFacet=new Map();
-  for(const e of edgeSets){
-   const diff=ad(la,e.angle);if(diff>30)continue;
-   const d=segDist(mid,e.a,e.b);if(d>2.4)continue;
-   const prev=byFacet.get(e.fi);
-   if(!prev||d<prev.distance)byFacet.set(e.fi,{distance:d,angleDiff:diff});
+  let match=null;
+
+  if(hasPhysical){
+   for(const p of physical){
+    const diff=ad(la,ang(p.a,p.b));if(diff>22)continue;
+    const d=segDist(mid,p.a,p.b);if(d>2.2)continue;
+    const convexOk=(l.type==='ridge'||l.type==='hip')?p.creaseKind!=='concave':p.creaseKind!=='convex';
+    if(!convexOk)continue;
+    const score=d+diff/22;
+    if(!match||score<match.score)match={score,d,diff,creaseKind:p.creaseKind,source:'plane-intersection'};
+   }
+  }else{
+   const byFacet=new Map();
+   for(const e of edgeSets){
+    const diff=ad(la,e.angle);if(diff>30)continue;
+    const d=segDist(mid,e.a,e.b);if(d>2.4)continue;
+    const prev=byFacet.get(e.fi);
+    if(!prev||d<prev.distance)byFacet.set(e.fi,{distance:d,angleDiff:diff});
+   }
+   const support=[...byFacet.entries()].sort((x,y)=>x[1].distance-y[1].distance);
+   if(support.length>=2&&support[0][1].distance<=1.8&&support[1][1].distance<=2.4){
+    match={d:(support[0][1].distance+support[1][1].distance)/2,diff:null,creaseKind:'unknown',source:'polygon-boundary'};
+   }
   }
-  const support=[...byFacet.entries()].sort((x,y)=>x[1].distance-y[1].distance);
+
   const lenFt=Number(l.length3dMeters||l.lengthMeters||0)*3.280839895;
-  const ok=support.length>=2 && support[0][1].distance<=1.8 && support[1][1].distance<=2.4;
-  const item={type:l.type,lengthFt:lenFt,supportFacets:support.length,meanDistanceM:support.length?(support.slice(0,2).reduce((s,x)=>s+x[1].distance,0)/Math.min(2,support.length)):null};
-  (ok?verified:unverified).push(item);
+  const item={type:l.type,lengthFt:lenFt,matched:Boolean(match),meanDistanceM:match?.d??null,angleDiffDeg:match?.diff??null,creaseKind:match?.creaseKind??null,source:match?.source??(hasPhysical?'plane-intersection':'polygon-boundary')};
+  (match?verified:unverified).push(item);
  }
  const totals={ridge:0,hip:0,valley:0};
  for(const x of verified)totals[x.type]+=Number(x.lengthFt||0);
  const totalLen=lines.reduce((s,l)=>s+Number(l.length3dMeters||l.lengthMeters||0)*3.280839895,0);
  const verifiedLen=verified.reduce((s,l)=>s+Number(l.lengthFt||0),0);
  return {
+  mode:hasPhysical?'physical-plane-intersections':'legacy-polygon-boundaries',
   totalLines:lines.length,verifiedLines:verified.length,
   supportRatio:totalLen>0?verifiedLen/totalLen:0,
+  physicalIntersectionCount:physical.length,
   verifiedTotals:totals,verified,unverified
  };
 }
@@ -1750,7 +1825,7 @@ async function generateRoofReport(){
      '<tr><th>Report confidence</th><td>'+reportConfidence+'</td></tr>'+
      '<tr><th>LiDAR validation</th><td>'+(lidarQualityGood?(Math.round(lidarSloped).toLocaleString()+' ft² · RMSE '+lidarWeightedRmse.toFixed(2)+' m · '+(lidarConfirmsProduction?'confirms production area':'does not confirm production area')):'Not available / not quality-screened')+'</td></tr>'+
      '<tr><th>Topology validation</th><td>'+(lidarQualityGood?((lidarTopologyAgrees?'Agrees':'Review')+' · LiDAR '+lidarAccepted.length+' facets vs DSM '+dsmFacets.length+' · pitch Δ '+(Number.isFinite(lidarPitchDiff)?lidarPitchDiff.toFixed(1)+'/12':'—')):'LiDAR topology validation unavailable')+'</td></tr>'+
-     '<tr><th>Internal line validation</th><td>'+(lidarLineValidation?(lidarLineValidation.verifiedLines+'/'+lidarLineValidation.totalLines+' DSM lines independently supported by LiDAR · '+Math.round(lidarLineValidation.supportRatio*100)+'% of internal-line length'):'LiDAR line validation unavailable')+'</td></tr>'+
+     '<tr><th>Internal line validation</th><td>'+(lidarLineValidation?(lidarLineValidation.verifiedLines+'/'+lidarLineValidation.totalLines+' DSM lines independently supported by LiDAR · '+Math.round(lidarLineValidation.supportRatio*100)+'% of internal-line length · '+(lidarLineValidation.mode==='physical-plane-intersections'?'physical plane intersections':'legacy boundary fallback')):'LiDAR line validation unavailable')+'</td></tr>'+
      '<tr><th>LiDAR-verified ridge / hip / valley</th><td>'+(lidarLineValidation?(lidarLineValidation.verifiedTotals.ridge.toFixed(1)+' ft / '+lidarLineValidation.verifiedTotals.hip.toFixed(1)+' ft / '+lidarLineValidation.verifiedTotals.valley.toFixed(1)+' ft'):'—')+'</td></tr>'+
      '<tr><th>Google whole-roof area</th><td>'+(Number.isFinite(Number(sm.googleWholeRoofAreaFt2))?Math.round(Number(sm.googleWholeRoofAreaFt2)).toLocaleString()+' ft²':'—')+'</td></tr>'+
      '<tr><th>DSM surface area</th><td>'+Math.round(Number(sm.model?.slopedAreaSqFt||0)).toLocaleString()+' ft²</td></tr>'+
