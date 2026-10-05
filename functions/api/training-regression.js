@@ -23,17 +23,21 @@ async function listSolarModels(env){
 }
 function edgeTotals(topology,sm){
  const out={ridgeFt:0,hipFt:0,valleyFt:0,eaveFt:0,rakeFt:0,perimeterFt:0};
+ // Match the actual production report: saved Solar/DSM measurements are the
+ // primary line source. Topology is only a fallback when an older model lacks
+ // a saved measurement.
+ const m=sm?.measurements||{};
+ for(const k of ["ridgeFt","hipFt","valleyFt","eaveFt","rakeFt"]){
+  const v=num(m[k]); if(v!=null)out[k]=v;
+ }
  if(topology?.edges?.length){
+  const t={ridgeFt:0,hipFt:0,valleyFt:0,eaveFt:0,rakeFt:0,perimeterFt:0};
   for(const e of topology.edges){
    const k=e.type==="ridge"?"ridgeFt":e.type==="hip"?"hipFt":e.type==="valley"?"valleyFt":e.type==="eave"?"eaveFt":e.type==="rake"?"rakeFt":e.type==="perimeter"?"perimeterFt":null;
-   if(k)out[k]+=Number(e.lengthMeters||0)*3.280839895;
+   if(k)t[k]+=Number(e.lengthMeters||0)*3.280839895;
   }
+  for(const k of ["ridgeFt","hipFt","valleyFt","eaveFt","rakeFt"])if(!(out[k]>0)&&t[k]>0)out[k]=t[k];
  }
- const m=sm?.measurements||{};
- for(const k of ["ridgeFt","hipFt","valleyFt","eaveFt","rakeFt"])if(!(out[k]>0)&&num(m[k])!=null)out[k]=num(m[k]);
- // Roof-report "perimeter" is the total exposed roof edge: eave + rake.
- // Keep footprint perimeter as its own metric instead of comparing plan-view
- // perimeter against a provider's eave+rake total.
  if(out.eaveFt>0||out.rakeFt>0)out.perimeterFt=out.eaveFt+out.rakeFt;
  return out;
 }
