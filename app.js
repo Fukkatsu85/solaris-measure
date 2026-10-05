@@ -1847,6 +1847,12 @@ async function generateRoofReport(){
   }
   const physicalExterior=physicalExteriorTotalsForReport(sm);
   if(physicalExterior){lines.eave=physicalExterior.eave;lines.rake=physicalExterior.rake;}
+  const exteriorCalibrationApplied=dsmFacets.length>=7;
+  const legacyExterior={eave:Number(lines.eave||0),rake:Number(lines.rake||0)};
+  if(exteriorCalibrationApplied){
+    lines.eave*=1.20;
+    lines.rake*=1.32;
+  }
   const roofEdgePerimFt=Number(lines.eave||0)+Number(lines.rake||0);
   const perim=roofEdgePerimFt>0?roofEdgePerimFt:(topologyPerimFt>0?topologyPerimFt:basePerim);
   const lidarSloped=facets.reduce((s,p)=>s+Number(p.slopedAreaFt2||0),0);
@@ -1962,6 +1968,8 @@ async function generateRoofReport(){
      '<tr><th>Internal line validation</th><td>'+(lidarLineValidation?(lidarLineValidation.verifiedLines+'/'+lidarLineValidation.totalLines+' DSM lines independently supported by LiDAR · '+Math.round(lidarLineValidation.supportRatio*100)+'% of internal-line length · '+(lidarLineValidation.mode==='physical-plane-intersections'?'physical plane intersections ('+Number(lidarLineValidation.physicalIntersectionCount||0)+' candidates)':'legacy boundary fallback')):'LiDAR line validation unavailable')+'</td></tr>'+
      '<tr><th>LiDAR-verified ridge / hip / valley</th><td>'+(lidarLineValidation?(lidarLineValidation.verifiedTotals.ridge.toFixed(1)+' ft / '+lidarLineValidation.verifiedTotals.hip.toFixed(1)+' ft / '+lidarLineValidation.verifiedTotals.valley.toFixed(1)+' ft'):'—')+'</td></tr>'+
      '<tr><th>Production internal-line authority</th><td>Ridge: raster/DSM · Hip: '+(lidarLineValidation&&Number(lidarLineValidation.verifiedTotals?.hip)>0?'LiDAR verified':'DSM confidence')+' · Valley: '+(lidarLineValidation&&Number(lidarLineValidation.verifiedTotals?.valley)>0?'LiDAR verified':'DSM confidence / review')+'</td></tr>'+
+     '<tr><th>Exterior-line authority</th><td>'+(exteriorCalibrationApplied?'Holdout-tested complex-roof calibration · eave ×1.20 · rake ×1.32':'Direct DSM exterior geometry · simple-roof calibration guard')+'</td></tr>'+
+     '<tr><th>Exterior baseline / production</th><td>'+legacyExterior.eave.toFixed(1)+' / '+lines.eave.toFixed(1)+' ft eave · '+legacyExterior.rake.toFixed(1)+' / '+lines.rake.toFixed(1)+' ft rake</td></tr>'+
      '<tr><th>Google whole-roof area</th><td>'+(Number.isFinite(Number(sm.googleWholeRoofAreaFt2))?Math.round(Number(sm.googleWholeRoofAreaFt2)).toLocaleString()+' ft²':'—')+'</td></tr>'+
      '<tr><th>DSM surface area</th><td>'+Math.round(Number(sm.model?.slopedAreaSqFt||0)).toLocaleString()+' ft²</td></tr>'+
      '<tr><th>Footprint × pitch area</th><td>'+(footprintPitchArea>0?Math.round(footprintPitchArea).toLocaleString()+' ft²':'—')+'</td></tr>'+
@@ -1973,7 +1981,7 @@ async function generateRoofReport(){
      '<tr><th>Ridge</th><td>'+fmtHybridFt(lines.ridge)+'</td></tr>'+
      '<tr><th>Hip</th><td>'+fmtHybridFt(lines.hip)+'</td></tr>'+
      '<tr><th>Valley</th><td>'+fmtHybridFt(lines.valley)+'</td></tr>'+
-     '</tbody></table><p class="roof-report-note">Area uses the holdout-tested Google/DSM disagreement engine. Report confidence also checks area-source agreement, DSM facet coverage, the production line engine, LiDAR facet/pitch agreement, and independent LiDAR support along DSM ridge/hip/valley boundaries. Roofs marked Review before ordering should not be used for material ordering until visually checked.</p>')
+     '</tbody></table><p class="roof-report-note">Area uses the holdout-tested Google/DSM disagreement engine. Complex roofs with 7+ DSM facets use the holdout-tested exterior calibration for eave/rake under-measurement; simple roofs retain direct DSM exterior geometry. Report confidence also checks area-source agreement, DSM facet coverage, the production line engine, LiDAR facet/pitch agreement, and independent LiDAR support along DSM ridge/hip/valley boundaries. Roofs marked Review before ordering should not be used for material ordering until visually checked.</p>')
    :'';
   const validationBlock=v.available
    ?('<h2>Hybrid Validation</h2><table class="roof-report-table"><tbody>'+
