@@ -127,10 +127,12 @@ function edgeTotals(topology,sm){
  if(out.eaveFt>0||out.rakeFt>0)out.perimeterFt=out.eaveFt+out.rakeFt;
  return out;
 }
-function currentMetrics(sm,outline,profileOverrides){
+function currentMetrics(sm,outline,profileOverrides,{evaluateTopology=true}={}){
  let topology=null,facetPartitionTopology=null;
- try{topology=buildRoofTopology(sm,{profileOverrides:profileOverrides||{}})}catch{}
- try{facetPartitionTopology=buildFacetPartitionTopology(sm)}catch{}
+ if(evaluateTopology){
+  try{topology=buildRoofTopology(sm,{profileOverrides:profileOverrides||{}})}catch{}
+  try{facetPartitionTopology=buildFacetPartitionTopology(sm)}catch{}
+ }
  const modelFacets=(sm?.model?.facets||[]).filter(f=>Number(f.slopedAreaSqFt||0)>0);
  // Match production reporting: Google DSM model is authoritative for area,
  // pitch and facet count. Topology faces are derived geometry used for line
@@ -251,8 +253,8 @@ function currentMetrics(sm,outline,profileOverrides){
   edgeSnapConservativeAreaFt2:edgeSnapConservative,
   edgeSnapBalancedAreaFt2:edgeSnapBalanced,
   edgeSnapRgbAreaFt2:edgeSnapRgb,
-  areaEdgeSnapDiagnostics:edgeSnaps,
-  areaMarginDiagnostics:sm?.areaMarginDiagnostics||null,
+  areaEdgeSnapDiagnostics:null,
+  areaMarginDiagnostics:null,
   trainingVersion:sm?.trainingVersion||null,
   areaCandidateCount:areaCandidates.length,
   rasterToGoogleAreaRatio:(googleWhole&&modelArea)?modelArea/googleWhole:null,
@@ -262,7 +264,15 @@ function currentMetrics(sm,outline,profileOverrides){
   lineEngineVersion:sm?.model?.lineEngineVersion||null,
   geometryMode:sm?.model?.geometryMode||null,
   reportLineEngineVersion:promotedRasterRidge!=null?"hybrid-confidence-lines-v2":"topology-v5-fallback",
-  planeIntersectionDiagnostics:sm?.model?.planeIntersectionDiagnostics||null
+  planeIntersectionDiagnostics:sm?.model?.planeIntersectionDiagnostics?{
+    valid:sm.model.planeIntersectionDiagnostics.valid,
+    selected:sm.model.planeIntersectionDiagnostics.selected,
+    facetCount:sm.model.planeIntersectionDiagnostics.facetCount,
+    roofLineCount:sm.model.planeIntersectionDiagnostics.roofLineCount,
+    googleCandidateCount:sm.model.planeIntersectionDiagnostics.googleCandidateCount,
+    dsmRegionCandidateCount:sm.model.planeIntersectionDiagnostics.dsmRegionCandidateCount,
+    dsmAugmented:sm.model.planeIntersectionDiagnostics.dsmAugmented?{facets:sm.model.planeIntersectionDiagnostics.dsmAugmented.facets,lines:sm.model.planeIntersectionDiagnostics.dsmAugmented.lines}:null
+  }:null
  };
 }
 function score(cur,ref){
@@ -457,13 +467,14 @@ export async function onRequestGet({env}){
   const found=candidates.sort((a,b)=>String(b.sm.savedAt||"").localeCompare(String(a.sm.savedAt||"")))[0];
   if(!found){const scope=effectiveScope(t);rows.push({caseId:t.caseId||null,address:t.address,scope,source:t.source,archetype:t.archetype,status:"not-processed",reference:refFor(t)});continue}
   const projectId=found.key.split("/")[0],outline=await readJson(env,projectId+"/_roof_outline_accepted.json");
-  const current=currentMetrics(found.sm,outline,profileOverrides),result=score(current,refFor(t));
   const scope=effectiveScope(t);
-  // A training-* Solar model resolves one geocoded building. Whole-property and
-  // detached-structure provider reports are useful truth, but are not directly
-  // comparable until Solaris aggregates/selects the same structure scope.
+  // Only primary-building references are directly comparable to one saved
+  // Google/Solar roof model. Expensive topology experiments are therefore
+  // evaluated only on those rows; scope-specific reports remain diagnostic.
   const scopeComparable=scope==="primary-building";
-  rows.push({caseId:t.caseId||null,address:t.address,scope,source:t.source,archetype:t.archetype,status:scopeComparable?"scored":"scope-specific",projectId,reference:refFor(t),current,score:scopeComparable?result:null});
+  const current=currentMetrics(found.sm,outline,profileOverrides,{evaluateTopology:scopeComparable});
+  const result=scopeComparable?score(current,refFor(t)):null;
+  rows.push({caseId:t.caseId||null,address:t.address,scope,source:t.source,archetype:t.archetype,status:scopeComparable?"scored":"scope-specific",projectId,reference:refFor(t),current,score:result});
  }
  const scored=rows.filter(r=>r.status==="scored"&&Number.isFinite(r.score?.overall));
  const geometryRows=rows.filter(r=>r.status!=="not-processed");
