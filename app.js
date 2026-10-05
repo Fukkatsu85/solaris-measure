@@ -1839,6 +1839,12 @@ async function generateRoofReport(){
   const confidenceInternal=confidenceInternalTotalsForReport(sm);
   if(confidenceInternal){lines.hip=confidenceInternal.hip;lines.valley=confidenceInternal.valley;}
   const lidarLineValidation=lidarInternalLineValidation(sm,facets,d.outline);
+  if(lidarLineValidation){
+    // LiDAR is an independent source. Promote only categories it physically
+    // confirms; leave unconfirmed categories on the DSM confidence engine.
+    if(Number(lidarLineValidation.verifiedTotals?.hip)>0)lines.hip=Number(lidarLineValidation.verifiedTotals.hip);
+    if(Number(lidarLineValidation.verifiedTotals?.valley)>0)lines.valley=Number(lidarLineValidation.verifiedTotals.valley);
+  }
   const physicalExterior=physicalExteriorTotalsForReport(sm);
   if(physicalExterior){lines.eave=physicalExterior.eave;lines.rake=physicalExterior.rake;}
   const roofEdgePerimFt=Number(lines.eave||0)+Number(lines.rake||0);
@@ -1908,12 +1914,27 @@ async function generateRoofReport(){
   const lidarPitchDiff=Number.isFinite(lidarPitchWeighted)&&Number.isFinite(rawAvgPitch)
     ?Math.abs(lidarPitchWeighted-rawAvgPitch)
     :null;
-  const lidarFacetDiff=lidarQualityGood?Math.abs(lidarAccepted.length-dsmFacets.length):null;
-  const lidarLineSupportOk=!lidarLineValidation||lidarLineValidation.totalLines===0||lidarLineValidation.supportRatio>=.60;
-  const lidarTopologyAgrees=lidarQualityGood
-    &&Number.isFinite(lidarPitchDiff)&&lidarPitchDiff<=1.5
-    &&Number.isFinite(lidarFacetDiff)&&lidarFacetDiff<=Math.max(2,Math.round(dsmFacets.length*.25))
-    &&lidarLineSupportOk;
+
+  // Commercial reports often split tiny dormers/projections into many facets
+  // that residential LiDAR cannot resolve. Compare the major physical planes
+  // separately from those supplemental small architectural facets.
+  const dsmFacetAreaTotal=dsmFacets.reduce((s,f)=>s+Number(f.slopedAreaSqFt||f.flatAreaSqFt||0),0);
+  const dsmMajorThreshold=Math.max(110,dsmFacetAreaTotal*.075);
+  const dsmMajorFacets=dsmFacets.filter(f=>Number(f.slopedAreaSqFt||f.flatAreaSqFt||0)>=dsmMajorThreshold);
+  const lidarFacetAreaTotal=lidarAccepted.reduce((s,f)=>s+Number(f.slopedAreaFt2||0),0);
+  const lidarMajorThreshold=Math.max(110,lidarFacetAreaTotal*.075);
+  const lidarMajorFacets=lidarAccepted.filter(f=>Number(f.slopedAreaFt2||0)>=lidarMajorThreshold);
+  const lidarMajorFacetDiff=lidarQualityGood?Math.abs(lidarMajorFacets.length-dsmMajorFacets.length):null;
+  const dsmSmallFeatureArea=dsmFacets
+    .filter(f=>Number(f.slopedAreaSqFt||f.flatAreaSqFt||0)<dsmMajorThreshold)
+    .reduce((s,f)=>s+Number(f.slopedAreaSqFt||f.flatAreaSqFt||0),0);
+  const dsmSmallFeatureShare=dsmFacetAreaTotal>0?dsmSmallFeatureArea/dsmFacetAreaTotal:0;
+
+  const lidarLineSupportOk=!lidarLineValidation||lidarLineValidation.totalLines===0||lidarLineValidation.supportRatio>=.45;
+  const lidarMajorTopologyAgrees=lidarQualityGood
+    &&Number.isFinite(lidarPitchDiff)&&lidarPitchDiff<=1.0
+    &&Number.isFinite(lidarMajorFacetDiff)&&lidarMajorFacetDiff<=1;
+  const lidarTopologyAgrees=lidarMajorTopologyAgrees&&lidarLineSupportOk;
   const lidarConfirmsProduction=Number.isFinite(lidarVsProductionPct)&&lidarVsProductionPct<=8;
   const reportNeedsReview=(areaConfidence==='Review'
     ||(Number.isFinite(facetCoverage)&&facetCoverage<.80)
@@ -1921,7 +1942,7 @@ async function generateRoofReport(){
     ||(lidarQualityGood&&!lidarTopologyAgrees))
     &&!lidarConfirmsProduction;
   const reportConfidence=lidarConfirmsProduction&&lidarTopologyAgrees
-    ?'LiDAR area + topology confirmed'
+    ?(dsmSmallFeatureShare>.03?'LiDAR major geometry confirmed · small features DSM/aerial':'LiDAR area + topology confirmed')
     :(lidarConfirmsProduction?'LiDAR area confirmed · topology review':(reportNeedsReview?'Review before ordering':(areaConfidence==='High'?'High':'Moderate')));
   const reportFacetCount=Number(dsmFacets.length||facets.length||d.topology?.faces?.length||0);
   const waste=[10,12,15].map(w=>({w,area:sloped*(1+w/100),sq:squares*(1+w/100)}));
@@ -1937,9 +1958,10 @@ async function generateRoofReport(){
      '<tr><th>Area confidence</th><td>'+areaConfidence+(Number.isFinite(areaSourceSpreadPct)?' · source spread '+areaSourceSpreadPct.toFixed(1)+'%':'')+'</td></tr>'+
      '<tr><th>Report confidence</th><td>'+reportConfidence+'</td></tr>'+
      '<tr><th>LiDAR validation</th><td>'+(lidarQualityGood?(Math.round(lidarSloped).toLocaleString()+' ft² · RMSE '+lidarWeightedRmse.toFixed(2)+' m · '+(lidarConfirmsProduction?'confirms production area':'does not confirm production area')):'Not available / not quality-screened')+'</td></tr>'+
-     '<tr><th>Topology validation</th><td>'+(lidarQualityGood?((lidarTopologyAgrees?'Agrees':'Review')+' · LiDAR '+lidarAccepted.length+' facets vs DSM '+dsmFacets.length+' · pitch Δ '+(Number.isFinite(lidarPitchDiff)?lidarPitchDiff.toFixed(1)+'/12':'—')):'LiDAR topology validation unavailable')+'</td></tr>'+
+     '<tr><th>Topology validation</th><td>'+(lidarQualityGood?((lidarTopologyAgrees?'Major geometry agrees':'Review')+' · major planes LiDAR '+lidarMajorFacets.length+' vs DSM '+dsmMajorFacets.length+' · total facets '+lidarAccepted.length+' vs '+dsmFacets.length+' · pitch Δ '+(Number.isFinite(lidarPitchDiff)?lidarPitchDiff.toFixed(1)+'/12':'—')+(dsmSmallFeatureShare>0?' · DSM small-feature area '+Math.round(dsmSmallFeatureShare*100)+'%':'')):'LiDAR topology validation unavailable')+'</td></tr>'+
      '<tr><th>Internal line validation</th><td>'+(lidarLineValidation?(lidarLineValidation.verifiedLines+'/'+lidarLineValidation.totalLines+' DSM lines independently supported by LiDAR · '+Math.round(lidarLineValidation.supportRatio*100)+'% of internal-line length · '+(lidarLineValidation.mode==='physical-plane-intersections'?'physical plane intersections ('+Number(lidarLineValidation.physicalIntersectionCount||0)+' candidates)':'legacy boundary fallback')):'LiDAR line validation unavailable')+'</td></tr>'+
      '<tr><th>LiDAR-verified ridge / hip / valley</th><td>'+(lidarLineValidation?(lidarLineValidation.verifiedTotals.ridge.toFixed(1)+' ft / '+lidarLineValidation.verifiedTotals.hip.toFixed(1)+' ft / '+lidarLineValidation.verifiedTotals.valley.toFixed(1)+' ft'):'—')+'</td></tr>'+
+     '<tr><th>Production internal-line authority</th><td>Ridge: raster/DSM · Hip: '+(lidarLineValidation&&Number(lidarLineValidation.verifiedTotals?.hip)>0?'LiDAR verified':'DSM confidence')+' · Valley: '+(lidarLineValidation&&Number(lidarLineValidation.verifiedTotals?.valley)>0?'LiDAR verified':'DSM confidence / review')+'</td></tr>'+
      '<tr><th>Google whole-roof area</th><td>'+(Number.isFinite(Number(sm.googleWholeRoofAreaFt2))?Math.round(Number(sm.googleWholeRoofAreaFt2)).toLocaleString()+' ft²':'—')+'</td></tr>'+
      '<tr><th>DSM surface area</th><td>'+Math.round(Number(sm.model?.slopedAreaSqFt||0)).toLocaleString()+' ft²</td></tr>'+
      '<tr><th>Footprint × pitch area</th><td>'+(footprintPitchArea>0?Math.round(footprintPitchArea).toLocaleString()+' ft²':'—')+'</td></tr>'+
