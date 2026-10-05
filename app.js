@@ -1455,12 +1455,14 @@ function roofDiagramSvg(data){
   let s='<svg viewBox="0 0 1000 1000" role="img" aria-label="Hybrid 2D roof measurement diagram"><rect width="1000" height="1000" fill="#fff"/>';
   if(topology?.faces?.length&&topology?.vertices?.length){
    const vById=new Map(topology.vertices.map(v=>[v.id,v]));
+   let visibleFaceNumber=0;
    topology.faces.forEach((face,i)=>{
     const poly=face.vertexIds.map(id=>vById.get(id)).filter(Boolean);if(poly.length<3)return;
     const q=poly.map(pt),cx=q.reduce((a,p)=>a+p.x,0)/q.length,cy=q.reduce((a,p)=>a+p.y,0)/q.length;
     s+='<polygon points="'+poly.map(P).join(' ')+'" fill="'+fills[i%fills.length]+'" stroke="#444" stroke-width="3"/>';
     if(!face.microFace&&Number(face.slopedAreaSqFt||0)>=28){
-      s+='<text x="'+cx.toFixed(1)+'" y="'+cy.toFixed(1)+'" text-anchor="middle" font-size="24" font-weight="700" fill="#111">F'+face.id+'</text>';
+      visibleFaceNumber++;
+      s+='<text x="'+cx.toFixed(1)+'" y="'+cy.toFixed(1)+'" text-anchor="middle" font-size="24" font-weight="700" fill="#111">F'+visibleFaceNumber+'</text>';
       s+='<text x="'+cx.toFixed(1)+'" y="'+(cy+28).toFixed(1)+'" text-anchor="middle" font-size="18" fill="#333">'+Math.round(Number(face.rise12||0))+'/12 · '+Math.round(Number(face.slopedAreaSqFt||0))+' ft²</text>';
     }
    });
