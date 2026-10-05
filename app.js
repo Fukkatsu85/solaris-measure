@@ -1770,7 +1770,7 @@ function renderRoofRegression(data){
    ['Edge snap conservative',fmtAreaCandidate(s.averageEdgeSnapConservativeErrorPct,s.edgeSnapConservativeCases)],
    ['Edge snap balanced',fmtAreaCandidate(s.averageEdgeSnapBalancedErrorPct,s.edgeSnapBalancedCases)],
    ['Edge snap + RGB',fmtAreaCandidate(s.averageEdgeSnapRgbErrorPct,s.edgeSnapRgbCases)],
-   ['Source disagreement blend',fmtAreaCandidate(s.averageDisagreementBlendErrorPct,s.disagreementBlendCases)],
+   ['Legacy consensus baseline',fmtAreaCandidate(s.averageLegacyConsensusErrorPct,s.legacyConsensusCases)],
    ['DSM facet error',fmtRegression(s.averageDsmFacetErrorPct??s.averageFacetErrorPct,'%')],
    ['Google segment err',fmtRegression(s.averageGoogleSegmentFacetErrorPct,'%')],
    ['Topology face err',fmtRegression(s.averageTopologyFaceErrorPct,'%')],
