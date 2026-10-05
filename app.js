@@ -2360,8 +2360,18 @@ document.querySelector('#run-roof-regression')?.addEventListener('click',async()
     ?'Topology optimizer unavailable; running regression with the last validated configuration…'
     :'Topology optimization complete. Running the verified 40-case regression…';
 
-  const r=await fetch('/api/training-regression',{cache:'no-store'}),d=await r.json().catch(()=>({}));
-  if(!r.ok||!d.ok)throw new Error(d.error||'Regression runner failed.');
+  let r=await fetch('/api/training-regression',{cache:'no-store'});
+  let raw=await r.text(),d={};
+  try{d=JSON.parse(raw)}catch{}
+  // One retry for transient Cloudflare worker/resource failures.
+  if(!r.ok&&r.status>=500){
+    if(status)status.textContent='Regression worker hit a transient server limit. Retrying once…';
+    await new Promise(resolve=>setTimeout(resolve,1200));
+    r=await fetch('/api/training-regression?retry=1',{cache:'no-store'});
+    raw=await r.text();
+    try{d=JSON.parse(raw)}catch{d={}}
+  }
+  if(!r.ok||!d.ok)throw new Error(d.error||('Regression runner failed'+(r.status?' · HTTP '+r.status:'')+(raw&&!raw.trim().startsWith('{')?' · '+raw.trim().slice(0,160):'')));
   renderRoofRegression(d);
 
   if(status)status.textContent=optimizerWarning
