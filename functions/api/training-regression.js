@@ -159,6 +159,10 @@ function currentMetrics(sm,outline,profileOverrides){
  if(promotedRasterRidge!=null&&promotedRasterRidge>=0){
   edges.ridgeFt=promotedRasterRidge;
  }
+ if(Array.isArray(sm?.model?.roofLines)){
+  edges.hipFt=confidenceHip;
+  edges.valleyFt=confidenceValley;
+ }
  const detailBoundary=sm?.measurementCandidates?.detailBoundary||null;
  const detailEave=num(detailBoundary?.eaveFt);
  const detailRake=num(detailBoundary?.rakeFt);
@@ -199,7 +203,7 @@ function currentMetrics(sm,outline,profileOverrides){
   facetEngineVersion:sm?.model?.facetEngineVersion||null,
   lineEngineVersion:sm?.model?.lineEngineVersion||null,
   geometryMode:sm?.model?.geometryMode||null,
-  reportLineEngineVersion:promotedRasterRidge!=null?"hybrid-raster-ridge-v1":"topology-v5-fallback",
+  reportLineEngineVersion:promotedRasterRidge!=null?"hybrid-confidence-lines-v2":"topology-v5-fallback",
   planeIntersectionDiagnostics:sm?.model?.planeIntersectionDiagnostics||null
  };
 }
