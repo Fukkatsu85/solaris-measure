@@ -1652,10 +1652,23 @@ async function generateRoofReport(){
     :(Number.isFinite(areaSourceSpreadPct)&&areaSourceSpreadPct<=20?'Moderate':'Review');
   const facetCoverage=Number(sm?.model?.facetCoverage);
   const lineEngineCurrent=sm?.model?.lineEngineVersion==='plane-dsm-trace-v5-restored';
-  const reportNeedsReview=areaConfidence==='Review'
+  const lidarAccepted=facets.filter(p=>p.accepted!==false&&Number(p.slopedAreaFt2||0)>0);
+  const lidarPointTotal=lidarAccepted.reduce((s,p)=>s+Number(p.pointCount||0),0);
+  const lidarWeightedRmse=lidarPointTotal>0
+    ?lidarAccepted.reduce((s,p)=>s+Number(p.rmse||0)*Number(p.pointCount||0),0)/lidarPointTotal
+    :null;
+  const lidarQualityGood=lidarAccepted.length>0&&lidarPointTotal>=250&&Number.isFinite(lidarWeightedRmse)&&lidarWeightedRmse<=.28;
+  const lidarVsProductionPct=lidarQualityGood&&lidarSloped>0
+    ?Math.abs(lidarSloped-sloped)/Math.max(1,sloped)*100
+    :null;
+  const lidarConfirmsProduction=Number.isFinite(lidarVsProductionPct)&&lidarVsProductionPct<=8;
+  const reportNeedsReview=(areaConfidence==='Review'
     ||(Number.isFinite(facetCoverage)&&facetCoverage<.80)
-    ||!lineEngineCurrent;
-  const reportConfidence=reportNeedsReview?'Review before ordering':(areaConfidence==='High'?'High':'Moderate');
+    ||!lineEngineCurrent)
+    &&!lidarConfirmsProduction;
+  const reportConfidence=lidarConfirmsProduction
+    ?'LiDAR confirmed'
+    :(reportNeedsReview?'Review before ordering':(areaConfidence==='High'?'High':'Moderate'));
   const reportFacetCount=Number(dsmFacets.length||facets.length||d.topology?.faces?.length||0);
   const waste=[10,12,15].map(w=>({w,area:sloped*(1+w/100),sq:squares*(1+w/100)}));
   const facetRows=(dsmFacets.length?dsmFacets:facets).map((p,i)=>{
@@ -1669,6 +1682,7 @@ async function generateRoofReport(){
      '<tr><th>Area engine</th><td>Source disagreement blend v1</td></tr>'+
      '<tr><th>Area confidence</th><td>'+areaConfidence+(Number.isFinite(areaSourceSpreadPct)?' · source spread '+areaSourceSpreadPct.toFixed(1)+'%':'')+'</td></tr>'+
      '<tr><th>Report confidence</th><td>'+reportConfidence+'</td></tr>'+
+     '<tr><th>LiDAR validation</th><td>'+(lidarQualityGood?(Math.round(lidarSloped).toLocaleString()+' ft² · RMSE '+lidarWeightedRmse.toFixed(2)+' m · '+(lidarConfirmsProduction?'confirms production area':'does not confirm production area')):'Not available / not quality-screened')+'</td></tr>'+
      '<tr><th>Google whole-roof area</th><td>'+(Number.isFinite(Number(sm.googleWholeRoofAreaFt2))?Math.round(Number(sm.googleWholeRoofAreaFt2)).toLocaleString()+' ft²':'—')+'</td></tr>'+
      '<tr><th>DSM surface area</th><td>'+Math.round(Number(sm.model?.slopedAreaSqFt||0)).toLocaleString()+' ft²</td></tr>'+
      '<tr><th>Footprint × pitch area</th><td>'+(footprintPitchArea>0?Math.round(footprintPitchArea).toLocaleString()+' ft²':'—')+'</td></tr>'+
