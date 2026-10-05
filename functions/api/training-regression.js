@@ -194,11 +194,13 @@ function currentMetrics(sm,outline,profileOverrides){
  const rasterHip=num(rasterLines?.hipFt);
  const rasterValley=num(rasterLines?.valleyFt);
  const topologyFaces=(topology?.faces||[]).filter(f=>Number(f.slopedAreaSqFt||0)>0);
+ const topologyFaceAreaFt2=topologyFaces.reduce((s,f)=>s+Number(f.slopedAreaSqFt||0),0);
  return {
   facetCount:modelFacets.length,slopedAreaFt2:slopedArea,avgPitch12:avgPitch,
   googleSegmentCount:num(sm?.googleRoofSegmentCount),
   dsmFacetCount:modelFacets.length,
   topologyFaceCount:topologyFaces.length,
+  topologyFaceAreaFt2,
   ...edges,ridgeHipFt:Number(edges.ridgeFt||0)+Number(edges.hipFt||0),
   detailBoundaryEaveFt:detailEave,
   detailBoundaryRakeFt:detailRake,
@@ -250,6 +252,7 @@ function score(cur,ref){
   googleSegments:ref.facetCount&&cur.googleSegmentCount!=null?Math.abs(cur.googleSegmentCount-ref.facetCount)/ref.facetCount*100:null,
   dsmFacets:ref.facetCount&&cur.dsmFacetCount!=null?Math.abs(cur.dsmFacetCount-ref.facetCount)/ref.facetCount*100:null,
   topologyFaces:ref.facetCount&&cur.topologyFaceCount!=null?Math.abs(cur.topologyFaceCount-ref.facetCount)/ref.facetCount*100:null,
+  topologyFaceArea:pct(cur.topologyFaceAreaFt2,ref.slopedAreaFt2),
   areaMargin25:pct(cur.areaMarginCandidate25Ft2,ref.slopedAreaFt2),
   areaMargin50:pct(cur.areaMarginCandidate50Ft2,ref.slopedAreaFt2),
   areaMargin75:pct(cur.areaMarginCandidate75Ft2,ref.slopedAreaFt2),
@@ -449,6 +452,7 @@ export async function onRequestGet({env}){
   averageInternalConfidenceEdgeErrorPct:av("internalConfidenceEdges"),
   averagePitchErrorPct:av("pitch"),averageFootprintAreaErrorPct:av("footprintArea"),averageFootprintPerimeterErrorPct:av("footprintPerimeter"),
   averageGoogleSegmentFacetErrorPct:av("googleSegments"),averageDsmFacetErrorPct:av("dsmFacets"),averageTopologyFaceErrorPct:av("topologyFaces"),
+  averageTopologyFaceAreaErrorPct:av("topologyFaceArea"),
   regressionGate:{maxAreaErrorPct:8,maxFacetErrorPct:25,maxEdgeErrorPct:25,minOverallScore:70},
   topologyOptimizerVersion:optimizerValid?optimizer.version:null,
   ignoredTopologyOptimizerVersion:!optimizerValid?(optimizer?.version||null):null,
