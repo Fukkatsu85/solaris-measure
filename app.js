@@ -1173,7 +1173,7 @@ async function decodeRoofLidar(){
    worker.onmessage=e=>{const m=e.data||{};if(m.type==='progress'){if(status)status.textContent='Decoding LiDAR node '+m.current+' of '+m.total+' · '+Number(m.inside||0).toLocaleString()+' roof points found…';return}
     clearTimeout(timer);worker.terminate();m.type==='done'?resolve(m):reject(new Error(m.error||'LiDAR decoder failed.'))};
    worker.onerror=e=>{clearTimeout(timer);worker.terminate();reject(new Error(e.message||'LiDAR worker error'))};
-   worker.postMessage({type:'decode',eptUrl:saved.lidarEpt.url,nodes:selected,queryBounds:saved.lidarSubset.queryBounds,polygon:poly,maxDecoded:550000,grid:.45});
+   worker.postMessage({type:'decode',eptUrl:saved.lidarEpt.url,nodes:selected,queryBounds:saved.lidarSubset.queryBounds,polygon:poly,maxDecoded:550000,grid:.30});
   });
   roofLidarDecoded={...result,polygon:poly,queryBounds:saved.lidarSubset.queryBounds};
   renderRoofLidar(result.surfacePoints,saved.lidarSubset.queryBounds,poly,result.minZ,result.maxZ);
@@ -1611,9 +1611,14 @@ function lidarInternalLineValidation(sm,lidarFacets,outline){
  if(!lines.length||facets.length<2||!outline)return null;
  const lat0=Number(outline.lat),lng0=Number(outline.lng),half=Number(outline.cropHalfMeters||42),size=half*2;
  if(!Number.isFinite(lat0)||!Number.isFinite(lng0)||!Number.isFinite(size))return null;
- const cos=Math.max(.2,Math.cos(lat0*Math.PI/180));
- const llxy=p=>({x:(Number(p.lng)-lng0)*111320*cos,y:(Number(p.lat)-lat0)*111320});
- const nxy=p=>({x:(Number(p.x)-.5)*size,y:(.5-Number(p.y))*size});
+ const merc=p=>{
+  const lat=Number(p?.lat??p?.latitude),lng=Number(p?.lng??p?.longitude);
+  return {x:6378137*lng*Math.PI/180,y:6378137*Math.log(Math.tan(Math.PI/4+lat*Math.PI/360))};
+ };
+ const centerMerc=merc({lat:lat0,lng:lng0});
+ // Use the SAME absolute Web Mercator frame as decoded EPT/LiDAR points.
+ const llxy=p=>merc(p);
+ const nxy=p=>({x:centerMerc.x+(Number(p.x)-.5)*size,y:centerMerc.y+(.5-Number(p.y))*size});
  const ang=(a,b)=>{let d=Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI%180;if(d<0)d+=180;return d};
  const ad=(a,b)=>{let d=Math.abs(a-b)%180;return Math.min(d,180-d)};
  const segDist=(p,a,b)=>{
@@ -1825,7 +1830,7 @@ async function generateRoofReport(){
      '<tr><th>Report confidence</th><td>'+reportConfidence+'</td></tr>'+
      '<tr><th>LiDAR validation</th><td>'+(lidarQualityGood?(Math.round(lidarSloped).toLocaleString()+' ft² · RMSE '+lidarWeightedRmse.toFixed(2)+' m · '+(lidarConfirmsProduction?'confirms production area':'does not confirm production area')):'Not available / not quality-screened')+'</td></tr>'+
      '<tr><th>Topology validation</th><td>'+(lidarQualityGood?((lidarTopologyAgrees?'Agrees':'Review')+' · LiDAR '+lidarAccepted.length+' facets vs DSM '+dsmFacets.length+' · pitch Δ '+(Number.isFinite(lidarPitchDiff)?lidarPitchDiff.toFixed(1)+'/12':'—')):'LiDAR topology validation unavailable')+'</td></tr>'+
-     '<tr><th>Internal line validation</th><td>'+(lidarLineValidation?(lidarLineValidation.verifiedLines+'/'+lidarLineValidation.totalLines+' DSM lines independently supported by LiDAR · '+Math.round(lidarLineValidation.supportRatio*100)+'% of internal-line length · '+(lidarLineValidation.mode==='physical-plane-intersections'?'physical plane intersections':'legacy boundary fallback')):'LiDAR line validation unavailable')+'</td></tr>'+
+     '<tr><th>Internal line validation</th><td>'+(lidarLineValidation?(lidarLineValidation.verifiedLines+'/'+lidarLineValidation.totalLines+' DSM lines independently supported by LiDAR · '+Math.round(lidarLineValidation.supportRatio*100)+'% of internal-line length · '+(lidarLineValidation.mode==='physical-plane-intersections'?'physical plane intersections ('+Number(lidarLineValidation.physicalIntersectionCount||0)+' candidates)':'legacy boundary fallback')):'LiDAR line validation unavailable')+'</td></tr>'+
      '<tr><th>LiDAR-verified ridge / hip / valley</th><td>'+(lidarLineValidation?(lidarLineValidation.verifiedTotals.ridge.toFixed(1)+' ft / '+lidarLineValidation.verifiedTotals.hip.toFixed(1)+' ft / '+lidarLineValidation.verifiedTotals.valley.toFixed(1)+' ft'):'—')+'</td></tr>'+
      '<tr><th>Google whole-roof area</th><td>'+(Number.isFinite(Number(sm.googleWholeRoofAreaFt2))?Math.round(Number(sm.googleWholeRoofAreaFt2)).toLocaleString()+' ft²':'—')+'</td></tr>'+
      '<tr><th>DSM surface area</th><td>'+Math.round(Number(sm.model?.slopedAreaSqFt||0)).toLocaleString()+' ft²</td></tr>'+
