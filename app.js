@@ -1830,6 +1830,7 @@ async function bootstrapTrainingCase(row,engine){
   rawCornerCount:result.rawCornerCount,
   model:result.model,
   measurements,
+  areaMarginCandidates:result.areaMarginCandidates||null,
   measurementCandidates:{detailBoundary:detailBoundaryMeasurements,rasterLines:rasterLineMeasurements}
  };
  const sr=await fetch('/api/roof-solar-model',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId,address,accepted:false,model:solarModel})});
@@ -1848,12 +1849,13 @@ document.querySelector('#bootstrap-roof-training')?.addEventListener('click',asy
     r.status==='not-processed' ||
     r.current?.lineEngineVersion!=='plane-dsm-trace-v5-restored' ||
     r.current?.detailBoundaryPerimeterFt==null ||
-    r.current?.rasterLineCandidateRidgeFt==null
+    r.current?.rasterLineCandidateRidgeFt==null ||
+    r.current?.areaMarginCandidate50Ft2==null
   ));
   const byAddress=new Map();for(const r of pendingRows)if(!byAddress.has(r.address))byAddress.set(r.address,r);
   const queue=[...byAddress.values()];
-  if(!queue.length){if(status)status.textContent='All eligible training roofs already have the restored v5 engine plus both shadow candidates.';return}
-  const engine=await import('/assets/js/solar-roof-engine.js?v=20261004-exterior-z-v1');
+  if(!queue.length){if(status)status.textContent='All eligible training roofs already have the restored v5 engine plus line and DSM-area shadow candidates.';return}
+  const engine=await import('/assets/js/solar-roof-engine.js?v=20261005-area-margin-shadow1');
   let done=0,failed=0;const failures=[];
   const worker=async()=>{
    while(queue.length){
@@ -1864,7 +1866,7 @@ document.querySelector('#bootstrap-roof-training')?.addEventListener('click',asy
    }
   };
   await Promise.all([worker(),worker()]);
-  const rebuildSummary='<strong>Training rebuild complete.</strong> '+done+' roofs updated with restored v5 plus boundary and raster-line shadow candidates · '+failed+' failed.'+(failures.length?'<br><span class="muted">'+failures.slice(0,8).map(escRoof).join('<br>')+(failures.length>8?'<br>…and '+(failures.length-8)+' more':'')+'</span>':'');
+  const rebuildSummary='<strong>Training rebuild complete.</strong> '+done+' roofs updated with restored v5 plus line and DSM-area shadow candidates · '+failed+' failed.'+(failures.length?'<br><span class="muted">'+failures.slice(0,8).map(escRoof).join('<br>')+(failures.length>8?'<br>…and '+(failures.length-8)+' more':'')+'</span>':'');
   if(status)status.innerHTML=rebuildSummary+'<br>Running regression now…';
   const reg=await fetch('/api/training-regression',{cache:'no-store'}),data=await reg.json().catch(()=>({}));
   if(!reg.ok||!data.ok)throw new Error(data.error||'Bootstrap finished, but regression could not run.');
@@ -1969,7 +1971,7 @@ async function runRoofSolarAnalysis(){
  try{
   const br=await fetch('/api/solar-building?lat='+encodeURIComponent(lat)+'&lng='+encodeURIComponent(lng)),building=await br.json();
   if(!br.ok||!building.ok)throw new Error(building.error||'Google Solar Building Insights is unavailable for this roof.');
-  const engine=await import('/assets/js/solar-roof-engine.js?v=20261004-exterior-z-v1');
+  const engine=await import('/assets/js/solar-roof-engine.js?v=20261005-area-margin-shadow1');
   const result=await engine.buildSolarRoofModel(lat,lng,building.roofSegments||[]);
   const measurements=engine.buildRoofMeasurements(result.outline,result.model.facets||[],result.model.roofLines||[]);
   const detailBoundaryMeasurements=Array.isArray(result.measurementOutlineCandidate)&&result.measurementOutlineCandidate.length>=3
@@ -1987,6 +1989,7 @@ async function runRoofSolarAnalysis(){
    rawCornerCount:result.rawCornerCount,
    model:result.model,
    measurements,
+   areaMarginCandidates:result.areaMarginCandidates||null,
    measurementCandidates:{detailBoundary:detailBoundaryMeasurements,rasterLines:rasterLineMeasurements}
   };
   renderRoofSolarProposal(roofSolarProposal);
