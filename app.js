@@ -1822,7 +1822,7 @@ async function generateRoofReport(){
   const sm=d.solarModel||null,dm=sm?.measurements||{},dsmFacets=sm?.model?.facets||[];
   if(sm?.model?.facets?.length){
    try{
-    const topo=await import('/assets/js/roof-topology.js?v=20261005-lidar-line-verify1');
+    const topo=await import('/assets/js/roof-topology.js?v=20261005-small-features1');
     let profileOverrides={};
     try{
      const cr=await fetch('/api/training-topology-optimizer',{cache:'no-store'}),cd=await cr.json().catch(()=>({}));
@@ -2229,7 +2229,7 @@ async function bootstrapTrainingCase(row,engine){
  const solarModel={
   source:'google-solar-dsm',
   trainingAuto:true,
-  trainingVersion:'r39-browser-rooftop-v4-edge-snap',
+  trainingVersion:'r40-browser-rooftop-v5-small-features',
   geocodeSource:geo.source||null,
   geocodePrecision:geo.precision||null,
   geocodeRooftop:Boolean(geo.rooftop),
@@ -2266,12 +2266,12 @@ document.querySelector('#bootstrap-roof-training')?.addEventListener('click',asy
     r.current?.detailBoundaryPerimeterFt==null ||
     r.current?.rasterLineCandidateRidgeFt==null ||
     r.current?.areaMarginCandidate50Ft2==null ||
-    r.current?.trainingVersion!=='r39-browser-rooftop-v4-edge-snap'
+    r.current?.trainingVersion!=='r40-browser-rooftop-v5-small-features'
   ));
   const byAddress=new Map();for(const r of pendingRows)if(!byAddress.has(r.address))byAddress.set(r.address,r);
   const queue=[...byAddress.values()];
   if(!queue.length){if(status)status.textContent='All eligible training roofs already have the restored v5 engine plus line and DSM-area shadow candidates.';return}
-  const engine=await import('/assets/js/solar-roof-engine.js?v=20261005-edge-snap-shadow1');
+  const engine=await import('/assets/js/solar-roof-engine.js?v=20261005-small-features1');
   let done=0,failed=0;const failures=[];
   const worker=async()=>{
    while(queue.length){
