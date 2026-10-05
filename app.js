@@ -1586,7 +1586,7 @@ async function generateRoofReport(){
   const sm=d.solarModel||null,dm=sm?.measurements||{},dsmFacets=sm?.model?.facets||[];
   if(sm?.model?.facets?.length){
    try{
-    const topo=await import('/assets/js/roof-topology.js?v=20261005-face-dedupe2');
+    const topo=await import('/assets/js/roof-topology.js?v=20261005-exterior-face-fix1');
     let profileOverrides={};
     try{
      const cr=await fetch('/api/training-topology-optimizer',{cache:'no-store'}),cd=await cr.json().catch(()=>({}));
