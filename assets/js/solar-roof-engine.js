@@ -1789,6 +1789,14 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
     labels.set(next);
   }
 
+  // Preserve architectural micro-facets more aggressively only when Google
+  // itself reports a complex roof. Simple roofs keep the conservative cleanup.
+  const detailPreservingRoof=rawCandidates.length>=8;
+  const secondaryMinAreaM2=detailPreservingRoof?.45:1.85;
+  const secondaryMinSpanM=detailPreservingRoof?.55:1.0;
+  const secondaryMinCompactness=detailPreservingRoof?.22:.34;
+  const secondaryMinShare=detailPreservingRoof?.035:.12;
+
   // Collapse only truly tiny disconnected islands.
   for(let pass=0;pass<2;pass++){
     const byLabel=Array.from({length:candidates.length},()=>[]);
@@ -1799,7 +1807,7 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
       if(groups.length<=1)return;
       const pixelMeters=Math.max(.1,Number(mask.pixelSize)||.1);
       const pixelAreaM2=pixelMeters*pixelMeters;
-      const minExtraAreaM2=1.85; // ~20 ft²; secondary islands below this are usually segmentation fragments
+      const minExtraAreaM2=secondaryMinAreaM2;
       groups.slice(1).forEach(group=>{
         const xs=group.map(idx=>idx%mask.width),ys=group.map(idx=>Math.floor(idx/mask.width));
         const spanXpx=Math.max(...xs)-Math.min(...xs)+1,spanYpx=Math.max(...ys)-Math.min(...ys)+1;
@@ -1809,7 +1817,7 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
         const compactness=group.length/bboxPixels;
         // Preserve only physically meaningful secondary pieces of the same roof plane.
         const share=group.length/Math.max(1,indices.length);
-        const strongSecondary=areaM2>=minExtraAreaM2&&Math.min(spanXm,spanYm)>=1.0&&compactness>=.34&&share>=.12;
+        const strongSecondary=areaM2>=minExtraAreaM2&&Math.min(spanXm,spanYm)>=secondaryMinSpanM&&compactness>=secondaryMinCompactness&&share>=secondaryMinShare;
         if(strongSecondary)return;
         const votes=new Map();
         group.forEach(idx=>{
@@ -1835,7 +1843,7 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
 
   const facets=[];
   const pixelMeters=Math.max(.1,Number(mask.pixelSize)||.1);
-  const minSecondaryAreaM2=1.85;
+  const minSecondaryAreaM2=secondaryMinAreaM2;
   byLabel.forEach((indices,i)=>{
     if(!indices.length)return;
     const groups=connectedComponentsForLabel(indices,mask.width,mask.height);
@@ -1849,7 +1857,7 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
       const compactness=group.length/Math.max(1,spanXpx*spanYpx);
       const isPrimary=componentIndex===0;
       const share=group.length/Math.max(1,indices.length);
-      const physicalSecondary=isPrimary||(areaM2>=minSecondaryAreaM2&&Math.min(spanXm,spanYm)>=1.0&&compactness>=.34&&share>=.12);
+      const physicalSecondary=isPrimary||(areaM2>=minSecondaryAreaM2&&Math.min(spanXm,spanYm)>=secondaryMinSpanM&&compactness>=secondaryMinCompactness&&share>=secondaryMinShare);
       if(!physicalSecondary)return;
 
       const groupSet=new Set(group);
@@ -1893,7 +1901,10 @@ function detectRoofFacets(mask,component,dsm,solarSegments=[],rgb=null){
   // artificial facets while still allowing complex roofs to exceed the Google
   // segment count when the raster contains a real disconnected plane region.
   const primaryCount=facets.filter(f=>!f.smallFacet).length;
-  const facetCap=Math.min(64,Math.max(primaryCount,Math.round(primaryCount*1.45)+2));
+  const facetCap=Math.min(64,Math.max(
+    primaryCount,
+    detailPreservingRoof?Math.round(primaryCount*1.9)+4:Math.round(primaryCount*1.45)+2
+  ));
   const kept=facets.slice(0,facetCap);
   const coveredPixels=kept.reduce((sum,f)=>sum+(f.pixelCount||0),0);
   const roofLines=extractSharedRoofLines(mask,component,labels,candidates,dsm);
