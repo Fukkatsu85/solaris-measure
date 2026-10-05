@@ -337,11 +337,32 @@ function connectedRoofComponent(raster,width,height,startIndex){
 
 function expandRoofComponentByDsmContinuity(mask,component,dsm,marginMeters){
   const out=new Set(component);
-  const pixelMeters=Math.max(.05,Number(mask.pixelSize)||.1);
-  const rings=Math.max(0,Math.min(12,Math.round(Number(marginMeters||0)/pixelMeters)));
-  if(!rings)return out;
+  // Derive mask scale from the GeoTIFF footprint instead of trusting only the
+  // requested Solar pixel size. Google can return a different raster resolution.
+  const midLat=(Number(mask.bounds?.north||0)+Number(mask.bounds?.south||0))/2;
+  const widthMeters=Math.abs(Number(mask.bounds?.east||0)-Number(mask.bounds?.west||0))*111320*Math.max(.2,Math.cos(midLat*Math.PI/180));
+  const heightMeters=Math.abs(Number(mask.bounds?.north||0)-Number(mask.bounds?.south||0))*111320;
+  const inferredPixelMeters=median([
+    widthMeters/Math.max(1,mask.width),
+    heightMeters/Math.max(1,mask.height)
+  ].filter(v=>Number.isFinite(v)&&v>0));
+  const pixelMeters=Math.max(.05,Number(inferredPixelMeters)||Number(mask.pixelSize)||.1);
+  const rings=Math.max(0,Math.min(20,Math.ceil(Number(marginMeters||0)/pixelMeters)));
+  const diagnostics={
+    marginMeters:Number(marginMeters||0),
+    pixelMeters,
+    requestedRings:rings,
+    ringsCompleted:0,
+    consideredPixels:0,
+    acceptedPixels:0,
+    rejectedNoElevation:0,
+    rejectedHeight:0,
+    rejectedSlope:0
+  };
+  if(!rings)return {component:out,diagnostics};
 
   const zCache=new Map();
+  const slopeCache=new Map();
   const zAtMaskIndex=idx=>{
     if(zCache.has(idx))return zCache.get(idx);
     const x=idx%mask.width,y=Math.floor(idx/mask.width);
@@ -351,32 +372,61 @@ function expandRoofComponentByDsmContinuity(mask,component,dsm,marginMeters){
     const v=Number.isFinite(z)&&z>-1000?z:null;
     zCache.set(idx,v); return v;
   };
+  const slopeAt=idx=>{
+    if(slopeCache.has(idx))return slopeCache.get(idx);
+    const v=dsmSlopeAt(mask,dsm,idx);
+    slopeCache.set(idx,v); return v;
+  };
+  const neighbors=idx=>{
+    const x=idx%mask.width,y=Math.floor(idx/mask.width),ns=[];
+    if(x>0)ns.push(idx-1);if(x<mask.width-1)ns.push(idx+1);
+    if(y>0)ns.push(idx-mask.width);if(y<mask.height-1)ns.push(idx+mask.width);
+    return ns;
+  };
 
   let frontier=[...component];
-  const maxStepDz=.45; // neighboring roof pixels should remain locally continuous
   for(let ring=0;ring<rings;ring++){
-    const next=[];
-    const seenCandidate=new Set();
+    const candidateSet=new Set();
     for(const idx of frontier){
-      const x=idx%mask.width,y=Math.floor(idx/mask.width),z0=zAtMaskIndex(idx);
-      if(z0==null)continue;
-      const ns=[];
-      if(x>0)ns.push(idx-1);if(x<mask.width-1)ns.push(idx+1);
-      if(y>0)ns.push(idx-mask.width);if(y<mask.height-1)ns.push(idx+mask.width);
-      for(const n of ns){
-        if(out.has(n)||seenCandidate.has(n))continue;
-        seenCandidate.add(n);
-        const zn=zAtMaskIndex(n);
-        if(zn==null||Math.abs(zn-z0)>maxStepDz)continue;
-        const slope=dsmSlopeAt(mask,dsm,n);
-        if(!slope||slope.pitch>58)continue;
-        out.add(n);next.push(n);
-      }
+      for(const n of neighbors(idx))if(!out.has(n))candidateSet.add(n);
+    }
+    if(!candidateSet.size)break;
+
+    const next=[];
+    for(const n of candidateSet){
+      diagnostics.consideredPixels++;
+      const zn=zAtMaskIndex(n);
+      const sn=slopeAt(n);
+      if(zn==null||!sn){diagnostics.rejectedNoElevation++;continue;}
+      if(sn.pitch>58){diagnostics.rejectedSlope++;continue;}
+
+      // Compare against all already-accepted adjacent roof pixels, not whichever
+      // boundary pixel happened to encounter this candidate first. That removes
+      // an order-dependent rejection bug at corners and valleys.
+      const acceptedNeighbors=neighbors(n).filter(q=>out.has(q));
+      const neighborZ=acceptedNeighbors.map(zAtMaskIndex).filter(Number.isFinite);
+      if(!neighborZ.length){diagnostics.rejectedNoElevation++;continue;}
+      const zRef=median(neighborZ);
+      const neighborPitch=acceptedNeighbors.map(q=>slopeAt(q)?.pitch).filter(Number.isFinite);
+      const pitchRef=neighborPitch.length?median(neighborPitch):sn.pitch;
+
+      // Permit the vertical change expected from the local roof pitch plus a
+      // small DSM-noise allowance. This stays continuity-based rather than a
+      // blind geometric buffer.
+      const expectedDz=Math.tan(Math.min(55,Math.max(0,pitchRef))*Math.PI/180)*pixelMeters;
+      const maxStepDz=Math.max(.22,expectedDz*1.8+.16);
+      if(Math.abs(zn-zRef)>maxStepDz){diagnostics.rejectedHeight++;continue;}
+      if(Math.abs(sn.pitch-pitchRef)>22){diagnostics.rejectedSlope++;continue;}
+
+      out.add(n);next.push(n);diagnostics.acceptedPixels++;
     }
     if(!next.length)break;
     frontier=next;
+    diagnostics.ringsCompleted=ring+1;
   }
-  return out;
+  diagnostics.addedPixels=out.size-component.size;
+  diagnostics.finalPixelCount=out.size;
+  return {component:out,diagnostics};
 }
 
 function traceComponentBoundary(component,width,height){
@@ -1829,12 +1879,16 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
   // elevation/slope remains roof-like. These candidates are benchmarked only;
   // production area is unchanged until holdout regression proves a winner.
   const areaMarginCandidates={};
+  const areaMarginDiagnostics={};
   for(const marginMeters of [.25,.5,.75]){
+    const key=String(marginMeters);
     try{
-      const expanded=expandRoofComponentByDsmContinuity(mask,component,dsm,marginMeters);
+      const expandedResult=expandRoofComponentByDsmContinuity(mask,component,dsm,marginMeters);
+      const expanded=expandedResult.component;
+      areaMarginDiagnostics[key]={...expandedResult.diagnostics,status:"continuity-complete"};
       if(expanded.size>component.size){
         const m=analyzeDsmRoof(mask,expanded,dsm);
-        areaMarginCandidates[String(marginMeters)]={
+        areaMarginCandidates[key]={
           marginMeters,
           pixelCount:expanded.size,
           addedPixels:expanded.size-component.size,
@@ -1844,8 +1898,14 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
           rise12:m.rise12,
           coverage:m.coverage
         };
+        areaMarginDiagnostics[key].candidateAreaSqFt=m.slopedAreaSqFt;
+        areaMarginDiagnostics[key].status="candidate-generated";
+      }else{
+        areaMarginDiagnostics[key].status="no-continuous-pixels";
       }
-    }catch{}
+    }catch(err){
+      areaMarginDiagnostics[key]={marginMeters,status:"candidate-error",error:String(err?.message||err||"unknown")};
+    }
   }
 
   const rasterFacetResult=detectRoofFacets(mask,component,dsm,solarSegments,rgb);
@@ -1928,7 +1988,7 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
     rasterFacetResult.facets||[],
     rasterFacetResult.roofLines||[]
   );
-  return {outline,measurementOutlineCandidate,rasterLineMeasurements,areaMarginCandidates,rawCornerCount,quality:mask.quality||dsm.quality,model};
+  return {outline,measurementOutlineCandidate,rasterLineMeasurements,areaMarginCandidates,areaMarginDiagnostics,rawCornerCount,quality:mask.quality||dsm.quality,model};
 }
 
 
