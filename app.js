@@ -1474,6 +1474,25 @@ function physicalExteriorTotalsForReport(sm){
  }
  return used?{eave,rake}:null;
 }
+
+function confidenceInternalTotalsForReport(sm){
+ const roofLines=sm?.model?.roofLines;
+ if(!Array.isArray(roofLines))return null;
+ let hip=0,valley=0;
+ for(const l of roofLines){
+  const lenFt=Number(l?.length3dMeters||l?.lengthMeters||0)*3.280839895;
+  if(l?.type==="hip"){
+   const plane=Math.abs(Number(l?.planeStrength||0));
+   const crease=Math.abs(Number(l?.creaseStrength||0));
+   if(lenFt>=5&&plane>=.45&&crease>=.06)hip+=lenFt;
+  }else if(l?.type==="valley"){
+   const trace=Number(l?.traceStrength||0);
+   const crease=Math.abs(Number(l?.creaseStrength||0));
+   if(trace>=.15&&crease>=.10)valley+=lenFt;
+  }
+ }
+ return {hip,valley};
+}
 async function generateRoofReport(){
  const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{},panel=document.querySelector('#roof-report-panel'),content=document.querySelector('#roof-report-content'),state=document.querySelector('#roof-state'),topBtn=document.querySelector('#roof-takeoff'),inlineBtn=document.querySelector('#roof-report-inline');
  const projectId=saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
@@ -1502,6 +1521,8 @@ async function generateRoofReport(){
   const lines=roofLineTotals(d);
   const promotedRasterRidge=Number(sm?.measurementCandidates?.rasterLines?.ridgeFt);
   if(Number.isFinite(promotedRasterRidge)&&promotedRasterRidge>=0)lines.ridge=promotedRasterRidge;
+  const confidenceInternal=confidenceInternalTotalsForReport(sm);
+  if(confidenceInternal){lines.hip=confidenceInternal.hip;lines.valley=confidenceInternal.valley;}
   const physicalExterior=physicalExteriorTotalsForReport(sm);
   if(physicalExterior){lines.eave=physicalExterior.eave;lines.rake=physicalExterior.rake;}
   const roofEdgePerimFt=Number(lines.eave||0)+Number(lines.rake||0);
@@ -1719,10 +1740,10 @@ function renderRoofRegression(data){
    ['Roof-line error',fmtRegression(s.averageEdgeErrorPct,'%')],
    ['Boundary candidate',fmtRegression(s.averageDetailBoundaryEdgeErrorPct,'%')],
    ['Raster line candidate',fmtRegression(s.averageRasterLineCandidateEdgeErrorPct,'%')],
-   ['Production hybrid',fmtRegression(s.averageEdgeErrorPct,'%')],
+   ['Production confidence lines',fmtRegression(s.averageEdgeErrorPct,'%')],
    ['Topology internal candidate',fmtRegression(s.averageTopologyInternalEdgeErrorPct,'%')],
-   ['Hip confidence candidate',fmtRegression(s.averageHipConfidenceEdgeErrorPct,'%')],
-   ['Hip + valley candidate',fmtRegression(s.averageInternalConfidenceEdgeErrorPct,'%')],
+   ['Hip-only candidate',fmtRegression(s.averageHipConfidenceEdgeErrorPct,'%')],
+   ['Promoted hip + valley',fmtRegression(s.averageInternalConfidenceEdgeErrorPct,'%')],
    ['Line v5 restored',(s.lineEngineV5RestoredCases??0)+' / '+(s.geometryProcessedCases??s.processedCases??0)]
   ];
   summary.innerHTML=cards.map(([a,b])=>'<div class="metric"><span>'+escRoof(a)+'</span><strong>'+escRoof(b)+'</strong></div>').join('');
