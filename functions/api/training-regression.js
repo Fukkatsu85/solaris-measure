@@ -145,6 +145,14 @@ function currentMetrics(sm,outline,profileOverrides){
  const footprintPitchArea=(footprint&&avgPitch!=null)
    ?footprint*Math.sqrt(1+Math.pow(avgPitch/12,2))
    :null;
+ // Shadow candidate selected from deterministic five-fold validation:
+ // when Google and DSM agree reasonably well, their midpoint is more stable;
+ // when DSM is >20% above Google, the DSM surface better captures the large
+ // under-measured roofs. This remains benchmark-only until it clears the gate.
+ const dsmGoogleRatio=(googleWhole&&modelArea)?modelArea/googleWhole:null;
+ const disagreementBlendArea=(googleWhole&&modelArea)
+   ?(dsmGoogleRatio>=1.20?modelArea:(googleWhole+modelArea)/2)
+   :null;
  const areaCandidates=[
    googleAreaSane?googleWhole:null,
    modelArea!=null&&modelArea>0?modelArea:null,
@@ -207,6 +215,7 @@ function currentMetrics(sm,outline,profileOverrides){
   areaAuthority:areaCandidates.length>=2?"consensus-median":(googleAreaSane?"google-whole-roof":"dsm-surface-area"),
   googleAreaRejected:googleWhole!=null&&!googleAreaSane,
   footprintPitchAreaFt2:footprintPitchArea,
+  disagreementBlendAreaFt2:disagreementBlendArea,
   areaMarginCandidate25Ft2:areaMargin25,
   areaMarginCandidate50Ft2:areaMargin50,
   areaMarginCandidate75Ft2:areaMargin75,
@@ -242,7 +251,8 @@ function score(cur,ref){
   areaMargin75:pct(cur.areaMarginCandidate75Ft2,ref.slopedAreaFt2),
   edgeSnapConservative:pct(cur.edgeSnapConservativeAreaFt2,ref.slopedAreaFt2),
   edgeSnapBalanced:pct(cur.edgeSnapBalancedAreaFt2,ref.slopedAreaFt2),
-  edgeSnapRgb:pct(cur.edgeSnapRgbAreaFt2,ref.slopedAreaFt2)
+  edgeSnapRgb:pct(cur.edgeSnapRgbAreaFt2,ref.slopedAreaFt2),
+  disagreementBlend:pct(cur.disagreementBlendAreaFt2,ref.slopedAreaFt2)
  };
  const edgeKeys=(ref.ridgeHipFt!=null?["ridgeHipFt"]:["ridgeFt","hipFt"]).concat(["valleyFt","eaveFt","rakeFt"]);
  // Provider perimeter is normally the same exterior roof edge already represented
@@ -413,6 +423,7 @@ export async function onRequestGet({env}){
   edgeSnapConservativeCases:geometryRows.filter(r=>r.current?.edgeSnapConservativeAreaFt2!=null).length,
   edgeSnapBalancedCases:geometryRows.filter(r=>r.current?.edgeSnapBalancedAreaFt2!=null).length,
   edgeSnapRgbCases:geometryRows.filter(r=>r.current?.edgeSnapRgbAreaFt2!=null).length,
+  disagreementBlendCases:geometryRows.filter(r=>r.current?.disagreementBlendAreaFt2!=null).length,
   averageScore:mean(scored.map(r=>r.score.overall)),medianScore:median(scored.map(r=>r.score.overall)),
   averageAreaErrorPct:av("area"),
   averageAreaMargin25ErrorPct:av("areaMargin25"),
@@ -421,6 +432,7 @@ export async function onRequestGet({env}){
   averageEdgeSnapConservativeErrorPct:av("edgeSnapConservative"),
   averageEdgeSnapBalancedErrorPct:av("edgeSnapBalanced"),
   averageEdgeSnapRgbErrorPct:av("edgeSnapRgb"),
+  averageDisagreementBlendErrorPct:av("disagreementBlend"),
   averageFacetErrorPct:av("facets"),averageEdgeErrorPct:av("edges"),
   averageDetailBoundaryEdgeErrorPct:av("detailBoundaryEdges"),
   averageRasterLineCandidateEdgeErrorPct:av("rasterLineCandidateEdges"),
