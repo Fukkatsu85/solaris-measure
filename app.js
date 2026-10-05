@@ -1575,6 +1575,12 @@ async function generateRoofReport(){
   const areaConfidence=(Number.isFinite(areaSourceSpreadPct)&&areaSourceSpreadPct<=10&&( !Number.isFinite(dsmSupport)||dsmSupport>=.85))
     ?'High'
     :(Number.isFinite(areaSourceSpreadPct)&&areaSourceSpreadPct<=20?'Moderate':'Review');
+  const facetCoverage=Number(sm?.model?.facetCoverage);
+  const lineEngineCurrent=sm?.model?.lineEngineVersion==='plane-dsm-trace-v5-restored';
+  const reportNeedsReview=areaConfidence==='Review'
+    ||(Number.isFinite(facetCoverage)&&facetCoverage<.80)
+    ||!lineEngineCurrent;
+  const reportConfidence=reportNeedsReview?'Review before ordering':(areaConfidence==='High'?'High':'Moderate');
   const reportFacetCount=Number(dsmFacets.length||facets.length||d.topology?.faces?.length||0);
   const waste=[10,12,15].map(w=>({w,area:sloped*(1+w/100),sq:squares*(1+w/100)}));
   const facetRows=(dsmFacets.length?dsmFacets:facets).map((p,i)=>{
@@ -1587,6 +1593,7 @@ async function generateRoofReport(){
      '<tr><th>Solaris production area</th><td>'+Math.round(sloped).toLocaleString()+' ft²</td></tr>'+
      '<tr><th>Area engine</th><td>Source disagreement blend v1</td></tr>'+
      '<tr><th>Area confidence</th><td>'+areaConfidence+(Number.isFinite(areaSourceSpreadPct)?' · source spread '+areaSourceSpreadPct.toFixed(1)+'%':'')+'</td></tr>'+
+     '<tr><th>Report confidence</th><td>'+reportConfidence+'</td></tr>'+
      '<tr><th>Google whole-roof area</th><td>'+(Number.isFinite(Number(sm.googleWholeRoofAreaFt2))?Math.round(Number(sm.googleWholeRoofAreaFt2)).toLocaleString()+' ft²':'—')+'</td></tr>'+
      '<tr><th>DSM surface area</th><td>'+Math.round(Number(sm.model?.slopedAreaSqFt||0)).toLocaleString()+' ft²</td></tr>'+
      '<tr><th>Footprint × pitch area</th><td>'+(footprintPitchArea>0?Math.round(footprintPitchArea).toLocaleString()+' ft²':'—')+'</td></tr>'+
@@ -1598,7 +1605,7 @@ async function generateRoofReport(){
      '<tr><th>Ridge</th><td>'+fmtHybridFt(lines.ridge)+'</td></tr>'+
      '<tr><th>Hip</th><td>'+fmtHybridFt(lines.hip)+'</td></tr>'+
      '<tr><th>Valley</th><td>'+fmtHybridFt(lines.valley)+'</td></tr>'+
-     '</tbody></table><p class="roof-report-note">Area uses the holdout-tested Google/DSM disagreement engine. Confidence reflects agreement between independent area sources; roofs marked Review should be checked before material ordering. LiDAR is retained as an independent 3D cross-check.</p>')
+     '</tbody></table><p class="roof-report-note">Area uses the holdout-tested Google/DSM disagreement engine. Report confidence also checks area-source agreement, DSM facet coverage, and the current production line engine. Roofs marked Review before ordering should not be used for material ordering until visually checked. LiDAR is retained as an independent 3D cross-check.</p>')
    :'';
   const validationBlock=v.available
    ?('<h2>Hybrid Validation</h2><table class="roof-report-table"><tbody>'+
