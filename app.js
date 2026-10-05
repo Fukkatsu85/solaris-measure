@@ -1822,7 +1822,7 @@ async function generateRoofReport(){
   const sm=d.solarModel||null,dm=sm?.measurements||{},dsmFacets=sm?.model?.facets||[];
   if(sm?.model?.facets?.length){
    try{
-    const topo=await import('/assets/js/roof-topology.js?v=20261005-facet-partition1');
+    const topo=await import('/assets/js/roof-topology.js?v=20261005-facet-adjacency1');
     let profileOverrides={};
     try{
      const cr=await fetch('/api/training-topology-optimizer',{cache:'no-store'}),cd=await cr.json().catch(()=>({}));
@@ -2160,6 +2160,7 @@ function renderRoofRegression(data){
    ['Topology area err',fmtRegression(s.averageTopologyFaceAreaErrorPct,'%')],
    ['Facet-partition topology',fmtRegression(s.averageFacetPartitionFaceErrorPct,'%')],
    ['Facet-partition area',fmtRegression(s.averageFacetPartitionAreaErrorPct,'%')],
+   ['Facet-adjacency lines',fmtRegression(s.averageFacetAdjacencyEdgeErrorPct,'%')],
    ['Roof-line error · production',fmtRegression(s.averageEdgeErrorPct,'%')],
    ['Boundary candidate',fmtRegression(s.averageDetailBoundaryEdgeErrorPct,'%')],
    ['Raster line candidate',fmtRegression(s.averageRasterLineCandidateEdgeErrorPct,'%')],
