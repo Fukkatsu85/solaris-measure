@@ -421,7 +421,33 @@ function extractFaces(nodes,edges,outerPoly){
     const canon=canonicalCycle(ids),key=canon.join("-");
     if(!unique.has(key))unique.set(key,canon);
   }
-  return [...unique.values()];
+
+  // A planar traversal yields the unbounded exterior face as well as the true
+  // roof faces. Its vertex cycle follows essentially the whole perimeter, and
+  // its centroid can still land inside a concave roof, so centroid filtering is
+  // not sufficient. If one extracted face covers nearly the entire outer roof
+  // while smaller faces also exist, discard that enclosing exterior cycle.
+  let bounded=[...unique.values()];
+  if(bounded.length>1){
+    const outerArea=Math.abs(polygonArea(outerPoly));
+    const measured=bounded.map(ids=>({
+      ids,
+      area:Math.abs(polygonArea(ids.map(id=>nodes[id])))
+    }));
+    const enclosing=measured
+      .filter(x=>outerArea>0&&x.area/outerArea>=.90)
+      .sort((a,b)=>b.area-a.area)[0];
+    if(enclosing){
+      const remaining=measured.filter(x=>x!==enclosing);
+      const remainingArea=remaining.reduce((s,x)=>s+x.area,0);
+      // Only remove it when the remaining bounded faces already account for a
+      // plausible roof partition. This avoids deleting a legitimate single face.
+      if(remaining.length&&remainingArea/outerArea>=.72&&remainingArea/outerArea<=1.28){
+        bounded=remaining.map(x=>x.ids);
+      }
+    }
+  }
+  return bounded;
 }
 function faceCentroid(face,nodes){
   const poly=face.map(id=>nodes[id]);
