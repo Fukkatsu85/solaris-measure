@@ -69,6 +69,10 @@ function currentMetrics(sm,outline,profileOverrides){
  ].filter(Number.isFinite);
  const slopedArea=areaCandidates.length?median(areaCandidates):(facetAreas.reduce((a,b)=>a+b,0));
  const edges=edgeTotals(topology,sm);
+ const promotedRasterRidge=num(sm?.measurementCandidates?.rasterLines?.ridgeFt);
+ if(promotedRasterRidge!=null&&promotedRasterRidge>=0){
+  edges.ridgeFt=promotedRasterRidge;
+ }
  const detailBoundary=sm?.measurementCandidates?.detailBoundary||null;
  const detailEave=num(detailBoundary?.eaveFt);
  const detailRake=num(detailBoundary?.rakeFt);
@@ -105,6 +109,7 @@ function currentMetrics(sm,outline,profileOverrides){
   facetEngineVersion:sm?.model?.facetEngineVersion||null,
   lineEngineVersion:sm?.model?.lineEngineVersion||null,
   geometryMode:sm?.model?.geometryMode||null,
+  reportLineEngineVersion:promotedRasterRidge!=null?"hybrid-raster-ridge-v1":"topology-v5-fallback",
   planeIntersectionDiagnostics:sm?.model?.planeIntersectionDiagnostics||null
  };
 }
