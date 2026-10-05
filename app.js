@@ -1722,6 +1722,7 @@ function renderRoofRegression(data){
    ['Production hybrid',fmtRegression(s.averageEdgeErrorPct,'%')],
    ['Topology internal candidate',fmtRegression(s.averageTopologyInternalEdgeErrorPct,'%')],
    ['Hip confidence candidate',fmtRegression(s.averageHipConfidenceEdgeErrorPct,'%')],
+   ['Hip + valley candidate',fmtRegression(s.averageInternalConfidenceEdgeErrorPct,'%')],
    ['Line v5 restored',(s.lineEngineV5RestoredCases??0)+' / '+(s.geometryProcessedCases??s.processedCases??0)]
   ];
   summary.innerHTML=cards.map(([a,b])=>'<div class="metric"><span>'+escRoof(a)+'</span><strong>'+escRoof(b)+'</strong></div>').join('');
