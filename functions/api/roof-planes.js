@@ -23,6 +23,7 @@ export async function onRequestPost({request,env}){
   rmse:+Number(p.rmse||0).toFixed(3),
   originX:Number.isFinite(Number(p.originX))?Number(p.originX):null,
   originY:Number.isFinite(Number(p.originY))?Number(p.originY):null,
+  mercatorGroundScale:Number.isFinite(Number(p.mercatorGroundScale))?Number(p.mercatorGroundScale):null,
   coefficients:{a:+Number(p.coefficients?.a||0).toFixed(8),b:+Number(p.coefficients?.b||0).toFixed(8),c:+Number(p.coefficients?.c||0).toFixed(5)},
   bounds:p.bounds||null,
   polygon:Array.isArray(p.polygon)?p.polygon.map(q=>({x:+Number(q.x).toFixed(7),y:+Number(q.y).toFixed(7)})):[],
