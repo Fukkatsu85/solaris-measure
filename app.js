@@ -2326,9 +2326,27 @@ document.querySelector('#optimize-roof-topology')?.addEventListener('click',asyn
 });
 
 document.querySelector('#run-roof-regression')?.addEventListener('click',async()=>{
- const btn=document.querySelector('#run-roof-regression'),status=document.querySelector('#roof-regression-status');
- const old=btn?.textContent;if(btn){btn.disabled=true;btn.textContent='Running 39 cases…'}if(status)status.textContent='Running the current solver against the verified training corpus…';
+ const btn=document.querySelector('#run-roof-regression'),status=document.querySelector('#roof-regression-status'),optStatus=document.querySelector('#roof-optimizer-status');
+ const old=btn?.textContent;if(btn){btn.disabled=true;btn.textContent='Running 40 cases…'}if(status)status.textContent='Checking holdout topology optimization before regression…';
  try{
+  // Keep the topology optimizer synchronized with the current corpus. It is
+  // deterministic and promotes a profile override only when its holdout set
+  // improves enough without materially regressing facets or lines.
+  let optimizerCurrent=false;
+  try{
+   const cr=await fetch('/api/training-topology-optimizer',{cache:'no-store'}),cd=await cr.json().catch(()=>({}));
+   const cfg=cd?.config||null;
+   optimizerCurrent=Boolean(cfg?.version==='topology-opt-3-holdout'&&cfg?.scopePolicy==='primary-building-only'&&cfg?.validationPolicy==='deterministic-profile-holdout'&&Number(cfg?.trainingCases||0)>=26);
+  }catch{}
+  if(!optimizerCurrent){
+   if(status)status.textContent='Topology optimizer is missing or stale. Running deterministic holdout optimization first…';
+   const or=await fetch('/api/training-topology-optimizer',{method:'POST',headers:{'content-type':'application/json'}});
+   const od=await or.json().catch(()=>({}));
+   if(!or.ok||!od.ok)throw new Error(od.error||'Topology optimization failed.');
+   const promoted=(od.config?.results||[]).filter(x=>x.promoted).length;
+   if(optStatus)optStatus.textContent='Automatic topology optimization complete · '+promoted+' profile'+(promoted===1?'':'s')+' promoted after holdout validation.';
+  }
+  if(status)status.textContent='Running the current solver against the verified 40-case corpus…';
   const r=await fetch('/api/training-regression',{cache:'no-store'}),d=await r.json().catch(()=>({}));
   if(!r.ok||!d.ok)throw new Error(d.error||'Regression runner failed.');
   renderRoofRegression(d);
