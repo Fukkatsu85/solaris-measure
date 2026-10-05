@@ -134,12 +134,20 @@ export async function onRequestPost({env}){
    const validationImprovement=Number(trainBest.validationScore||0)-Number(baseline?.validationScore||0);
    const facetRegression=Number(trainBest.validationFacetErrorPct||0)-Number(baseline?.validationFacetErrorPct||0);
    const edgeRegression=Number(trainBest.validationEdgeErrorPct||0)-Number(baseline?.validationEdgeErrorPct||0);
-   const passesHoldout=!validation.length||(validationImprovement>=1.5&&facetRegression<=8&&edgeRegression<=8);
+   // Production promotion requires an actual holdout set. Profiles with
+   // fewer than 2 validation roofs are diagnostic-only and cannot self-promote.
+   const hasRealHoldout=validation.length>=2;
+   const passesHoldout=hasRealHoldout
+     &&validationImprovement>=1.5
+     &&facetRegression<=8
+     &&edgeRegression<=8;
    if(passesHoldout){profileOverrides[profile]=trainBest.override;promoted=trainBest}
   }
   results.push({
    profile,cases:items.length,trainCases:train.length,validationCases:validation.length,
    best:promoted||baseline,trainBest,baseline,
+   promotionEligible:validation.length>=2,
+   promotionBlockedReason:validation.length>=2?null:"insufficient-holdout",
    promoted:Boolean(promoted),candidates:ranked
   });
  }
