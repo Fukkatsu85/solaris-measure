@@ -473,12 +473,19 @@ export function buildRoofTopology(solarModel,options={}){
   const facesRaw=solved.faces;
   const faces=facesRaw.map((ids,i)=>{
     const c=faceCentroid(ids,graph.nodes),meta=nearestFacetMeta(c,facets,F)||{};
+    const poly=ids.map(id=>graph.nodes[id]);
+    const flatAreaM2=Math.abs(polygonArea(poly));
+    const pitchDegrees=Number(meta.pitchDegrees||0);
+    const flatAreaSqFt=flatAreaM2*10.7639104167;
+    const slopedAreaSqFt=flatAreaSqFt/Math.max(.35,Math.cos(rad(Math.max(0,Math.min(55,pitchDegrees)))));
     return {
       id:i+1,vertexIds:ids,
       rise12:Number(meta.rise12||0),
-      pitchDegrees:Number(meta.pitchDegrees||0),
-      flatAreaSqFt:Number(meta.flatAreaSqFt||0),
-      slopedAreaSqFt:Number(meta.slopedAreaSqFt||0)
+      pitchDegrees,
+      flatAreaSqFt,
+      slopedAreaSqFt,
+      sourceFacetAreaSqFt:Number(meta.slopedAreaSqFt||0),
+      microFace:slopedAreaSqFt<28
     };
   });
 
