@@ -429,6 +429,113 @@ function expandRoofComponentByDsmContinuity(mask,component,dsm,marginMeters){
   return {component:out,diagnostics};
 }
 
+
+function estimatePhysicalEdgeSnapAreas(mask,component,dsm,rgb,basePitchDegrees=0){
+  const midLat=(Number(mask.bounds?.north||0)+Number(mask.bounds?.south||0))/2;
+  const widthMeters=Math.abs(Number(mask.bounds?.east||0)-Number(mask.bounds?.west||0))*111320*Math.max(.2,Math.cos(midLat*Math.PI/180));
+  const heightMeters=Math.abs(Number(mask.bounds?.north||0)-Number(mask.bounds?.south||0))*111320;
+  const pixelMeters=Math.max(.05,median([
+    widthMeters/Math.max(1,mask.width),
+    heightMeters/Math.max(1,mask.height)
+  ].filter(v=>Number.isFinite(v)&&v>0))||Number(mask.pixelSize)||.1);
+
+  const has=(x,y)=>x>=0&&x<mask.width&&y>=0&&y<mask.height&&component.has(y*mask.width+x);
+  const boundary=[];
+  component.forEach(idx=>{
+    const x=idx%mask.width,y=Math.floor(idx/mask.width);
+    if(!has(x-1,y)||!has(x+1,y)||!has(x,y-1)||!has(x,y+1))boundary.push(idx);
+  });
+  if(boundary.length<20)return null;
+
+  // Sample at roughly 0.4 m spacing so one long eave does not dominate solely
+  // because the Solar raster happens to be high-resolution.
+  const stride=Math.max(1,Math.round(.4/pixelMeters));
+  const sampled=boundary.filter((_,i)=>i%stride===0);
+  const profiles={
+    conservative:{movePenalty:.52,rgbWeight:.12,minGain:.12,maxOut:.35,maxIn:.25},
+    balanced:{movePenalty:.30,rgbWeight:.20,minGain:.08,maxOut:.60,maxIn:.40},
+    rgb:{movePenalty:.25,rgbWeight:.45,minGain:.08,maxOut:.60,maxIn:.40}
+  };
+  const acc=Object.fromEntries(Object.keys(profiles).map(k=>[k,{weightedShift:0,weight:0,moved:0,samples:0,positive:0,negative:0}]));
+
+  const sampleAtMaskXY=(x,y)=>{
+    const ll=rasterLatLng(mask,x+.5,y+.5);
+    const p=rasterPixelForLatLng(dsm,ll.lat,ll.lng);
+    const z=Number(dsm.raster[p.y*dsm.width+p.x]);
+    if(!Number.isFinite(z)||z<=-1000)return null;
+    const fakeIdx=Math.max(0,Math.min(mask.width*mask.height-1,Math.round(y)*mask.width+Math.round(x)));
+    const slope=dsmSlopeAt(mask,dsm,fakeIdx);
+    return {ll,z,pitch:Number(slope?.pitch),rgb:rgbEdgeStrength(rgb,ll.lat,ll.lng)};
+  };
+
+  for(const idx of sampled){
+    const x=idx%mask.width,y=Math.floor(idx/mask.width);
+    // Outward normal from missing cardinal neighbors.
+    let nx=0,ny=0;
+    if(!has(x-1,y))nx-=1;if(!has(x+1,y))nx+=1;
+    if(!has(x,y-1))ny-=1;if(!has(x,y+1))ny+=1;
+    const mag=Math.hypot(nx,ny);if(!mag)continue;
+    nx/=mag;ny/=mag;
+
+    // Score physical discontinuities at signed offsets around Google's edge.
+    const candidates=[];
+    for(let o=-4;o<=6;o++){
+      const a=sampleAtMaskXY(x+nx*(o-.55),y+ny*(o-.55));
+      const b=sampleAtMaskXY(x+nx*(o+.55),y+ny*(o+.55));
+      if(!a||!b)continue;
+      const dz=Math.min(1,Math.abs(b.z-a.z)/.65);
+      const pa=Number.isFinite(a.pitch)?a.pitch:basePitchDegrees;
+      const pb=Number.isFinite(b.pitch)?b.pitch:basePitchDegrees;
+      const dp=Math.min(1,Math.abs(pb-pa)/24);
+      const rgbEdge=Math.max(a.rgb||0,b.rgb||0);
+      const signedMeters=o*pixelMeters;
+      candidates.push({o,signedMeters,dz,dp,rgbEdge,physical:.62*dz+.38*dp});
+    }
+    if(!candidates.length)continue;
+
+    for(const [name,p] of Object.entries(profiles)){
+      const allowed=candidates.filter(c=>c.signedMeters<=p.maxOut&&c.signedMeters>=-p.maxIn);
+      if(!allowed.length)continue;
+      const score=c=>c.physical+p.rgbWeight*c.rgbEdge-p.movePenalty*Math.abs(c.signedMeters)/Math.max(.1,p.maxOut);
+      const zero=allowed.reduce((best,c)=>Math.abs(c.signedMeters)<Math.abs(best.signedMeters)?c:best,allowed[0]);
+      let best=allowed.reduce((a,b)=>score(b)>score(a)?b:a,allowed[0]);
+      const gain=score(best)-score(zero);
+      if(gain<p.minGain)best=zero;
+      const confidence=Math.max(.05,Math.min(1,best.physical+p.rgbWeight*best.rgbEdge));
+      const a=acc[name];
+      a.samples++;
+      a.weightedShift+=best.signedMeters*confidence;
+      a.weight+=confidence;
+      if(Math.abs(best.signedMeters)>.04){a.moved++;if(best.signedMeters>0)a.positive++;else a.negative++;}
+    }
+  }
+
+  const roofPitch=Math.max(0,Math.min(55,Number(basePitchDegrees)||0));
+  const slopeFactor=1/Math.max(.35,Math.cos(roofPitch*Math.PI/180));
+  const sampleSegmentMeters=pixelMeters*stride;
+  const result={};
+  for(const [name,a] of Object.entries(acc)){
+    if(a.samples<8||!a.weight)continue;
+    const meanShift=a.weightedShift/a.weight;
+    // Convert the mean signed boundary displacement into a first-order surface
+    // area correction. This can be positive or negative unlike the old buffer.
+    const estimatedPerimeterMeters=sampled.length*sampleSegmentMeters;
+    const planAdjustmentM2=estimatedPerimeterMeters*meanShift;
+    const areaAdjustmentSqFt=planAdjustmentM2*slopeFactor*SQ_METERS_TO_SQ_FEET;
+    result[name]={
+      meanShiftMeters:meanShift,
+      areaAdjustmentSqFt,
+      estimatedPerimeterMeters,
+      samples:a.samples,
+      movedSamples:a.moved,
+      outwardSamples:a.positive,
+      inwardSamples:a.negative,
+      slopeFactor
+    };
+  }
+  return Object.keys(result).length?result:null;
+}
+
 function traceComponentBoundary(component,width,height){
   if(!component.size)return [];
   const edges=[];
@@ -1874,6 +1981,11 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
 
   const model=analyzeDsmRoof(mask,component,dsm);
 
+  // Signed physical-edge shadow experiment. Unlike the rejected outward-only
+  // buffer, this looks for DSM/RGB discontinuities and can move area inward or
+  // outward. Production area remains unchanged.
+  const areaEdgeSnapCandidates=estimatePhysicalEdgeSnapAreas(mask,component,dsm,rgb,model.pitchDegrees)||{};
+
   // Shadow area experiment: Google Solar's mask can occasionally stop inside a
   // visually continuous roof edge. Grow only into neighboring DSM pixels whose
   // elevation/slope remains roof-like. These candidates are benchmarked only;
@@ -1988,7 +2100,7 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
     rasterFacetResult.facets||[],
     rasterFacetResult.roofLines||[]
   );
-  return {outline,measurementOutlineCandidate,rasterLineMeasurements,areaMarginCandidates,areaMarginDiagnostics,rawCornerCount,quality:mask.quality||dsm.quality,model};
+  return {outline,measurementOutlineCandidate,rasterLineMeasurements,areaMarginCandidates,areaMarginDiagnostics,areaEdgeSnapCandidates,rawCornerCount,quality:mask.quality||dsm.quality,model};
 }
 
 
