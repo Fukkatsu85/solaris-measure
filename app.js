@@ -3741,6 +3741,15 @@ async function restoreRoofSolarModel(){
    }
  });
  const overlay=$('#manual-roof-overlay');
+ const stage=$('#manual-roof-stage');
+ stage?.addEventListener('contextmenu',e=>{
+   if(!state.outline.length)return;
+   const svg=$('#manual-roof-overlay'),r=svg?.getBoundingClientRect();if(!r)return;
+   const p={x:clamp((e.clientX-r.left)/r.width),y:clamp((e.clientY-r.top)/r.height)};
+   let near=false;
+   state.outline.forEach(q=>{if(dist(p,q)<=.008)near=true;});
+   if(near)e.preventDefault();
+ },true);
  const deleteOutlineVertexByIndex=bi=>{
    const status=$('#manual-roof-outline-status');
    if(!Number.isInteger(bi)||bi<0||bi>=state.outline.length)return false;
@@ -3760,11 +3769,23 @@ async function restoreRoofSolarModel(){
    return true;
  };
  overlay?.addEventListener('contextmenu',e=>{
-   const vertex=e.target?.closest?.('[data-outline-point]');
-   if(!vertex)return;
+   // SVG context-menu targeting is inconsistent across browsers, especially
+   // after CSS transforms/zoom. Intercept the overlay itself and resolve the
+   // nearest perimeter vertex from click coordinates.
    e.preventDefault();e.stopPropagation();
-   const bi=Number(vertex.dataset.outlinePoint);
-   deleteOutlineVertexByIndex(bi);
+   const p=svgPoint(e);
+   let bi=-1,bd=.008;
+   state.outline.forEach((q,i)=>{
+     const d=dist(p,q);
+     if(d<bd){bd=d;bi=i;}
+   });
+   if(bi>=0){
+     deleteOutlineVertexByIndex(bi);
+   }else{
+     const s=$('#manual-roof-outline-status');
+     if(s)s.textContent='Right-click directly on a perimeter vertex dot to delete it.';
+   }
+   return false;
  });
  overlay?.addEventListener('pointerdown',e=>{
    // Geometry editing is left-click only. Right-click is reserved for
