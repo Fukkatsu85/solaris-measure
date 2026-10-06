@@ -3378,6 +3378,7 @@ async function restoreRoofSolarModel(){
      state.autoFacetData=(d.solarModel?.model?.facets||[]).map((f,i)=>{
        const outline=(f.outline||[]).map(toNorm);
        return {id:i+1,z0:Number(f.z0),rise12:Number(f.rise12),azimuthDegrees:Number(f.azimuthDegrees),
+         center:f.center?toNorm(f.center):centroid(outline),gradientEast:Number(f.gradientEast||0),gradientNorth:Number(f.gradientNorth||0),
          outline,autoBaseOutline:outline.map(p=>({...p})),area:Number(f.slopedAreaSqFt||f.flatAreaSqFt||0)};
      }).filter(f=>f.outline.length>=3);
      const zFacets=state.autoFacetData.filter(f=>Number.isFinite(f.z0)).sort((a,b)=>a.z0-b.z0);
@@ -3435,7 +3436,8 @@ async function restoreRoofSolarModel(){
          return {type:l.type,a:{...a},b:{...b},autoBaseA:{...a},autoBaseB:{...b},confidence:Number(l.creaseStrength||l.traceSupport||l.elevationSeparationMeters||0),elevationSeparationMeters:Number(l.elevationSeparationMeters||0)};
        });
      const detectedRoofLines=state.autoStructuralCandidates
-       .filter(l=>['ridge','elevation_break'].includes(l.type))
+       .filter(l=>l.type==='ridge')
+       .filter(l=>dist(l.a,l.b)>=.018)
        .map(l=>({...l,autoDetected:true}));
      state.lines=detectedRoofLines;
      state.outlineScale=1;state.outlineRotation=0;state.outlineOffsetX=0;state.outlineOffsetY=0;
@@ -3765,6 +3767,79 @@ async function restoreRoofSolarModel(){
    });
    return inside||best;
  };
+ const planeHeightAtNorm=(facet,p)=>{
+   if(!facet||!Number.isFinite(Number(facet.z0)))return NaN;
+   const c=facet.center||centroid(facet.outline||[]),m=metersPerNorm();
+   const east=(p.x-c.x)*m,north=-(p.y-c.y)*m;
+   return Number(facet.z0)-Number(facet.gradientEast||0)*east-Number(facet.gradientNorth||0)*north;
+ };
+ const facetContaining=p=>{
+   const inside=(state.autoFacetData||[]).filter(f=>(f.outline||[]).length>=3&&pointInPoly(p,f.outline));
+   if(inside.length)return inside.sort((a,b)=>dist(centroid(a.outline),p)-dist(centroid(b.outline),p))[0];
+   return autoFacetAtPoint(p);
+ };
+ const ridgePhysicalElevation=l=>{
+   const mid={x:(l.a.x+l.b.x)/2,y:(l.a.y+l.b.y)/2},dx=l.b.x-l.a.x,dy=l.b.y-l.a.y,len=Math.hypot(dx,dy)||1;
+   const nx=-dy/len,ny=dx/len,off=Math.min(.014,Math.max(.006,len*.08));
+   const p1={x:mid.x+nx*off,y:mid.y+ny*off},p2={x:mid.x-nx*off,y:mid.y-ny*off};
+   const f1=facetContaining(p1),f2=facetContaining(p2),heights=[];
+   for(const f of [f1,f2]){
+     const z=planeHeightAtNorm(f,mid);if(Number.isFinite(z))heights.push(z);
+   }
+   if(!heights.length){
+     const f=facetContaining(mid),z=planeHeightAtNorm(f,mid);if(Number.isFinite(z))heights.push(z);
+   }
+   if(!heights.length)return NaN;
+   heights.sort((a,b)=>a-b);
+   return heights.length===2?(heights[0]+heights[1])/2:heights[Math.floor(heights.length/2)];
+ };
+ const closestRidgeEnds=(a,b)=>{
+   const pairs=[['a','a'],['a','b'],['b','a'],['b','b']].map(([ea,eb])=>({ea,eb,p:a[ea],q:b[eb],d:dist(a[ea],b[eb])}));
+   return pairs.sort((x,y)=>x.d-y.d)[0];
+ };
+ const extendLineToPerimeterOnly=(origin,angleDeg)=>{
+   const r=angleDeg*Math.PI/180,dir={x:Math.cos(r),y:Math.sin(r)},hits=[];
+   for(const side of [-1,1]){
+     const d={x:dir.x*side,y:dir.y*side};
+     for(let i=0;i<state.outline.length;i++){
+       const h=raySegmentHit(origin,d,state.outline[i],state.outline[(i+1)%state.outline.length]);
+       if(h&&h.t>.002)hits.push({...h,side});
+     }
+   }
+   const neg=hits.filter(h=>h.side===-1).sort((a,b)=>a.t-b.t)[0],pos=hits.filter(h=>h.side===1).sort((a,b)=>a.t-b.t)[0];
+   return neg&&pos?{a:{x:neg.x,y:neg.y},b:{x:pos.x,y:pos.y}}:null;
+ };
+ const addCleanRidgeSystemBreaks=()=>{
+   const ridges=state.lines.filter(l=>l.type==='ridge'&&dist(l.a,l.b)>=.03);
+   let added=0;
+   for(let i=0;i<ridges.length;i++)for(let j=i+1;j<ridges.length;j++){
+     const r1=ridges[i],r2=ridges[j],ang1=lineAngle(r1.a,r1.b),ang2=lineAngle(r2.a,r2.b);
+     if(angleDiff(ang1,ang2)>14)continue;
+     const ends=closestRidgeEnds(r1,r2);
+     if(!ends||ends.d>.16)continue;
+     const z1=ridgePhysicalElevation(r1),z2=ridgePhysicalElevation(r2);
+     if(!Number.isFinite(z1)||!Number.isFinite(z2)||Math.abs(z1-z2)<.55)continue;
+
+     r1.roofElevationZ=z1;r2.roofElevationZ=z2;
+     r1.roofSystem='ridge-system-'+i+'-'+Math.round(z1*10);
+     r2.roofSystem='ridge-system-'+j+'-'+Math.round(z2*10);
+
+     const junction={x:(ends.p.x+ends.q.x)/2,y:(ends.p.y+ends.q.y)/2};
+     let mean=ang1;
+     const signed=((ang2-ang1+540)%180)-90;
+     mean=(ang1+signed/2+180)%180;
+     const sepAngle=(mean+90)%180;
+     const sep=extendLineToPerimeterOnly(junction,sepAngle);
+     if(!sep||dist(sep.a,sep.b)<.04)continue;
+
+     const test={type:'elevation_break',a:sep.a,b:sep.b,autoAssisted:true,cleanSectionBreak:true,elevationSeparationMeters:Math.abs(z1-z2),confidence:1};
+     if(state.lines.some(l=>l.type==='elevation_break'&&lineNearlySame(l,test,.05)))continue;
+     state.lines.push(test);
+     added++;
+     if(added>=2)return added;
+   }
+   return added;
+ };
  const ridgeJunctionPoint=(a,b)=>{
    const pairs=[[a.a,b.a],[a.a,b.b],[a.b,b.a],[a.b,b.b]];
    let best=null,bd=.035;
@@ -3890,7 +3965,7 @@ async function restoreRoofSolarModel(){
 
      if(l.type==='ridge'){
        target=closestAxis(ang,axes);
-     }else if(l.type==='elevation_break'){
+     }else if(l.type==='elevation_break'&&!l.cleanSectionBreak){
        const mid={x:(l.a.x+l.b.x)/2,y:(l.a.y+l.b.y)/2};
        let nearestRidge=null,bd=Infinity;
        state.lines.filter(x=>x.type==='ridge').forEach(r=>{
@@ -3914,7 +3989,7 @@ async function restoreRoofSolarModel(){
        changed++;
      }
 
-     if(l.type==='elevation_break'){
+     if(l.type==='elevation_break'&&!l.cleanSectionBreak){
        const mid={x:(l.a.x+l.b.x)/2,y:(l.a.y+l.b.y)/2};
        const extended=extendLineThroughPointToRoof(mid,target);
        if(extended&&dist(extended.a,extended.b)>.025){
@@ -3962,8 +4037,11 @@ async function restoreRoofSolarModel(){
    return changed;
  };
  const assistCompleteRoofGraph=()=>{
-   const ridgeElevationBreaks=addRidgeJunctionElevationBreaks();
-   const proactiveBreaks=addDerivedElevationBreaks();
+   // Elevation topology is section-first: clean ridge-system separators first.
+   // Raw DSM boundary fragments stay advisory and are not inserted proactively.
+   const ridgeSystemBreaks=addCleanRidgeSystemBreaks();
+   const ridgeElevationBreaks=0;
+   const proactiveBreaks=0;
    const symmetryAdjustments=regularizeAutoRoofTopology();
    let extended=0;
    for(let pass=0;pass<3;pass++){
@@ -3975,7 +4053,6 @@ async function restoreRoofSolarModel(){
      });
    }
    let addedBreaks=0;
-   if(validateStructuralLines().length)addedBreaks=addHelpfulElevationBreaks();
    for(let pass=0;pass<2;pass++){
      const invalid=validateStructuralLines();
      if(!invalid.length)break;
@@ -3984,7 +4061,7 @@ async function restoreRoofSolarModel(){
        if(!item.bConnected&&extendDanglingEndpoint(item.index,'b'))extended++;
      });
    }
-   return {extended,addedBreaks:addedBreaks+proactiveBreaks+ridgeElevationBreaks,proactiveBreaks,ridgeElevationBreaks,symmetryAdjustments,remaining:validateStructuralLines()};
+   return {extended,addedBreaks:ridgeSystemBreaks,proactiveBreaks:0,ridgeElevationBreaks:ridgeSystemBreaks,symmetryAdjustments,remaining:validateStructuralLines()};
  };
  const validateStructuralLines=()=>{
    const invalid=[];
@@ -4436,7 +4513,7 @@ async function restoreRoofSolarModel(){
      const half=Number(state.property.cropHalfMeters||42),R=6378137,lat0=Number(state.property.lat),lng0=Number(state.property.lng);
      const merc=(lat,lng)=>({x:R*Number(lng)*Math.PI/180,y:R*Math.log(Math.tan(Math.PI/4+Math.max(-85.05112878,Math.min(85.05112878,Number(lat)))*Math.PI/360))});
      const cc=merc(lat0,lng0),toNorm=p=>{const q=merc(p.lat,p.lng);return{x:clamp(.5+(q.x-cc.x)/(half*2)),y:clamp(.5-(q.y-cc.y)/(half*2))}};
-     state.autoFacetData=facets.map((f,i)=>{const outline=(f.outline||[]).map(toNorm);return{id:i+1,z0:Number(f.z0),rise12:Number(f.rise12),azimuthDegrees:Number(f.azimuthDegrees),outline,autoBaseOutline:outline.map(p=>({...p})),area:Number(f.slopedAreaSqFt||f.flatAreaSqFt||0)}}).filter(f=>f.outline.length>=3);
+     state.autoFacetData=facets.map((f,i)=>{const outline=(f.outline||[]).map(toNorm);return{id:i+1,z0:Number(f.z0),rise12:Number(f.rise12),azimuthDegrees:Number(f.azimuthDegrees),center:f.center?toNorm(f.center):centroid(outline),gradientEast:Number(f.gradientEast||0),gradientNorth:Number(f.gradientNorth||0),outline,autoBaseOutline:outline.map(p=>({...p})),area:Number(f.slopedAreaSqFt||f.flatAreaSqFt||0)}}).filter(f=>f.outline.length>=3);
      const z=state.autoFacetData.filter(f=>Number.isFinite(f.z0)).sort((a,b)=>a.z0-b.z0),groups=[];
      z.forEach(f=>{let g=groups.find(x=>Math.abs(x.meanZ-f.z0)<.55);if(!g){g={items:[],meanZ:f.z0};groups.push(g);}g.items.push(f);g.meanZ=g.items.reduce((sum,x)=>sum+x.z0,0)/g.items.length;});
      state.layers=groups.map((g,i)=>({id:'elevation-'+(i+1),meanZ:g.meanZ,facetCount:g.items.length,facetIds:g.items.map(x=>x.id),polygons:g.items.map(x=>x.outline),source:'dsm'}));
