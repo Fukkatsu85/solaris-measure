@@ -3226,7 +3226,7 @@ async function restoreRoofSolarModel(){
  const normLengthM=(a,b)=>dist(a,b)*metersPerNorm();
  const pitchFactor=(pitch,type)=>{
    const r=Math.atan(Number(pitch||0)/12);
-   if(type==='ridge'||type==='elevation_break')return 1;
+   if(type==='ridge'||type==='elevation_break'||type==='elevated_eave')return 1;
    // Generic 45-degree hip/valley rise factor. User-entered topology controls plan length.
    const runSlope=Math.tan(r)/Math.SQRT2;
    return Math.sqrt(1+runSlope*runSlope);
@@ -3275,7 +3275,7 @@ async function restoreRoofSolarModel(){
  };
  function renderManualRoof(){
    const svg=$('#manual-roof-overlay');if(!svg)return;
-   const colors={ridge:'#16a34a',hip:'#2563eb',valley:'#dc2626',elevation_break:'#f59e0b'};
+   const colors={ridge:'#16a34a',hip:'#2563eb',valley:'#dc2626',elevation_break:'#f59e0b',elevated_eave:'#0f172a'};
    let out='';
    (state.layers||[]).forEach((layer,i)=>(layer.polygons||[]).forEach(poly=>{
      if(poly.length>=3)out+='<polygon points="'+poly.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="none" stroke="'+(i%2?'rgba(14,165,233,.45)':'rgba(168,85,247,.45)')+'" stroke-width="1.5" stroke-dasharray="8 10" pointer-events="none" vector-effect="non-scaling-stroke"/>';
@@ -4114,11 +4114,62 @@ async function restoreRoofSolarModel(){
 
    return changed;
  };
+ const addElevatedEavesFromRoofSystems=systems=>{
+   // A higher gable terminating over a lower gable creates an interior eave,
+   // not a generic transition. The eave is parallel to the higher ridge and
+   // lies on the side of that roof system facing the lower system.
+   let added=0;
+   for(let i=0;i<(systems||[]).length;i++)for(let j=i+1;j<(systems||[]).length;j++){
+     const A=systems[i],B=systems[j];
+     if(!A?.ridge||!B?.ridge||!Number.isFinite(A.elevationZ)||!Number.isFinite(B.elevationZ))continue;
+     if(angleDiff(A.angle,B.angle)>14)continue;
+     const dz=Math.abs(A.elevationZ-B.elevationZ);if(dz<.55)continue;
+     const high=A.elevationZ>B.elevationZ?A:B,low=high===A?B:A;
+     const hr=high.angle*Math.PI/180,u={x:Math.cos(hr),y:Math.sin(hr)},n={x:-Math.sin(hr),y:Math.cos(hr)};
+     const hm={x:(high.ridge.a.x+high.ridge.b.x)/2,y:(high.ridge.a.y+high.ridge.b.y)/2};
+     const lm={x:(low.ridge.a.x+low.ridge.b.x)/2,y:(low.ridge.a.y+low.ridge.b.y)/2};
+     const side=((lm.x-hm.x)*n.x+(lm.y-hm.y)*n.y)>=0?1:-1;
+     const poly=high.outline||[];if(poly.length!==4)continue;
+
+     // inferMajorRoofSystems orders corners as:
+     // [uMin,nMin], [uMax,nMin], [uMax,nMax], [uMin,nMax].
+     let a=side>0?{...poly[3]}:{...poly[0]},b=side>0?{...poly[2]}:{...poly[1]};
+
+     // Limit the eave to the longitudinal overlap of the two roof systems.
+     const proj=(p,o)=>((p.x-o.x)*u.x+(p.y-o.y)*u.y);
+     const hu=[proj(a,hm),proj(b,hm)].sort((x,y)=>x-y);
+     const lowU=(low.outline||[]).map(p=>proj(p,hm));
+     if(lowU.length){
+       const lo=Math.max(hu[0],Math.min(...lowU)),hi=Math.min(hu[1],Math.max(...lowU));
+       if(hi-lo>.025){
+         const nn=((a.x-hm.x)*n.x+(a.y-hm.y)*n.y);
+         a={x:clamp(hm.x+u.x*lo+n.x*nn),y:clamp(hm.y+u.y*lo+n.y*nn)};
+         b={x:clamp(hm.x+u.x*hi+n.x*nn),y:clamp(hm.y+u.y*hi+n.y*nn)};
+       }
+     }
+
+     // Pull endpoints onto existing physical graph anchors when close, then let
+     // the standard completion pass extend any remaining small gap.
+     a=snapPoint(a);b=snapPoint(b);
+     if(dist(a,b)<.025)continue;
+     const candidate={
+       type:'elevated_eave',a,b,autoAssisted:true,autoElevatedEave:true,
+       higherRoofSystemId:high.id,lowerRoofSystemId:low.id,
+       higherElevationZ:high.elevationZ,lowerElevationZ:low.elevationZ,
+       elevationSeparationMeters:dz
+     };
+     if(state.lines.some(l=>l.type==='elevated_eave'&&lineNearlySame(l,candidate,.04)))continue;
+     state.lines.push(candidate);added++;
+     if(added>=3)return added;
+   }
+   return added;
+ };
  const assistCompleteRoofGraph=()=>{
    // Elevation topology is section-first. Build clean roof-system envelopes from
    // major ridges, then add only their interior perimeter sides to the graph.
    state.lines=state.lines.filter(l=>!l.roofSystemBoundary);
    state.roofSystems=inferMajorRoofSystems();
+   const elevatedEaves=addElevatedEavesFromRoofSystems(state.roofSystems);
    // Roof-system envelopes are diagnostic evidence only. Do not turn them into
    // graph edges until a true 3D section solver can prove the shared boundary.
    const systemBoundaries=0;
@@ -4144,7 +4195,7 @@ async function restoreRoofSolarModel(){
        if(!item.bConnected&&extendDanglingEndpoint(item.index,'b'))extended++;
      });
    }
-   return {extended,addedBreaks:0,proactiveBreaks:0,ridgeElevationBreaks:0,systemBoundaries:0,symmetryAdjustments,remaining:validateStructuralLines()};
+   return {extended,addedBreaks:0,elevatedEaves,proactiveBreaks:0,ridgeElevationBreaks:0,systemBoundaries:0,symmetryAdjustments,remaining:validateStructuralLines()};
  };
  const validateStructuralLines=()=>{
    const invalid=[];
@@ -4247,7 +4298,7 @@ async function restoreRoofSolarModel(){
      const a=nodeFor(s.a),b=nodeFor(s.b);if(a===b)return;
      const key=a<b?a+'|'+b:b+'|'+a;
      if(!map.has(key))map.set(key,{a,b,type:s.type});
-     else if(['ridge','hip','valley','elevation_break'].includes(s.type))map.get(key).type=s.type;
+     else if(['ridge','hip','valley','elevation_break','elevated_eave'].includes(s.type))map.get(key).type=s.type;
    });
    edges.push(...map.values());
    const adj=Array.from({length:nodes.length},()=>[]);
@@ -4296,7 +4347,7 @@ async function restoreRoofSolarModel(){
    // Manual Roof builds. They were evidence lines, not real roof topology.
    // Preserve anything the user explicitly drew and the new clean section breaks.
    const beforeLegacy=state.lines.length;
-   state.lines=state.lines.filter(l=>!(l.type==='elevation_break' && !l.manual));
+   state.lines=state.lines.filter(l=>!(l.type==='elevation_break' && !l.manual) && !(l.type==='elevated_eave' && l.autoElevatedEave));
    const removedLegacyBreaks=beforeLegacy-state.lines.length;
 
    // Snap every structural endpoint to a real roof anchor. This includes corners,
@@ -4347,7 +4398,7 @@ async function restoreRoofSolarModel(){
    const table=$('#manual-roof-facet-table');
    if(table)table.innerHTML='<table><thead><tr><th>Facet</th><th>Pitch</th><th>Plan ft²</th><th>Sloped ft²</th></tr></thead><tbody>'+state.facets.map(f=>'<tr><td>F'+f.id+'</td><td><select data-manual-facet-pitch="'+f.id+'">'+[2,3,4,5,6,7,8,9,10,11,12,14,16,18].map(p=>'<option value="'+p+'"'+(p===f.pitch?' selected':'')+'>'+p+'/12</option>').join('')+'</select></td><td>'+Math.round(f.planM2*SQFT_PER_M2)+'</td><td>'+Math.round(f.slopedM2*SQFT_PER_M2)+'</td></tr>').join('')+'</tbody></table>';
    if(badge)badge.textContent=state.facets.length+' facets';
-   if(status)status.textContent='Roof geometry built ✓ · '+state.facets.length+' connected closed facet'+(state.facets.length===1?'':'s')+(removedLegacyBreaks?' · removed '+removedLegacyBreaks+' legacy DSM break fragment'+(removedLegacyBreaks===1?'':'s'):'')+(assist.extended?' · '+assist.extended+' endpoint'+(assist.extended===1?'':'s')+' auto-connected':'')+(state.roofSystems.length?' · '+state.roofSystems.length+' major roof system'+(state.roofSystems.length===1?'':'s')+' reconstructed from ridges':'')+(assist.addedBreaks?' · '+assist.addedBreaks+' clean section boundar'+(assist.addedBreaks===1?'y':'ies')+' added':'')+(assist.symmetryAdjustments?' · '+assist.symmetryAdjustments+' auto line'+(assist.symmetryAdjustments===1?'':'s')+' symmetry-corrected':'')+((cleanupBefore+cleanupAfter)?' · '+(cleanupBefore+cleanupAfter)+' junction adjustment'+((cleanupBefore+cleanupAfter)===1?'':'s')+' cleaned':'')+'. DSM is assisting topology and pitch without becoming report facets.';
+   if(status)status.textContent='Roof geometry built ✓ · '+state.facets.length+' connected closed facet'+(state.facets.length===1?'':'s')+(removedLegacyBreaks?' · removed '+removedLegacyBreaks+' legacy DSM break fragment'+(removedLegacyBreaks===1?'':'s'):'')+(assist.extended?' · '+assist.extended+' endpoint'+(assist.extended===1?'':'s')+' auto-connected':'')+(state.roofSystems.length?' · '+state.roofSystems.length+' major roof system'+(state.roofSystems.length===1?'':'s')+' reconstructed from ridges':'')+(assist.elevatedEaves?' · '+assist.elevatedEaves+' elevated eave'+(assist.elevatedEaves===1?'':'s')+' inferred from height-separated roof systems':'')+(assist.addedBreaks?' · '+assist.addedBreaks+' clean section boundar'+(assist.addedBreaks===1?'y':'ies')+' added':'')+(assist.symmetryAdjustments?' · '+assist.symmetryAdjustments+' auto line'+(assist.symmetryAdjustments===1?'':'s')+' symmetry-corrected':'')+((cleanupBefore+cleanupAfter)?' · '+(cleanupBefore+cleanupAfter)+' junction adjustment'+((cleanupBefore+cleanupAfter)===1?'':'s')+' cleaned':'')+'. DSM is assisting topology and pitch without becoming report facets.';
    generateManualReport(graph);
    renderManualRoof();save();
  }
@@ -4449,9 +4500,9 @@ async function restoreRoofSolarModel(){
    const planFt2=state.facets.reduce((s,f)=>s+f.planM2*SQFT_PER_M2,0),slopedFt2=state.facets.reduce((s,f)=>s+f.slopedM2*SQFT_PER_M2,0);
    const lineLengthFt=l=>normLengthM(l.a,l.b)*pitchFactor(defaultPitch,l.type)*FT_PER_M;
    const lineTotal=type=>state.lines.filter(l=>l.type===type).reduce((s,l)=>s+lineLengthFt(l),0);
-   const ridge=lineTotal('ridge'),hip=lineTotal('hip'),valley=lineTotal('valley'),elevationBreak=lineTotal('elevation_break');
-   const ext=exteriorTotals(),eave=ext.eaveM*FT_PER_M,rake=ext.rakeM*FT_PER_M;
-   const colors={ridge:'#16a34a',hip:'#2563eb',valley:'#dc2626',elevation_break:'#f59e0b',eave:'#111827',rake:'#64748b'};
+   const ridge=lineTotal('ridge'),hip=lineTotal('hip'),valley=lineTotal('valley'),elevationBreak=lineTotal('elevation_break'),elevatedEave=lineTotal('elevated_eave');
+   const ext=exteriorTotals(),outerEave=ext.eaveM*FT_PER_M,eave=outerEave+elevatedEave,rake=ext.rakeM*FT_PER_M;
+   const colors={ridge:'#16a34a',hip:'#2563eb',valley:'#dc2626',elevation_break:'#f59e0b',elevated_eave:'#0f172a',eave:'#111827',rake:'#64748b'};
    const allSectionOutlines=[state.outline,...(state.sections||[]).map(s=>s.outline||[])].filter(p=>p.length>=3);
    const reportPoints=[
      ...allSectionOutlines.flat(),
@@ -4471,7 +4522,7 @@ async function restoreRoofSolarModel(){
        (areaFt2>=28?'<text x="'+cx+'" y="'+cy+'" text-anchor="middle" font-size="'+(22*labelScale)+'" font-weight="700" fill="#111827" stroke="#fff" stroke-width="4" paint-order="stroke">'+label+'</text>':'');
    };
    const outlinesSvg=()=>allSectionOutlines.map((poly,i)=>'<polygon points="'+poly.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="none" stroke="'+(i?'#0891b2':'#111827')+'" stroke-width="5" vector-effect="non-scaling-stroke"/>').join('');
-   const lineName=t=>t==='elevation_break'?'Transition':t.charAt(0).toUpperCase()+t.slice(1);
+   const lineName=t=>t==='elevation_break'?'Transition':t==='elevated_eave'?'Elevated Eave':t.charAt(0).toUpperCase()+t.slice(1);
    let measureSvg=svgOpen();
    reportFacets.forEach((f,i)=>measureSvg+=polygonSvg(f,i,'facet'));
    measureSvg+=outlinesSvg();
@@ -4531,7 +4582,7 @@ async function restoreRoofSolarModel(){
      '<h3 style="margin-top:18px">Pitch Diagram</h3>'+pitchSvg+
      '<h3 style="margin-top:18px">Area Diagram</h3>'+areaSvg+
      '<h3 style="margin-top:18px">Linear Measurements</h3><div class="table-wrap"><table><tbody>'+
-       '<tr><th>Ridge</th><td>'+ridge.toFixed(1)+' ft</td></tr><tr><th>Hip</th><td>'+hip.toFixed(1)+' ft</td></tr><tr><th>Valley</th><td>'+valley.toFixed(1)+' ft</td></tr><tr><th>Transition / elevation break</th><td>'+elevationBreak.toFixed(1)+' ft</td></tr><tr><th>Eave</th><td>'+eave.toFixed(1)+' ft</td></tr><tr><th>Rake</th><td>'+rake.toFixed(1)+' ft</td></tr>'+
+       '<tr><th>Ridge</th><td>'+ridge.toFixed(1)+' ft</td></tr><tr><th>Hip</th><td>'+hip.toFixed(1)+' ft</td></tr><tr><th>Valley</th><td>'+valley.toFixed(1)+' ft</td></tr><tr><th>Transition / elevation break</th><td>'+elevationBreak.toFixed(1)+' ft</td></tr><tr><th>Exterior eave</th><td>'+outerEave.toFixed(1)+' ft</td></tr><tr><th>Elevated eave / soffit edge</th><td>'+elevatedEave.toFixed(1)+' ft</td></tr><tr><th>Total eave</th><td>'+eave.toFixed(1)+' ft</td></tr><tr><th>Rake</th><td>'+rake.toFixed(1)+' ft</td></tr>'+
      '</tbody></table></div>'+
      '<h3 style="margin-top:18px">Segment Measurements</h3><div class="table-wrap"><table><thead><tr><th>Segment</th><th>Type</th><th>Length</th></tr></thead><tbody>'+segmentRows+'</tbody></table></div>'+
      '<h3 style="margin-top:18px">Facet Measurements</h3><div class="table-wrap"><table><thead><tr><th>Facet</th><th>Roof section</th><th>Pitch</th><th>Plan ft²</th><th>Sloped ft²</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
@@ -4757,7 +4808,7 @@ async function restoreRoofSolarModel(){
    if(state.tool==='select'){
      const ep=nearestEndpoint(p);if(ep){pushUndo();state.drag={kind:'line-end',...ep};overlay.setPointerCapture(e.pointerId);}return;
    }
-   if(['ridge','hip','valley','elevation_break'].includes(state.tool)){
+   if(['ridge','hip','valley','elevation_break','elevated_eave'].includes(state.tool)){
      const q=snapPoint(p);
      if(!state.pending){state.pending=q;renderManualRoof();}
      else{
