@@ -77,6 +77,12 @@
           <div id="roof-remote-snapshots" hidden style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-top:12px"></div>
           <div id="roof-remote-panorama" hidden style="height:360px;border-radius:12px;overflow:hidden;margin-top:12px;background:#111"></div>
         </div>
+        <div id="roof-aerial-view-panel" class="card" style="margin-top:12px">
+          <div class="card-head"><div><div class="eyebrow">REMOTE OBLIQUE REFERENCE</div><h3>Google Aerial View</h3><p class="muted">Checks for Google's photorealistic aerial flyover for this address. Used as a live visual QA/reference layer; video is not stored.</p></div><span id="roof-aerial-view-badge" class="status">Not checked</span></div>
+          <div class="actions"><button id="check-roof-aerial-view" class="secondary" type="button">Check Aerial View</button><button id="play-roof-aerial-view" class="secondary" type="button" disabled>Load Flyover</button></div>
+          <div id="roof-aerial-view-status" class="analysis-state" style="margin-top:10px">Check whether an Aerial View already exists for this property.</div>
+          <video id="roof-aerial-view-video" hidden controls playsinline style="width:100%;max-height:520px;margin-top:12px;border-radius:12px;background:#000"></video>
+        </div>
         <div class="actions" style="margin-top:12px"><button id="roof-outline-tool" class="primary" type="button">Roof Outline</button><button id="detect-roof-lines" class="secondary" type="button">Detect Internal Roof Lines</button></div>
         <p class="muted" id="roof-workspace-status">Accept the roof outline first, then detect and classify internal roof geometry.</p>
         <details id="roof-advanced-tools" style="margin-top:12px">
@@ -317,6 +323,6 @@
     </div>
   </main>
 
-  <script src="/app.js?v=20261005-final-readiness2"></script>
+  <script src="/app.js?v=20261005-aerial-view1"></script>
 </body>
 </html>
