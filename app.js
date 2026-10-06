@@ -2155,6 +2155,23 @@ async function generateRoofReport(){
     ?(dsmSmallFeatureShare>.03?'LiDAR major geometry confirmed · small features DSM/aerial':'LiDAR area + topology confirmed')
     :(lidarConfirmsProduction?'LiDAR area confirmed · topology review':(reportNeedsReview?'Review before ordering':(areaConfidence==='High'?'High':'Moderate')));
   const reportFacetCount=Number(dsmFacets.length||facets.length||d.topology?.faces?.length||0);
+
+  // Final-report readiness gate: deterministic, source-agreement based, and
+  // independent of any uploaded benchmark/reference report.
+  const readinessChecks=[
+    {id:'area',label:'Area agreement',pass:areaConfidence!=='Review'&&(!Number.isFinite(areaSourceSpreadPct)||areaSourceSpreadPct<=15),detail:Number.isFinite(areaSourceSpreadPct)?areaSourceSpreadPct.toFixed(1)+'% source spread':areaConfidence},
+    {id:'facetCoverage',label:'Facet coverage',pass:!Number.isFinite(facetCoverage)||facetCoverage>=.80,detail:Number.isFinite(facetCoverage)?Math.round(facetCoverage*100)+'%':'Not scored'},
+    {id:'lineEngine',label:'Production line engine',pass:lineEngineCurrent,detail:lineEngineCurrent?'Current':'Stale'},
+    {id:'ridge',label:'Ridge geometry',pass:Number(lines.ridge||0)>0,detail:Number(lines.ridge||0)>0?lines.ridge.toFixed(1)+' ft':'Not verified'},
+    {id:'exterior',label:'Exterior geometry',pass:Number(lines.eave||0)>0&&Number(lines.rake||0)>0,detail:(Number(lines.eave||0)+Number(lines.rake||0)).toFixed(1)+' ft eave+rake'},
+    {id:'lidarArea',label:'Independent area cross-check',pass:!lidarQualityGood||Boolean(lidarConfirmsProduction),detail:lidarQualityGood?(lidarConfirmsProduction?'LiDAR agrees':'LiDAR disagreement '+(Number.isFinite(lidarVsProductionPct)?lidarVsProductionPct.toFixed(1)+'%':'—')):'LiDAR unavailable / not quality-screened'},
+    {id:'lidarTopology',label:'Independent topology cross-check',pass:!lidarQualityGood||Boolean(lidarTopologyAgrees),detail:lidarQualityGood?(lidarTopologyAgrees?'Major geometry agrees':'Needs review'):'LiDAR unavailable / not quality-screened'}
+  ];
+  const failedReadiness=readinessChecks.filter(x=>!x.pass);
+  const orderReady=failedReadiness.length===0;
+  const finalReportStatus=orderReady?'ORDER-READY':'REVIEW REQUIRED';
+  const readinessRows=readinessChecks.map(x=>'<tr><th>'+escRoof(x.label)+'</th><td>'+(x.pass?'PASS':'REVIEW')+' · '+escRoof(x.detail)+'</td></tr>').join('');
+
   const waste=[10,12,15].map(w=>({w,area:sloped*(1+w/100),sq:squares*(1+w/100)}));
   d.reportLineOverlay={
     ridgeFt:Number(lines.ridge||0),
@@ -2209,6 +2226,7 @@ async function generateRoofReport(){
   content.innerHTML='<div class="roof-report-sheet">'+
    '<div class="roof-report-head"><div><div class="roof-report-brand">SOLARIS ROOFING</div><h1>Roof Measurement Report</h1><p>'+escRoof(d.outline.address||saved.address||'')+'</p></div><div style="text-align:right"><strong>Solaris Measure</strong><br><span>Generated '+new Date().toLocaleDateString()+'</span><br><span>Hybrid DSM + LiDAR geometry</span></div></div>'+
    '<div class="roof-report-grid"><div class="roof-report-stat"><span>Plan area</span><strong>'+Math.round(plan).toLocaleString()+' ft²</strong></div><div class="roof-report-stat"><span>Sloped roof area</span><strong>'+Math.round(sloped).toLocaleString()+' ft²</strong></div><div class="roof-report-stat"><span>Roofing squares</span><strong>'+squares.toFixed(2)+'</strong></div><div class="roof-report-stat"><span>Roof perimeter</span><strong>'+perim.toFixed(1)+' ft</strong></div><div class="roof-report-stat"><span>Facets</span><strong>'+reportFacetCount+'</strong></div><div class="roof-report-stat"><span>Average pitch</span><strong>'+avgPitch.toFixed(1)+'/12</strong></div><div class="roof-report-stat"><span>Ridge</span><strong>'+(lines.ridge?lines.ridge.toFixed(1)+' ft':'Not verified')+'</strong></div><div class="roof-report-stat"><span>Valley</span><strong>'+(lines.valley?lines.valley.toFixed(1)+' ft':'Not verified')+'</strong></div></div>'+
+   '<h2>Final Report Readiness</h2><div class="analysis-state"><strong>'+finalReportStatus+'</strong><br>'+(orderReady?'All deterministic production gates passed. This report is internally consistent enough for normal ordering workflow.':'Do not use for material ordering until the review items below are resolved.')+'</div><table class="roof-report-table"><tbody>'+readinessRows+'</tbody></table>'+
    '<h2>2D Roof Diagram</h2><div class="roof-diagram-wrap">'+roofDiagramSvg(d)+'</div>'+
    '<h2>Facet Measurements</h2><table class="roof-report-table"><thead><tr><th>Facet</th><th>Pitch</th><th>Slope</th><th>Plan ft²</th><th>Sloped ft²</th><th>Source / fit</th></tr></thead><tbody>'+facetRows+'</tbody></table>'+
    '<h2>Linear Measurements</h2><table class="roof-report-table"><tbody><tr><th>Roof perimeter</th><td>'+perim.toFixed(1)+' ft</td></tr><tr><th>Ridge</th><td>'+(lines.ridge?lines.ridge.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Hip</th><td>'+(lines.hip?lines.hip.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Valley</th><td>'+(lines.valley?lines.valley.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Eave</th><td>'+(lines.eave?lines.eave.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Rake</th><td>'+(lines.rake?lines.rake.toFixed(1)+' ft':'Not yet verified')+'</td></tr></tbody></table>'+
@@ -2217,7 +2235,15 @@ async function generateRoofReport(){
    validationBlock+
    '<p class="roof-report-note">Accepted Google DSM geometry is the primary source for roof facet shape, pitch and roof-line classification in this report. USGS 3DEP LiDAR remains an independent 3D cross-check for elevation planes, area and geometry consistency.</p></div>';
   if(panel){panel.hidden=false;panel.scrollIntoView({behavior:'smooth',block:'start'});}
-  if(state)state.textContent='Roof measurement report ready.';
+  try{
+    localStorage.setItem('solarisRoofReadiness',JSON.stringify({
+      projectId,generatedAt:new Date().toISOString(),geometryVersion,
+      status:finalReportStatus,orderReady,
+      failed:failedReadiness.map(x=>x.id),
+      checks:readinessChecks.map(x=>({id:x.id,pass:x.pass,detail:x.detail}))
+    }));
+  }catch{}
+  if(state)state.textContent='Roof measurement report ready · '+finalReportStatus+'.';
   loadRoofBenchmark();
  }catch(err){
   const msg=err?.name==='AbortError'?'Report generation timed out. The saved DSM/LiDAR data is intact; try again.':(err?.message||String(err));
