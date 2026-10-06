@@ -1585,24 +1585,41 @@ function roofDiagramSvg(data){
     }
    });
   }else{
+   const labelBoxes=[];
    facets.forEach((f,i)=>{
     const poly=f.outline||[];if(poly.length<3)return;
     const q=poly.map(pt),cx=q.reduce((a,p)=>a+p.x,0)/q.length,cy=q.reduce((a,p)=>a+p.y,0)/q.length;
-    s+='<polygon points="'+poly.map(P).join(' ')+'" fill="'+fills[i%fills.length]+'" stroke="#444" stroke-width="3"/>';
-    if(Number(f.slopedAreaSqFt||0)>=8)s+='<text x="'+cx.toFixed(1)+'" y="'+cy.toFixed(1)+'" text-anchor="middle" font-size="22" font-weight="700" fill="#111">F'+(i+1)+'</text>';
-    if(Number(f.slopedAreaSqFt||0)>=28)s+='<text x="'+cx.toFixed(1)+'" y="'+(cy+26).toFixed(1)+'" text-anchor="middle" font-size="17" fill="#333">'+Math.round(Number(f.rise12||0))+'/12 · '+Math.round(Number(f.slopedAreaSqFt||0))+' ft²</text>';
+    const xs=q.map(p=>p.x),ys=q.map(p=>p.y),bw=Math.max(...xs)-Math.min(...xs),bh=Math.max(...ys)-Math.min(...ys);
+    const area=Number(f.slopedAreaSqFt||0);
+    s+='<polygon points="'+poly.map(P).join(' ')+'" fill="'+fills[i%fills.length]+'" stroke="#555" stroke-width="2.5"/>';
+    // Tiny facets remain visible geometrically but are listed in the facet table
+    // rather than crowding the drawing with unreadable labels.
+    if(area>=45&&Math.min(bw,bh)>=34){
+      let ly=cy;
+      for(let tries=0;tries<6;tries++){
+        const hit=labelBoxes.some(b=>Math.abs(b.x-cx)<60&&Math.abs(b.y-ly)<42);
+        if(!hit)break;
+        ly+=tries%2===0?34:-68;
+      }
+      labelBoxes.push({x:cx,y:ly});
+      s+='<text x="'+cx.toFixed(1)+'" y="'+ly.toFixed(1)+'" text-anchor="middle" font-size="21" font-weight="700" fill="#111" stroke="#fff" stroke-width="5" paint-order="stroke">F'+(i+1)+'</text>';
+      if(area>=80)s+='<text x="'+cx.toFixed(1)+'" y="'+(ly+24).toFixed(1)+'" text-anchor="middle" font-size="16" fill="#333" stroke="#fff" stroke-width="4" paint-order="stroke">'+Math.round(Number(f.rise12||0))+'/12 · '+Math.round(area)+' ft²</text>';
+    }
    });
    s+='<polygon points="'+outline.map(P).join(' ')+'" fill="none" stroke="#111" stroke-width="7"/>';
+   const auth=data.reportLineOverlay||{};
    lines.filter(l=>['ridge','hip','valley'].includes(l.type)).forEach(l=>{
-    const a=pt(l.a),b=pt(l.b);
-    s+='<line x1="'+a.x.toFixed(1)+'" y1="'+a.y.toFixed(1)+'" x2="'+b.x.toFixed(1)+'" y2="'+b.y.toFixed(1)+'" stroke="'+lc[l.type]+'" stroke-width="7"/>';
+    const a=pt(l.a),b=pt(l.b),verified=l.type==='ridge'?auth.ridgeVerified:(l.type==='hip'?auth.hipVerified:auth.valleyVerified);
+    const stroke=verified?lc[l.type]:'#9ca3af',dash=verified?'':' stroke-dasharray="12 9"';
+    s+='<line x1="'+a.x.toFixed(1)+'" y1="'+a.y.toFixed(1)+'" x2="'+b.x.toFixed(1)+'" y2="'+b.y.toFixed(1)+'" stroke="'+stroke+'" stroke-width="'+(verified?7:4)+'"'+dash+'/>';
    });
   }
   if(!useTopologyFaces)rawExteriorEdges.forEach(e=>{
+   const len=Number(e.lengthFt||0);if(!Number.isFinite(len)||len<2.5)return;
    const a=pt(e.a),b=pt(e.b),mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
-   s+='<text x="'+mx.toFixed(1)+'" y="'+(my-7).toFixed(1)+'" text-anchor="middle" font-size="15" font-weight="600" fill="#111" stroke="#fff" stroke-width="5" paint-order="stroke">'+Number(e.lengthFt||0).toFixed(1)+' ft</text>';
+   s+='<text x="'+mx.toFixed(1)+'" y="'+(my-7).toFixed(1)+'" text-anchor="middle" font-size="14" font-weight="600" fill="#111" stroke="#fff" stroke-width="5" paint-order="stroke">'+len.toFixed(1)+' ft</text>';
   });
-  s+='<g transform="translate(28 935)" font-size="17" fill="#111"><text x="0" y="0">Geometry: DSM facet mesh + production roof-line overlay</text><text x="0" y="26">DSM facets drive the visible face model; topology and LiDAR remain independent validation sources</text></g></svg>';
+  s+='<g transform="translate(28 925)" font-size="16" fill="#111"><text x="0" y="0">Geometry: DSM facet mesh + production roof-line overlay</text><text x="0" y="24">Colored solid lines = production-authoritative · gray dashed lines = detected but not yet verified</text><text x="0" y="48">Small facets remain in the facet table even when labels are suppressed for diagram clarity</text></g></svg>';
   return s;
  }
  const outline=data.outline,poly=outline.polygon||[],planes=(data.planes?.planes||[]).filter(p=>p.accepted),geom=(data.geometry?.lines||[]).filter(l=>l.type!=='ignore'&&l.type!=='candidate');
@@ -1959,6 +1976,14 @@ async function generateRoofReport(){
     :(lidarConfirmsProduction?'LiDAR area confirmed · topology review':(reportNeedsReview?'Review before ordering':(areaConfidence==='High'?'High':'Moderate')));
   const reportFacetCount=Number(dsmFacets.length||facets.length||d.topology?.faces?.length||0);
   const waste=[10,12,15].map(w=>({w,area:sloped*(1+w/100),sq:squares*(1+w/100)}));
+  d.reportLineOverlay={
+    ridgeFt:Number(lines.ridge||0),
+    hipFt:Number(lines.hip||0),
+    valleyFt:Number(lines.valley||0),
+    ridgeVerified:Number(lines.ridge||0)>0,
+    hipVerified:Number(lines.hip||0)>0,
+    valleyVerified:Number(lines.valley||0)>0
+  };
   const facetRows=(dsmFacets.length?dsmFacets:facets).map((p,i)=>{
    const isDsm=dsmFacets.length>0,pitch=wholePitch(isDsm?p.rise12:p.pitch12),slope=isDsm?Number(p.pitchDegrees||0):Number(p.slopeDeg||0),planArea=isDsm?Number(p.flatAreaSqFt||0):Number(p.planAreaFt2||0),slopedArea=isDsm?Number(p.slopedAreaSqFt||0):Number(p.slopedAreaFt2||0);
    return '<tr><td>F'+(i+1)+'</td><td>'+pitch+'/12</td><td>'+slope.toFixed(1)+'°</td><td>'+Math.round(planArea).toLocaleString()+'</td><td>'+Math.round(slopedArea).toLocaleString()+'</td><td>'+(isDsm?'DSM':'LiDAR '+Number(p.rmse||0).toFixed(2)+' m')+'</td></tr>';
