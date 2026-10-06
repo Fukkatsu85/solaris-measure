@@ -967,7 +967,10 @@ async function checkRoofAerialView(){
      localStorage.setItem('solarisRoofAerialView',JSON.stringify(roofAerialViewState));
      return roofAerialViewState;
    }
-   if(!r.ok||!d.ok)throw new Error(d.error||('HTTP '+r.status));
+   if(!r.ok||!d.ok){
+     const diag=d?.keyConfigured?(' · key '+(d.keyLooksLikeGoogleApiKey?'format OK':'format looks wrong')+' · length '+Number(d.keyLength||0)):' · key not configured';
+     throw new Error((d.error||('HTTP '+r.status))+diag);
+   }
    roofAerialViewState={available:d.state==='ACTIVE',state:d.state,videoId:d.videoId,captureDate:d.captureDate,duration:d.duration,address:saved.address};
    localStorage.setItem('solarisRoofAerialView',JSON.stringify(roofAerialViewState));
    if(badge)badge.textContent=d.state==='ACTIVE'?'Available':(d.state||'Found');
