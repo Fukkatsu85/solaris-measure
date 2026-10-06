@@ -2781,7 +2781,7 @@ document.querySelector('#bootstrap-roof-training')?.addEventListener('click',asy
   const byAddress=new Map();for(const r of pendingRows)if(!byAddress.has(r.address))byAddress.set(r.address,r);
   const queue=[...byAddress.values()];
   if(!queue.length){if(status)status.textContent='All eligible training roofs already have the restored v5 engine plus line and DSM-area shadow candidates.';return}
-  const engine=await import('/assets/js/solar-roof-engine.js?v=20261005-small-edge-shadow1');
+  const engine=await import('/assets/js/solar-roof-engine.js?v=20261006-affine-orientation1');
   let done=0,failed=0;const failures=[];
   const worker=async()=>{
    while(queue.length){
@@ -2942,7 +2942,7 @@ async function runRoofSolarAnalysis(){
  try{
   const br=await fetch('/api/solar-building?lat='+encodeURIComponent(lat)+'&lng='+encodeURIComponent(lng)),building=await br.json();
   if(!br.ok||!building.ok)throw new Error(building.error||'Google Solar Building Insights is unavailable for this roof.');
-  const engine=await import('/assets/js/solar-roof-engine.js?v=20261005-small-edge-shadow1');
+  const engine=await import('/assets/js/solar-roof-engine.js?v=20261006-affine-orientation1');
   const result=await engine.buildSolarRoofModel(lat,lng,building.roofSegments||[]);
   const measurements=engine.buildRoofMeasurements(result.outline,result.model.facets||[],result.model.roofLines||[]);
   const detailBoundaryMeasurements=Array.isArray(result.measurementOutlineCandidate)&&result.measurementOutlineCandidate.length>=3
@@ -3278,14 +3278,54 @@ async function restoreRoofSolarModel(){
        const east=(Number(p.lng)-lng0)*111320*cos,north=(Number(p.lat)-lat0)*111320;
        return {x:clamp(.5+east/(half*2)),y:clamp(.5-north/(half*2))};
      };
+     const dominantAxis=(items,angleOf,weightOf)=>{
+       let sx=0,sy=0,total=0;
+       (items||[]).forEach((item,i)=>{
+         const angle=Number(angleOf(item,i));if(!Number.isFinite(angle))return;
+         const weight=Math.max(.001,Number(weightOf(item,i))||1),r=angle*Math.PI/180*4;
+         sx+=Math.cos(r)*weight;sy+=Math.sin(r)*weight;total+=weight;
+       });
+       if(!total||Math.hypot(sx,sy)/total<.12)return null;
+       let angle=Math.atan2(sy,sx)/4*180/Math.PI;
+       while(angle>45)angle-=90;while(angle<=-45)angle+=90;
+       return angle;
+     };
+     const outlineAxis=dominantAxis(
+       d.solarModel.outline,
+       (p,i)=>{
+         const q=d.solarModel.outline[(i+1)%d.solarModel.outline.length];
+         const east=(Number(q.lng)-Number(p.lng))*cos,north=Number(q.lat)-Number(p.lat);
+         return Math.atan2(-north,east)*180/Math.PI;
+       },
+       (p,i)=>{
+         const q=d.solarModel.outline[(i+1)%d.solarModel.outline.length];
+         return Math.hypot((Number(q.lng)-Number(p.lng))*cos,Number(q.lat)-Number(p.lat));
+       }
+     );
+     const facetAxis=dominantAxis(
+       d.solarModel?.model?.facets||[],
+       f=>Number(f.azimuthDegrees),
+       f=>Number(f.slopedAreaSqFt||f.flatAreaSqFt||f.componentAreaM2||1)
+     );
+     let autoRotation=0;
+     if(Number.isFinite(outlineAxis)&&Number.isFinite(facetAxis)){
+       autoRotation=facetAxis-outlineAxis;
+       while(autoRotation>45)autoRotation-=90;while(autoRotation<=-45)autoRotation+=90;
+       if(Math.abs(autoRotation)<.5)autoRotation=0;
+       autoRotation=Math.max(-20,Math.min(20,autoRotation));
+     }
+
      pushUndo();
      state.autoOutlineBase=d.solarModel.outline.map(toNorm);
      state.outline=state.autoOutlineBase.map(p=>({...p}));
      state.outlineScale=1;state.outlineRotation=0;
+     if(autoRotation)applyAutoOutlineTransform(1,autoRotation,false);
      const scaleSlider=$('#manual-outline-scale'),scaleLabel=$('#manual-outline-scale-label'),rotSlider=$('#manual-outline-rotation'),rotLabel=$('#manual-outline-rotation-label');
-     if(scaleSlider)scaleSlider.value='100';if(scaleLabel)scaleLabel.textContent='100%';if(rotSlider)rotSlider.value='0';if(rotLabel)rotLabel.textContent='0°';
+     if(scaleSlider)scaleSlider.value='100';if(scaleLabel)scaleLabel.textContent='100%';if(rotSlider)rotSlider.value=String(autoRotation);if(rotLabel)rotLabel.textContent=(autoRotation>0?'+':'')+autoRotation.toFixed(1).replace('.0','')+'°';
      state.lines=[];state.facets=[];state.facetPitches={};
-     if(status)status.textContent='Existing Solaris outline loaded. Use Expand 2% if the mask sits inside the roof edge, then fine-tune points if needed.';
+     if(status)status.textContent=autoRotation
+       ?'Existing Solaris outline loaded and auto-aligned '+(autoRotation>0?'+':'')+autoRotation.toFixed(1)+'° from the saved roof-plane orientation. Use Rotation / Size for final visual alignment.'
+       :'Existing Solaris outline loaded. Rotation is preserved from the saved geometry; use Rotation / Size for final visual alignment.';
      renderManualRoof();
    }catch(err){if(status)status.textContent=err.message+' Use Draw Outline instead.';}
  }
