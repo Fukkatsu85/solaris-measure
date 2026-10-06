@@ -3318,14 +3318,22 @@ async function restoreRoofSolarModel(){
      pushUndo();
      state.autoOutlineBase=d.solarModel.outline.map(toNorm);
      state.outline=state.autoOutlineBase.map(p=>({...p}));
+     const detectedRidges=(d.solarModel?.model?.roofLines||[])
+       .filter(l=>l?.type==='ridge'&&l?.a&&l?.b)
+       .map(l=>{
+         const a=toNorm(l.a),b=toNorm(l.b);
+         return {type:'ridge',a:{...a},b:{...b},autoDetected:true,autoBaseA:{...a},autoBaseB:{...b},confidence:Number(l.creaseStrength||l.traceSupport||0)};
+       });
+     state.lines=detectedRidges;
      state.outlineScale=1;state.outlineRotation=0;
      if(autoRotation)applyAutoOutlineTransform(1,autoRotation,false);
      const scaleSlider=$('#manual-outline-scale'),scaleLabel=$('#manual-outline-scale-label'),rotSlider=$('#manual-outline-rotation'),rotLabel=$('#manual-outline-rotation-label');
      if(scaleSlider)scaleSlider.value='100';if(scaleLabel)scaleLabel.textContent='100%';if(rotSlider)rotSlider.value=String(autoRotation);if(rotLabel)rotLabel.textContent=(autoRotation>0?'+':'')+autoRotation.toFixed(1).replace('.0','')+'°';
-     state.lines=[];state.facets=[];state.facetPitches={};
-     if(status)status.textContent=autoRotation
-       ?'Existing Solaris outline loaded and auto-aligned '+(autoRotation>0?'+':'')+autoRotation.toFixed(1)+'° from the saved roof-plane orientation. Use Rotation / Size for final visual alignment.'
-       :'Existing Solaris outline loaded. Rotation is preserved from the saved geometry; use Rotation / Size for final visual alignment.';
+     state.facets=[];state.facetPitches={};
+     const ridgeNote=detectedRidges.length?' · '+detectedRidges.length+' detected ridge'+(detectedRidges.length===1?'':'s')+' loaded as editable lines.':' · no reliable saved ridge candidate was available.';
+     if(status)status.textContent=(autoRotation
+       ?'Existing Solaris outline loaded and auto-aligned '+(autoRotation>0?'+':'')+autoRotation.toFixed(1)+'° from the saved roof-plane orientation.'
+       :'Existing Solaris outline loaded with saved orientation.')+ridgeNote+' Use Move / Select to drag ridge endpoints or Delete to remove a bad ridge.';
      renderManualRoof();
    }catch(err){if(status)status.textContent=err.message+' Use Draw Outline instead.';}
  }
@@ -3346,10 +3354,15 @@ async function restoreRoofSolarModel(){
    const cx=base.reduce((s,p)=>s+p.x,0)/base.length;
    const cy=base.reduce((s,p)=>s+p.y,0)/base.length;
    const a=Number(rotation||0)*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a);
-   state.outline=base.map(p=>{
+   const tx=p=>{
      const dx=(p.x-cx)*scale,dy=(p.y-cy)*scale;
      return {x:clamp(cx+dx*ca-dy*sa),y:clamp(cy+dx*sa+dy*ca)};
-   });
+   };
+   state.outline=base.map(tx);
+   // Auto-detected ridges stay registered with the outline while the user adjusts
+   // size/rotation. Once an endpoint is manually dragged we drop its base points,
+   // making that line fully user-controlled.
+   state.lines=state.lines.map(l=>l.autoBaseA&&l.autoBaseB?{...l,a:tx(l.autoBaseA),b:tx(l.autoBaseB)}:l);
    state.outlineScale=scale;state.outlineRotation=rotation;state.facets=[];
    const slider=$('#manual-outline-scale'),label=$('#manual-outline-scale-label'),rot=$('#manual-outline-rotation'),rotLabel=$('#manual-outline-rotation-label');
    if(slider)slider.value=String(Math.round(scale*100));
@@ -3514,6 +3527,14 @@ async function restoreRoofSolarModel(){
    save();
  }
  // UI events
+ const setManualStageWidth=value=>{
+   const stage=$('#manual-roof-stage');if(!stage)return;
+   stage.style.maxWidth=value;
+   const s=$('#manual-roof-outline-status');if(s&&state.property)s.textContent='Workspace enlarged. Outline and detected ridges remain registered to the aerial image.';
+ };
+ $('#manual-view-900')?.addEventListener('click',()=>setManualStageWidth('900px'));
+ $('#manual-view-1200')?.addEventListener('click',()=>setManualStageWidth('1200px'));
+ $('#manual-view-full')?.addEventListener('click',()=>setManualStageWidth('none'));
  $('#manual-roof-load')?.addEventListener('click',loadProperty);
  $('#manual-roof-address')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();loadProperty();}});
  $('#manual-use-auto-outline')?.addEventListener('click',useExistingAutoOutline);
@@ -3589,7 +3610,12 @@ async function restoreRoofSolarModel(){
  overlay?.addEventListener('pointermove',e=>{
    if(!state.drag)return;const p=snapPoint(svgPoint(e),state.drag.line);
    if(state.drag.kind==='outline')state.outline[state.drag.index]=p;
-   if(state.drag.kind==='line-end')state.lines[state.drag.line][state.drag.end]=p;
+   if(state.drag.kind==='line-end'){
+     const line=state.lines[state.drag.line];
+     line[state.drag.end]=p;
+     delete line.autoBaseA;delete line.autoBaseB;
+     line.autoDetected=false;line.manual=true;
+   }
    state.facets=[];renderManualRoof();
  });
  const endDrag=e=>{if(state.drag){state.drag=null;try{overlay.releasePointerCapture(e.pointerId)}catch{}renderManualRoof();}};
