@@ -3263,13 +3263,35 @@ async function restoreRoofSolarModel(){
      const r=await fetch('/api/mn-aerial?lat='+encodeURIComponent(lat)+'&lng='+encodeURIComponent(lng)+'&address='+encodeURIComponent(formatted),{cache:'no-store'}),d=await r.json().catch(()=>({}));
      if(!r.ok)throw new Error(d.error||'Could not load aerial imagery.');
      state.property={address:formatted,lat,lng,imageryUrl:d.imageryUrl,cropHalfMeters:Number(d.cropHalfMeters||42),imageryLabel:d.imageryLabel||d.source||'Aerial imagery',locationSource:'google-browser-geocode'};
-     state.outline=[];state.lines=[];state.facets=[];state.facetPitches={};state.undo=[];state.redo=[];state.pending=null;
+     state.outline=[];state.autoOutlineBase=[];state.lines=[];state.facets=[];state.facetPitches={};state.undo=[];state.redo=[];state.pending=null;
+     state.outlineScale=1;state.outlineRotation=0;state.outlineOffsetX=0;state.outlineOffsetY=0;
      state.viewZoom=1.25;state.viewPanX=0;state.viewPanY=0;state.viewPanDrag=null;renderManualViewport();
-     const img=$('#manual-roof-image');if(img)img.src=d.imageryUrl+'&v='+Date.now();
+     const img=$('#manual-roof-image');
      const ed=$('#manual-roof-editor-card');if(ed)ed.hidden=false;
-     if(status)status.textContent=formatted+' · '+(d.imageryLabel||'aerial still')+' · exact Google geocode center · draw or load the roof outline.';
-     if(badge)badge.textContent='Property loaded';
+     if(status)status.textContent=formatted+' · '+(d.imageryLabel||'aerial still')+' · loading roof geometry…';
+     if(badge)badge.textContent='Loading roof';
+     if(img){
+       img.src=d.imageryUrl+'&v='+Date.now();
+       try{
+         await new Promise((resolve,reject)=>{
+           if(img.complete&&img.naturalWidth)return resolve();
+           const timer=setTimeout(()=>reject(new Error('Aerial image load timed out.')),10000);
+           const ok=()=>{clearTimeout(timer);resolve();};
+           const bad=()=>{clearTimeout(timer);reject(new Error('Aerial image could not be loaded.'));};
+           img.addEventListener('load',ok,{once:true});img.addEventListener('error',bad,{once:true});
+         });
+       }catch(imageErr){throw imageErr;}
+     }
      renderManualRoof();save();
+     if(status)status.textContent='Aerial loaded · loading existing outline and auto-fitting to the roof…';
+     const autoLoaded=await useExistingAutoOutline();
+     if(autoLoaded){
+       if(badge)badge.textContent='Roof ready';
+       if(status)status.textContent='Roof ready · outline and detected ridges loaded and auto-fitted. Review the geometry, then draw or correct ridge / hip / valley lines.';
+     }else{
+       if(badge)badge.textContent='Property loaded';
+       if(status)status.textContent='Aerial loaded. No reusable auto outline was available; use Draw Outline to continue.';
+     }
    }catch(err){if(status)status.textContent='Could not load property: '+(err?.message||err);if(badge)badge.textContent='Error';}
  }
  async function useExistingAutoOutline(){
@@ -3350,7 +3372,8 @@ async function restoreRoofSolarModel(){
        :'Existing Solaris outline loaded with saved orientation.')+ridgeNote+' Use Move / Select to drag ridge endpoints or Delete to remove a bad ridge.';
      renderManualRoof();
      await autoFitRoofOutline();
-   }catch(err){if(status)status.textContent=err.message+' Use Draw Outline instead.';}
+     return true;
+   }catch(err){if(status)status.textContent=err.message+' Use Draw Outline instead.';return false;}
  }
  function setTool(tool){
    state.tool=tool;state.pending=null;
