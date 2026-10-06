@@ -3682,32 +3682,74 @@ async function restoreRoofSolarModel(){
    graph=graph||buildPlanarFaces();
    const size=metersPerNorm(),defaultPitch=Number($('#manual-roof-default-pitch')?.value||8);
    const planFt2=state.facets.reduce((s,f)=>s+f.planM2*SQFT_PER_M2,0),slopedFt2=state.facets.reduce((s,f)=>s+f.slopedM2*SQFT_PER_M2,0);
-   const lineTotal=type=>state.lines.filter(l=>l.type===type).reduce((s,l)=>{
-     const pitch=defaultPitch,m=normLengthM(l.a,l.b)*pitchFactor(pitch,type);return s+m*FT_PER_M;
-   },0);
-   const ridge=lineTotal('ridge'),hip=lineTotal('hip'),valley=lineTotal('valley'),elevationBreak=lineTotal('elevation_break'),ext=exteriorTotals(),eave=ext.eaveM*FT_PER_M,rake=ext.rakeM*FT_PER_M;
-   const colors={ridge:'#16a34a',hip:'#2563eb',valley:'#dc2626',elevation_break:'#f59e0b'};
+   const lineLengthFt=l=>normLengthM(l.a,l.b)*pitchFactor(defaultPitch,l.type)*FT_PER_M;
+   const lineTotal=type=>state.lines.filter(l=>l.type===type).reduce((s,l)=>s+lineLengthFt(l),0);
+   const ridge=lineTotal('ridge'),hip=lineTotal('hip'),valley=lineTotal('valley'),elevationBreak=lineTotal('elevation_break');
+   const ext=exteriorTotals(),eave=ext.eaveM*FT_PER_M,rake=ext.rakeM*FT_PER_M;
+   const colors={ridge:'#16a34a',hip:'#2563eb',valley:'#dc2626',elevation_break:'#f59e0b',eave:'#111827',rake:'#64748b'};
+   const allSectionOutlines=[state.outline,...(state.sections||[]).map(s=>s.outline||[])].filter(p=>p.length>=3);
    const reportPoints=[
-     ...state.outline,
+     ...allSectionOutlines.flat(),
      ...state.lines.flatMap(l=>[l.a,l.b]),
      ...state.facets.flatMap(f=>f.poly||[])
    ];
    let minX=Math.min(...reportPoints.map(p=>p.x))*1000,maxX=Math.max(...reportPoints.map(p=>p.x))*1000;
    let minY=Math.min(...reportPoints.map(p=>p.y))*1000,maxY=Math.max(...reportPoints.map(p=>p.y))*1000;
-   const rawW=Math.max(1,maxX-minX),rawH=Math.max(1,maxY-minY),pad=Math.max(35,Math.max(rawW,rawH)*.12);
+   const rawW=Math.max(1,maxX-minX),rawH=Math.max(1,maxY-minY),pad=Math.max(28,Math.max(rawW,rawH)*.09);
    minX-=pad;minY-=pad;maxX+=pad;maxY+=pad;
-   const viewW=maxX-minX,viewH=maxY-minY;
-   let svg='<svg viewBox="'+minX+' '+minY+' '+viewW+' '+viewH+'" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto;max-height:720px;background:#fff;border:1px solid #dbe2ea;border-radius:12px"><rect x="'+minX+'" y="'+minY+'" width="'+viewW+'" height="'+viewH+'" fill="#fff"/>';
-   const labelScale=Math.max(.45,Math.min(1.15,Math.max(rawW,rawH)/360));
-   state.facets.forEach((f,i)=>{
-     svg+='<polygon points="'+f.poly.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="'+['#e8eef5','#dbe7f0','#e6e2f3','#e3efe7','#f2e8dc','#e0ebeb'][i%6]+'" stroke="#64748b" stroke-width="'+(3*labelScale)+'" vector-effect="non-scaling-stroke"/>';
-     const cx=f.poly.reduce((s,p)=>s+p.x,0)/f.poly.length*1000,cy=f.poly.reduce((s,p)=>s+p.y,0)/f.poly.length*1000;
-     svg+='<text x="'+cx+'" y="'+cy+'" text-anchor="middle" font-size="'+(22*labelScale)+'" font-weight="700">F'+f.id+'</text><text x="'+cx+'" y="'+(cy+24*labelScale)+'" text-anchor="middle" font-size="'+(15*labelScale)+'">'+f.pitch+'/12 · '+Math.round(f.slopedM2*SQFT_PER_M2)+' ft²</text>';
+   const viewW=maxX-minX,viewH=maxY-minY,labelScale=Math.max(.42,Math.min(1.05,Math.max(rawW,rawH)/360));
+   const svgOpen=()=>'<svg viewBox="'+minX+' '+minY+' '+viewW+' '+viewH+'" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto;max-height:760px;background:#fff;border:1px solid #dbe2ea;border-radius:12px"><rect x="'+minX+'" y="'+minY+'" width="'+viewW+'" height="'+viewH+'" fill="#fff"/>';
+   const polygonSvg=(f,i,mode)=>{
+     const fill=['#e8eef5','#dbe7f0','#e6e2f3','#e3efe7','#f2e8dc','#e0ebeb'][i%6],cx=f.poly.reduce((s,p)=>s+p.x,0)/f.poly.length*1000,cy=f.poly.reduce((s,p)=>s+p.y,0)/f.poly.length*1000;
+     const label=mode==='pitch'?(f.pitch+'/12'):mode==='area'?(Math.round(f.slopedM2*SQFT_PER_M2)+' ft²'):('F'+f.id);
+     return '<polygon points="'+f.poly.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="'+fill+'" stroke="#94a3b8" stroke-width="2.5" vector-effect="non-scaling-stroke"/>'+
+       '<text x="'+cx+'" y="'+cy+'" text-anchor="middle" font-size="'+(22*labelScale)+'" font-weight="700" fill="#111827" stroke="#fff" stroke-width="4" paint-order="stroke">'+label+'</text>';
+   };
+   const outlinesSvg=()=>allSectionOutlines.map((poly,i)=>'<polygon points="'+poly.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="none" stroke="'+(i?'#0891b2':'#111827')+'" stroke-width="5" vector-effect="non-scaling-stroke"/>').join('');
+   const lineName=t=>t==='elevation_break'?'Transition':t.charAt(0).toUpperCase()+t.slice(1);
+   let measureSvg=svgOpen();
+   state.facets.forEach((f,i)=>measureSvg+=polygonSvg(f,i,'facet'));
+   measureSvg+=outlinesSvg();
+   ext.segments.forEach(seg=>{
+     const ax=seg.a.x*1000,ay=seg.a.y*1000,bx=seg.b.x*1000,by=seg.b.y*1000,mx=(ax+bx)/2,my=(ay+by)/2;
+     measureSvg+='<line x1="'+ax+'" y1="'+ay+'" x2="'+bx+'" y2="'+by+'" stroke="'+colors[seg.type]+'" stroke-width="4" vector-effect="non-scaling-stroke"/>'+
+       '<text x="'+mx+'" y="'+(my-6)+'" text-anchor="middle" font-size="'+(13*labelScale)+'" font-weight="700" fill="#111827" stroke="#fff" stroke-width="4" paint-order="stroke">'+Math.round(seg.lengthFt*10)/10+"'"+'</text>';
    });
-   svg+='<polygon points="'+state.outline.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="none" stroke="#111" stroke-width="5" vector-effect="non-scaling-stroke"/>';
-   state.lines.forEach(l=>svg+='<line x1="'+(l.a.x*1000)+'" y1="'+(l.a.y*1000)+'" x2="'+(l.b.x*1000)+'" y2="'+(l.b.y*1000)+'" stroke="'+colors[l.type]+'" stroke-width="5" '+(l.type==='elevation_break'?'stroke-dasharray="14 9" ':'')+'vector-effect="non-scaling-stroke"/>');
-   svg+='</svg>';
-   const rows=state.facets.map(f=>'<tr><td>F'+f.id+'</td><td>'+f.pitch+'/12</td><td>'+Math.round(f.planM2*SQFT_PER_M2)+'</td><td>'+Math.round(f.slopedM2*SQFT_PER_M2)+'</td></tr>').join('');
+   state.lines.forEach(l=>{
+     const ax=l.a.x*1000,ay=l.a.y*1000,bx=l.b.x*1000,by=l.b.y*1000,mx=(ax+bx)/2,my=(ay+by)/2,len=lineLengthFt(l);
+     measureSvg+='<line x1="'+ax+'" y1="'+ay+'" x2="'+bx+'" y2="'+by+'" stroke="'+colors[l.type]+'" stroke-width="5" '+(l.type==='elevation_break'?'stroke-dasharray="14 9" ':'')+'vector-effect="non-scaling-stroke"/>'+
+       '<text x="'+mx+'" y="'+(my-7)+'" text-anchor="middle" font-size="'+(13*labelScale)+'" font-weight="700" fill="#111827" stroke="#fff" stroke-width="4" paint-order="stroke">'+Math.round(len*10)/10+"'"+'</text>';
+   });
+   measureSvg+='</svg>';
+
+   let pitchSvg=svgOpen();state.facets.forEach((f,i)=>pitchSvg+=polygonSvg(f,i,'pitch'));pitchSvg+=outlinesSvg()+'</svg>';
+   let areaSvg=svgOpen();state.facets.forEach((f,i)=>areaSvg+=polygonSvg(f,i,'area'));areaSvg+=outlinesSvg()+'</svg>';
+
+   const rows=state.facets.map(f=>'<tr><td>F'+f.id+'</td><td>'+(f.sectionId==='main'?'Main roof':escRoof((state.sections.find(s=>s.id===f.sectionId)||{}).name||'Roof section'))+'</td><td>'+f.pitch+'/12</td><td>'+Math.round(f.planM2*SQFT_PER_M2)+'</td><td>'+Math.round(f.slopedM2*SQFT_PER_M2)+'</td></tr>').join('');
+   const segmentRows=ext.segments.map((s,i)=>'<tr><td>'+(i+1)+'</td><td>'+lineName(s.type)+'</td><td>'+s.lengthFt.toFixed(1)+' ft</td></tr>').join('')+
+     state.lines.map((l,i)=>'<tr><td>I'+(i+1)+'</td><td>'+lineName(l.type)+'</td><td>'+lineLengthFt(l).toFixed(1)+' ft</td></tr>').join('');
+
+   const wasteRec=recommendedWaste(),wasteOptions=[8,10,12,13,15].filter((v,i,a)=>a.indexOf(v)===i).sort((a,b)=>a-b);
+   if(!wasteOptions.includes(wasteRec))wasteOptions.push(wasteRec);
+   wasteOptions.sort((a,b)=>a-b);
+   const orderArea=slopedFt2*(1+wasteRec/100),orderSquares=orderArea/100;
+   const shingleBundles=Math.ceil(orderSquares*3);
+   const starterLf=eave+rake,starterBundles=Math.ceil(starterLf/100);
+   const ridgeHipLf=ridge+hip,ridgeCapBundles=Math.ceil(ridgeHipLf/33);
+   const syntheticRolls=Math.ceil(orderArea/1000);
+   const iceWaterRolls=Math.ceil(Math.max(0,eave)/32.5);
+   const gutterApronPieces=Math.ceil(eave/10),rakeMetalPieces=Math.ceil(rake/10),valleyMetalPieces=Math.ceil(valley/10);
+   const materialRows=[
+     ['IKO Dynasty field shingles',shingleBundles+' bundles','3 bundles/square planning factor'],
+     ['Starter',starterBundles+' bundles',Math.round(starterLf)+' lf perimeter demand / ~100 lf per bundle'],
+     ['Hip & ridge cap',ridgeCapBundles+' bundles',Math.round(ridgeHipLf)+' lf / ~33 lf per bundle'],
+     ['Synthetic underlayment',syntheticRolls+' rolls','~1,000 ft² per roll planning factor'],
+     ['Ice & water',iceWaterRolls+' rolls','Two-course eave assumption; ~32.5 eave lf per 195 ft² roll'],
+     ['Gutter apron',gutterApronPieces+' × 10 ft',Math.round(eave)+' eave lf'],
+     ['Rake / drip metal',rakeMetalPieces+' × 10 ft',Math.round(rake)+' rake lf'],
+     ['W-valley metal',valleyMetalPieces+' × 10 ft',Math.round(valley)+' valley lf']
+   ];
+
    const report=$('#manual-roof-report');
    if(report)report.innerHTML=
      '<h2>'+escRoof(state.property?.address||'Manual Roof Report')+'</h2>'+
@@ -3716,16 +3758,33 @@ async function restoreRoofSolarModel(){
        '<div class="metric"><span>Sloped area</span><strong>'+Math.round(slopedFt2).toLocaleString()+' ft²</strong></div>'+
        '<div class="metric"><span>Squares</span><strong>'+(slopedFt2/100).toFixed(2)+'</strong></div>'+
        '<div class="metric"><span>Facets</span><strong>'+state.facets.length+'</strong></div>'+
+       '<div class="metric"><span>Roof elevations</span><strong>'+Math.max(1,(state.layers||[]).length)+'</strong></div>'+
+       '<div class="metric"><span>Recommended waste</span><strong>'+wasteRec+'%</strong></div>'+
      '</div>'+
-     '<h3 style="margin-top:18px">2D Roof Diagram</h3>'+svg+
+     '<h3 style="margin-top:18px">Measurement Diagram</h3><p class="muted">Every perimeter and topology segment is dimensioned. Eave/rake labels are automatically classified from DSM facet direction when available.</p>'+measureSvg+
+     '<h3 style="margin-top:18px">Pitch Diagram</h3>'+pitchSvg+
+     '<h3 style="margin-top:18px">Area Diagram</h3>'+areaSvg+
      '<h3 style="margin-top:18px">Linear Measurements</h3><div class="table-wrap"><table><tbody>'+
-       '<tr><th>Ridge</th><td>'+ridge.toFixed(1)+' ft</td></tr><tr><th>Hip</th><td>'+hip.toFixed(1)+' ft</td></tr><tr><th>Valley</th><td>'+valley.toFixed(1)+' ft</td></tr><tr><th>Elevation break</th><td>'+elevationBreak.toFixed(1)+' ft</td></tr><tr><th>Eave</th><td>'+eave.toFixed(1)+' ft</td></tr><tr><th>Rake</th><td>'+rake.toFixed(1)+' ft</td></tr>'+
+       '<tr><th>Ridge</th><td>'+ridge.toFixed(1)+' ft</td></tr><tr><th>Hip</th><td>'+hip.toFixed(1)+' ft</td></tr><tr><th>Valley</th><td>'+valley.toFixed(1)+' ft</td></tr><tr><th>Transition / elevation break</th><td>'+elevationBreak.toFixed(1)+' ft</td></tr><tr><th>Eave</th><td>'+eave.toFixed(1)+' ft</td></tr><tr><th>Rake</th><td>'+rake.toFixed(1)+' ft</td></tr>'+
      '</tbody></table></div>'+
-     '<h3 style="margin-top:18px">Facet Measurements</h3><div class="table-wrap"><table><thead><tr><th>Facet</th><th>Pitch</th><th>Plan ft²</th><th>Sloped ft²</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
-     '<h3 style="margin-top:18px">Waste Options</h3><div class="table-wrap"><table><thead><tr><th>Waste</th><th>Area</th><th>Squares</th></tr></thead><tbody>'+
-       [10,12,15].map(w=>'<tr><td>'+w+'%</td><td>'+Math.round(slopedFt2*(1+w/100)).toLocaleString()+' ft²</td><td>'+(slopedFt2*(1+w/100)/100).toFixed(2)+'</td></tr>').join('')+
+     '<h3 style="margin-top:18px">Segment Measurements</h3><div class="table-wrap"><table><thead><tr><th>Segment</th><th>Type</th><th>Length</th></tr></thead><tbody>'+segmentRows+'</tbody></table></div>'+
+     '<h3 style="margin-top:18px">Facet Measurements</h3><div class="table-wrap"><table><thead><tr><th>Facet</th><th>Roof section</th><th>Pitch</th><th>Plan ft²</th><th>Sloped ft²</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+     '<h3 style="margin-top:18px">Waste / Ordering Area</h3><div class="table-wrap"><table><thead><tr><th>Waste</th><th>Area</th><th>Squares</th><th></th></tr></thead><tbody>'+
+       wasteOptions.map(w=>'<tr><td>'+w+'%</td><td>'+Math.round(slopedFt2*(1+w/100)).toLocaleString()+' ft²</td><td>'+(slopedFt2*(1+w/100)/100).toFixed(2)+'</td><td>'+(w===wasteRec?'<strong>Recommended</strong>':'')+'</td></tr>').join('')+
      '</tbody></table></div>'+
-     '<p class="muted">Manual topology authority: user-confirmed outline and ridge / hip / valley geometry. Pitch is assigned by the user per facet. Exterior eave/rake split is an assisted estimate and should be reviewed before ordering.</p>';
+     '<p class="muted">Waste recommendation uses facet count, hip/valley complexity and additional roof sections. Review unusual cut-up roofs before ordering.</p>';
+
+   const materials=$('#manual-roof-materials');
+   if(materials)materials.innerHTML='<h3>Solaris Production Material Estimate</h3>'+
+     '<p class="muted">Planning quantities based on '+wasteRec+'% recommended waste. Product coverage varies by manufacturer/package; confirm supplier coverage before final PO.</p>'+
+     '<div class="table-wrap"><table><thead><tr><th>Material</th><th>Suggested quantity</th><th>Basis</th></tr></thead><tbody>'+
+     materialRows.map(r=>'<tr><td>'+r[0]+'</td><td><strong>'+r[1]+'</strong></td><td>'+r[2]+'</td></tr>').join('')+
+     '</tbody></table></div>'+
+     '<div class="metrics" style="grid-template-columns:repeat(auto-fit,minmax(145px,1fr));margin-top:12px">'+
+       '<div class="metric"><span>Order area</span><strong>'+Math.round(orderArea).toLocaleString()+' ft²</strong></div>'+
+       '<div class="metric"><span>Order squares</span><strong>'+orderSquares.toFixed(2)+'</strong></div>'+
+       '<div class="metric"><span>Shingle bundles</span><strong>'+shingleBundles+'</strong></div>'+
+     '</div>';
    const rc=$('#manual-roof-report-card');if(rc)rc.hidden=false;
    save();
  }
