@@ -3438,6 +3438,21 @@ async function restoreRoofSolarModel(){
  $('#manual-roof-clear-lines')?.addEventListener('click',()=>{pushUndo();state.lines=[];state.pending=null;state.facets=[];renderManualRoof();});
  $('#manual-roof-undo')?.addEventListener('click',()=>{if(!state.undo.length)return;state.redo.push(snapshot());restore(state.undo.pop());});
  $('#manual-roof-redo')?.addEventListener('click',()=>{if(!state.redo.length)return;state.undo.push(snapshot());restore(state.redo.pop());});
+ $('#manual-roof-auto-pitch')?.addEventListener('click',async()=>{
+   const status=$('#manual-roof-line-status');if(!state.property){if(status)status.textContent='Load a property first.';return;}
+   const projectId='roof-'+Number(state.property.lat).toFixed(6)+'-'+Number(state.property.lng).toFixed(6);
+   try{
+     const r=await fetch('/api/roof-report?projectId='+encodeURIComponent(projectId),{cache:'no-store'}),d=await r.json().catch(()=>({}));
+     const facets=d?.solarModel?.model?.facets||[];
+     const wt=facets.reduce((s,f)=>s+Number(f.slopedAreaSqFt||f.flatAreaSqFt||0),0);
+     const pitch=facets.length?(wt>0?facets.reduce((s,f)=>s+Number(f.rise12||0)*Number(f.slopedAreaSqFt||f.flatAreaSqFt||0),0)/wt:facets.reduce((s,f)=>s+Number(f.rise12||0),0)/facets.length):NaN;
+     if(!Number.isFinite(pitch)||pitch<=0)throw new Error('No saved DSM pitch is available for this roof.');
+     const rounded=Math.max(2,Math.min(18,Math.round(pitch)));
+     const sel=$('#manual-roof-default-pitch');if(sel)sel.value=String(rounded);
+     state.facetPitches={};if(status)status.textContent='Auto pitch loaded from Solaris DSM: '+rounded+'/12. You can override any facet after geometry is built.';
+     if(state.facets.length)buildManualGeometry();
+   }catch(err){if(status)status.textContent='Auto pitch unavailable: '+(err?.message||err)+'. Enter the default pitch manually.';}
+ });
  $('#manual-roof-build')?.addEventListener('click',buildManualGeometry);
  $('#manual-roof-recalculate')?.addEventListener('click',()=>{buildManualGeometry();});
  $('#manual-roof-print')?.addEventListener('click',()=>window.print());
