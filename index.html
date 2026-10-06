@@ -82,6 +82,21 @@
           <div class="actions"><button id="check-roof-aerial-view" class="secondary" type="button">Check Aerial View</button><button id="render-roof-aerial-view" class="secondary" type="button">Generate Aerial View</button><button id="play-roof-aerial-view" class="secondary" type="button" disabled>Load Flyover</button></div>
           <div id="roof-aerial-view-status" class="analysis-state" style="margin-top:10px">Check whether an Aerial View already exists for this property.</div>
           <video id="roof-aerial-view-video" hidden controls playsinline style="width:100%;max-height:520px;margin-top:12px;border-radius:12px;background:#000"></video>
+          <div class="actions" style="margin-top:12px"><button id="start-roof-aerial-qa" class="primary" type="button" disabled>Start Aerial QA</button></div>
+          <div id="roof-aerial-qa-panel" hidden class="card" style="margin-top:12px">
+            <div class="card-head"><div><div class="eyebrow">AERIAL QA</div><h3>Internal roof-line review</h3><p class="muted">Review each DSM ridge / hip / valley against the live oblique flyover. Confirm, reclassify, reject, or leave unresolved.</p></div><span id="roof-aerial-qa-badge" class="status">Not started</span></div>
+            <div id="roof-aerial-qa-plan" style="background:#fff;border-radius:12px;overflow:hidden;margin-bottom:12px"></div>
+            <div id="roof-aerial-qa-current" class="analysis-state">Load the flyover, then start QA.</div>
+            <div class="actions" style="margin-top:10px">
+              <button type="button" class="secondary" data-aerial-time="4">Angle 1</button>
+              <button type="button" class="secondary" data-aerial-time="12">Angle 2</button>
+              <button type="button" class="secondary" data-aerial-time="20">Angle 3</button>
+              <button type="button" class="secondary" data-aerial-time="28">Angle 4</button>
+              <button type="button" class="secondary" data-aerial-time="36">Angle 5</button>
+            </div>
+            <div id="roof-aerial-qa-list" style="margin-top:12px"></div>
+            <div class="actions" style="margin-top:12px"><button id="save-roof-aerial-qa" class="primary" type="button">Save Aerial QA</button></div>
+          </div>
         </div>
         <div class="actions" style="margin-top:12px"><button id="roof-outline-tool" class="primary" type="button">Roof Outline</button><button id="detect-roof-lines" class="secondary" type="button">Detect Internal Roof Lines</button></div>
         <p class="muted" id="roof-workspace-status">Accept the roof outline first, then detect and classify internal roof geometry.</p>
@@ -323,6 +338,6 @@
     </div>
   </main>
 
-  <script src="/app.js?v=20261005-aerial-render1"></script>
+  <script src="/app.js?v=20261006-aerial-qa1"></script>
 </body>
 </html>
