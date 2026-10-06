@@ -3149,12 +3149,12 @@ async function restoreRoofSolarModel(){
  const FT_PER_M=3.280839895,SQFT_PER_M2=10.7639104167;
  const $=s=>document.querySelector(s);
  const state={
-   property:null,outline:[],lines:[],tool:'ridge',pending:null,mode:'idle',
+   property:null,outline:[],autoOutlineBase:[],outlineScale:1,lines:[],tool:'ridge',pending:null,mode:'idle',
    undo:[],redo:[],facets:[],facetPitches:{},drag:null
  };
  const save=()=>{
    try{localStorage.setItem('solarisManualRoof',JSON.stringify({
-     property:state.property,outline:state.outline,lines:state.lines,
+     property:state.property,outline:state.outline,autoOutlineBase:state.autoOutlineBase,outlineScale:state.outlineScale,lines:state.lines,
      facetPitches:state.facetPitches,defaultPitch:Number($('#manual-roof-default-pitch')?.value||8)
    }))}catch{}
  };
@@ -3278,8 +3278,12 @@ async function restoreRoofSolarModel(){
        const east=(Number(p.lng)-lng0)*111320*cos,north=(Number(p.lat)-lat0)*111320;
        return {x:clamp(.5+east/(half*2)),y:clamp(.5-north/(half*2))};
      };
-     pushUndo();state.outline=d.solarModel.outline.map(toNorm);state.lines=[];state.facets=[];state.facetPitches={};
-     if(status)status.textContent='Existing Solaris outline loaded. Edit points if needed, then draw the interior roof lines.';
+     pushUndo();
+     state.autoOutlineBase=d.solarModel.outline.map(toNorm);
+     state.outline=state.autoOutlineBase.map(p=>({...p}));
+     state.outlineScale=1;
+     state.lines=[];state.facets=[];state.facetPitches={};
+     if(status)status.textContent='Existing Solaris outline loaded. Use Expand 2% if the mask sits inside the roof edge, then fine-tune points if needed.';
      renderManualRoof();
    }catch(err){if(status)status.textContent=err.message+' Use Draw Outline instead.';}
  }
@@ -3292,6 +3296,25 @@ async function restoreRoofSolarModel(){
    const status=$('#manual-roof-outline-status');
    if(state.outline.length<3){if(status)status.textContent='Outline needs at least 3 points.';return;}
    state.mode='idle';if(status)status.textContent='Outline confirmed. Draw ridges, hips and valleys.';renderManualRoof();
+ }
+ function scaleOutline(factor){
+   if(state.outline.length<3)return;
+   pushUndo();
+   const cx=state.outline.reduce((s,p)=>s+p.x,0)/state.outline.length;
+   const cy=state.outline.reduce((s,p)=>s+p.y,0)/state.outline.length;
+   state.outline=state.outline.map(p=>({x:clamp(cx+(p.x-cx)*factor),y:clamp(cy+(p.y-cy)*factor)}));
+   state.outlineScale*=factor;
+   state.facets=[];
+   const pct=(state.outlineScale*100-100);
+   const status=$('#manual-roof-outline-status');
+   if(status)status.textContent='Outline size adjusted '+(pct>=0?'+':'')+pct.toFixed(1)+'% from the loaded auto outline. Fine-tune individual points if needed.';
+   renderManualRoof();
+ }
+ function resetAutoOutline(){
+   if(!state.autoOutlineBase?.length)return;
+   pushUndo();state.outline=state.autoOutlineBase.map(p=>({...p}));state.outlineScale=1;state.facets=[];state.pending=null;
+   const status=$('#manual-roof-outline-status');if(status)status.textContent='Auto outline restored to its original size.';
+   renderManualRoof();
  }
  function clearOutline(){pushUndo();state.outline=[];state.lines=[];state.facets=[];state.pending=null;renderManualRoof();}
  function splitSegmentsForGraph(){
@@ -3442,6 +3465,9 @@ async function restoreRoofSolarModel(){
  $('#manual-draw-outline')?.addEventListener('click',()=>{pushUndo();state.mode='draw-outline';state.outline=[];state.lines=[];state.pending=null;const s=$('#manual-roof-outline-status');if(s)s.textContent='Click around the roof perimeter in order.';renderManualRoof();});
  $('#manual-finish-outline')?.addEventListener('click',finishOutline);
  $('#manual-edit-outline')?.addEventListener('click',()=>{state.mode='edit-outline';const s=$('#manual-roof-outline-status');if(s)s.textContent='Drag the white outline points to correct the roof boundary.';});
+ $('#manual-expand-outline')?.addEventListener('click',()=>scaleOutline(1.02));
+ $('#manual-shrink-outline')?.addEventListener('click',()=>scaleOutline(0.98));
+ $('#manual-reset-auto-outline')?.addEventListener('click',resetAutoOutline);
  $('#manual-clear-outline')?.addEventListener('click',clearOutline);
  document.querySelectorAll('[data-manual-tool]').forEach(b=>b.addEventListener('click',()=>setTool(b.dataset.manualTool)));
  $('#manual-roof-clear-lines')?.addEventListener('click',()=>{pushUndo();state.lines=[];state.pending=null;state.facets=[];renderManualRoof();});
@@ -3510,7 +3536,7 @@ async function restoreRoofSolarModel(){
  try{
    const saved=JSON.parse(localStorage.getItem('solarisManualRoof')||'null');
    if(saved){
-     state.property=saved.property||null;state.outline=saved.outline||[];state.lines=saved.lines||[];state.facetPitches=saved.facetPitches||{};
+     state.property=saved.property||null;state.outline=saved.outline||[];state.autoOutlineBase=saved.autoOutlineBase||[];state.outlineScale=Number(saved.outlineScale||1);state.lines=saved.lines||[];state.facetPitches=saved.facetPitches||{};
      if($('#manual-roof-default-pitch')&&saved.defaultPitch)$('#manual-roof-default-pitch').value=String(saved.defaultPitch);
      if(state.property){
        $('#manual-roof-address').value=state.property.address||'';
