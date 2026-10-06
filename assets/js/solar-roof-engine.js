@@ -1269,6 +1269,7 @@ function buildRoofMeasurements(outline,facets=[],roofLines=[]){
     ridgeFt:sumLine("ridge"),
     hipFt:sumLine("hip"),
     valleyFt:sumLine("valley"),
+    transitionFt:sumLine("elevation_break"),
     exteriorEdges:exterior,
     facetCount:facets.length
   };
@@ -1277,7 +1278,7 @@ function buildRoofMeasurements(outline,facets=[],roofLines=[]){
 function dedupeRoofLines(lines=[]){
   const kept=[];
   for(const line of [...lines].sort((a,b)=>Number(b.lengthMeters||0)-Number(a.lengthMeters||0))){
-    if(!["ridge","hip","valley"].includes(line.type)){kept.push(line);continue}
+    if(!["ridge","hip","valley","elevation_break"].includes(line.type)){kept.push(line);continue}
     let duplicate=false;
     for(let i=0;i<kept.length;i++){
       const k=kept[i];
@@ -1442,12 +1443,12 @@ function facetBoundaryAdjacencyLines(facets=[],dsm=null){
 }
 
 function fuseRoofLineEvidence(primaryLines=[],rasterLines=[],facetAdjacencyLines=[],outline=[]){
-  const primary=(primaryLines||[]).filter(l=>["ridge","hip","valley"].includes(l?.type)&&l?.a&&l?.b).map(l=>({...l,evidenceSource:l.source||"plane"}));
+  const primary=(primaryLines||[]).filter(l=>["ridge","hip","valley","elevation_break"].includes(l?.type)&&l?.a&&l?.b).map(l=>({...l,evidenceSource:l.source||"plane"}));
   const accepted=[...primary],added=[],facetAdded=[];
   // Facet-boundary adjacency is structural evidence: two fitted roof planes
   // actually share an edge in the partition. Prefer it over image-only raster
   // proposals when it adds a missing category or closes a graph gap.
-  for(const line of (facetAdjacencyLines||[]).filter(l=>["ridge","hip","valley"].includes(l?.type)&&l?.a&&l?.b)){
+  for(const line of (facetAdjacencyLines||[]).filter(l=>["ridge","hip","valley","elevation_break"].includes(l?.type)&&l?.a&&l?.b)){
     const len=Number(line.lengthMeters||metersBetween(line.a,line.b));
     if(!Number.isFinite(len)||len<.8||lineLooksDuplicate(line,accepted))continue;
     const typeMissing=!accepted.some(x=>x.type===line.type);
@@ -1484,7 +1485,8 @@ function fuseRoofLineEvidence(primaryLines=[],rasterLines=[],facetAdjacencyLines
       addedByType:{
         ridge:added.filter(l=>l.type==="ridge").length,
         hip:added.filter(l=>l.type==="hip").length,
-        valley:added.filter(l=>l.type==="valley").length
+        valley:added.filter(l=>l.type==="valley").length,
+        elevationBreak:added.filter(l=>l.type==="elevation_break").length
       },
       finalCount:snapped.length,
       version:"multi-evidence-topology-fusion-v2"
