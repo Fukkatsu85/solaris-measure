@@ -57,6 +57,12 @@
           <button id="manual-draw-outline" class="primary" type="button">Draw Outline</button>
           <button id="manual-finish-outline" class="secondary" type="button">Finish Outline</button>
           <button id="manual-edit-outline" class="secondary" type="button">Edit Points</button>
+          <button id="manual-rotate-left" class="secondary" type="button">Rotate −1°</button>
+          <button id="manual-rotate-right" class="secondary" type="button">Rotate +1°</button>
+          <label style="display:flex;gap:8px;align-items:center">Rotation
+            <input id="manual-outline-rotation" type="range" min="-20" max="20" step="0.5" value="0">
+            <span id="manual-outline-rotation-label">0°</span>
+          </label>
           <button id="manual-expand-outline" class="secondary" type="button">Expand 5%</button>
           <button id="manual-expand-outline-fine" class="secondary" type="button">Expand 1%</button>
           <button id="manual-shrink-outline-fine" class="secondary" type="button">Shrink 1%</button>
@@ -424,6 +430,6 @@
     </div>
   </main>
 
-  <script src="/app.js?v=20261006-manual-roof6"></script>
+  <script src="/app.js?v=20261006-manual-roof7"></script>
 </body>
 </html>
