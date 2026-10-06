@@ -3886,9 +3886,61 @@ async function restoreRoofSolarModel(){
    const segs=classifyExteriorSegments(),eaveFt=segs.filter(s=>s.type==='eave').reduce((a,s)=>a+s.lengthFt,0),rakeFt=segs.filter(s=>s.type==='rake').reduce((a,s)=>a+s.lengthFt,0);
    return {eaveM:eaveFt/FT_PER_M,rakeM:rakeFt/FT_PER_M,segments:segs};
  }
+ const beautifySmallFacetForReport=f=>{
+   const original=(f.poly||[]).map(p=>({...p})),areaFt2=Number(f.planM2||0)*SQFT_PER_M2;
+   if(original.length<3||areaFt2>260)return {poly:original,changed:false,kind:null};
+   const maxMove=.012;
+
+   if(original.length===3){
+     // Real dormer/hip triangles are very commonly symmetric. Use the longest
+     // edge as the base and center the opposite apex only when it is already
+     // close to the base's perpendicular bisector.
+     let baseI=0,best=-1;
+     for(let i=0;i<3;i++){
+       const d=dist(original[i],original[(i+1)%3]);
+       if(d>best){best=d;baseI=i;}
+     }
+     const ia=baseI,ib=(baseI+1)%3,ic=(baseI+2)%3,a=original[ia],b=original[ib],c=original[ic];
+     const vx=b.x-a.x,vy=b.y-a.y,len=Math.hypot(vx,vy)||1,ux=vx/len,uy=vy/len;
+     const mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
+     const along=(c.x-mx)*ux+(c.y-my)*uy;
+     const target={x:c.x-along*ux,y:c.y-along*uy},move=dist(c,target);
+     const limit=Math.min(maxMove,len*.12);
+     if(move>0&&move<=limit){
+       const out=original.map(p=>({...p}));out[ic]=target;
+       return {poly:out,changed:true,kind:'isosceles'};
+     }
+   }
+
+   if(original.length===4){
+     // When opposite edges are already nearly parallel, close the small
+     // residual error into a true parallelogram while preserving the centroid.
+     const a0=lineAngle(original[0],original[1]),a1=lineAngle(original[1],original[2]),
+           a2=lineAngle(original[2],original[3]),a3=lineAngle(original[3],original[0]);
+     if(angleDiff(a0,a2)<=12&&angleDiff(a1,a3)<=12){
+       const dx=(original[1].x+original[3].x-original[0].x-original[2].x)/4;
+       const dy=(original[1].y+original[3].y-original[0].y-original[2].y)/4;
+       const move=Math.hypot(dx,dy);
+       if(move>0&&move<=maxMove){
+         const out=[
+           {x:original[0].x+dx,y:original[0].y+dy},
+           {x:original[1].x-dx,y:original[1].y-dy},
+           {x:original[2].x+dx,y:original[2].y+dy},
+           {x:original[3].x-dx,y:original[3].y-dy}
+         ].map(p=>({x:clamp(p.x),y:clamp(p.y)}));
+         return {poly:out,changed:true,kind:'parallelogram'};
+       }
+     }
+   }
+
+   return {poly:original,changed:false,kind:null};
+ };
  function generateManualReport(graph=null){
    if(!state.facets.length){buildManualGeometry();return;}
    graph=graph||buildPlanarFaces();
+   const reportFacetShapes=state.facets.map(f=>beautifySmallFacetForReport(f));
+   const reportFacets=state.facets.map((f,i)=>({...f,reportPoly:reportFacetShapes[i].poly}));
+   const symmetryFixCount=reportFacetShapes.filter(x=>x.changed).length;
    const size=metersPerNorm(),defaultPitch=Number($('#manual-roof-default-pitch')?.value||8);
    const planFt2=state.facets.reduce((s,f)=>s+f.planM2*SQFT_PER_M2,0),slopedFt2=state.facets.reduce((s,f)=>s+f.slopedM2*SQFT_PER_M2,0);
    const lineLengthFt=l=>normLengthM(l.a,l.b)*pitchFactor(defaultPitch,l.type)*FT_PER_M;
@@ -3900,7 +3952,7 @@ async function restoreRoofSolarModel(){
    const reportPoints=[
      ...allSectionOutlines.flat(),
      ...state.lines.flatMap(l=>[l.a,l.b]),
-     ...state.facets.flatMap(f=>f.poly||[])
+     ...reportFacets.flatMap(f=>f.reportPoly||f.poly||[])
    ];
    let minX=Math.min(...reportPoints.map(p=>p.x))*1000,maxX=Math.max(...reportPoints.map(p=>p.x))*1000;
    let minY=Math.min(...reportPoints.map(p=>p.y))*1000,maxY=Math.max(...reportPoints.map(p=>p.y))*1000;
@@ -3909,15 +3961,15 @@ async function restoreRoofSolarModel(){
    const viewW=maxX-minX,viewH=maxY-minY,labelScale=Math.max(.42,Math.min(1.05,Math.max(rawW,rawH)/360));
    const svgOpen=()=>'<svg viewBox="'+minX+' '+minY+' '+viewW+' '+viewH+'" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto;max-height:760px;background:#fff;border:1px solid #dbe2ea;border-radius:12px"><rect x="'+minX+'" y="'+minY+'" width="'+viewW+'" height="'+viewH+'" fill="#fff"/>';
    const polygonSvg=(f,i,mode)=>{
-     const fill=['#e8eef5','#dbe7f0','#e6e2f3','#e3efe7','#f2e8dc','#e0ebeb'][i%6],cx=f.poly.reduce((s,p)=>s+p.x,0)/f.poly.length*1000,cy=f.poly.reduce((s,p)=>s+p.y,0)/f.poly.length*1000;
+     const poly=f.reportPoly||f.poly,fill=['#e8eef5','#dbe7f0','#e6e2f3','#e3efe7','#f2e8dc','#e0ebeb'][i%6],cx=poly.reduce((s,p)=>s+p.x,0)/poly.length*1000,cy=poly.reduce((s,p)=>s+p.y,0)/poly.length*1000;
      const label=mode==='pitch'?(f.pitch+'/12'):mode==='area'?(Math.round(f.slopedM2*SQFT_PER_M2)+' ft²'):('F'+f.id),areaFt2=f.planM2*SQFT_PER_M2;
-     return '<polygon points="'+f.poly.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="'+fill+'" stroke="#94a3b8" stroke-width="2.5" vector-effect="non-scaling-stroke"/>'+
+     return '<polygon points="'+poly.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="'+fill+'" stroke="#94a3b8" stroke-width="2.5" vector-effect="non-scaling-stroke"/>'+
        (areaFt2>=28?'<text x="'+cx+'" y="'+cy+'" text-anchor="middle" font-size="'+(22*labelScale)+'" font-weight="700" fill="#111827" stroke="#fff" stroke-width="4" paint-order="stroke">'+label+'</text>':'');
    };
    const outlinesSvg=()=>allSectionOutlines.map((poly,i)=>'<polygon points="'+poly.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="none" stroke="'+(i?'#0891b2':'#111827')+'" stroke-width="5" vector-effect="non-scaling-stroke"/>').join('');
    const lineName=t=>t==='elevation_break'?'Transition':t.charAt(0).toUpperCase()+t.slice(1);
    let measureSvg=svgOpen();
-   state.facets.forEach((f,i)=>measureSvg+=polygonSvg(f,i,'facet'));
+   reportFacets.forEach((f,i)=>measureSvg+=polygonSvg(f,i,'facet'));
    measureSvg+=outlinesSvg();
    ext.segments.forEach(seg=>{
      const ax=seg.a.x*1000,ay=seg.a.y*1000,bx=seg.b.x*1000,by=seg.b.y*1000,mx=(ax+bx)/2,my=(ay+by)/2;
@@ -3931,8 +3983,8 @@ async function restoreRoofSolarModel(){
    });
    measureSvg+='</svg>';
 
-   let pitchSvg=svgOpen();state.facets.forEach((f,i)=>pitchSvg+=polygonSvg(f,i,'pitch'));pitchSvg+=outlinesSvg()+'</svg>';
-   let areaSvg=svgOpen();state.facets.forEach((f,i)=>areaSvg+=polygonSvg(f,i,'area'));areaSvg+=outlinesSvg()+'</svg>';
+   let pitchSvg=svgOpen();reportFacets.forEach((f,i)=>pitchSvg+=polygonSvg(f,i,'pitch'));pitchSvg+=outlinesSvg()+'</svg>';
+   let areaSvg=svgOpen();reportFacets.forEach((f,i)=>areaSvg+=polygonSvg(f,i,'area'));areaSvg+=outlinesSvg()+'</svg>';
 
    const rows=state.facets.map(f=>'<tr><td>F'+f.id+'</td><td>'+(f.sectionId==='main'?'Main roof':escRoof((state.sections.find(s=>s.id===f.sectionId)||{}).name||'Roof section'))+'</td><td>'+f.pitch+'/12</td><td>'+Math.round(f.planM2*SQFT_PER_M2)+'</td><td>'+Math.round(f.slopedM2*SQFT_PER_M2)+'</td></tr>').join('');
    const segmentRows=ext.segments.map((s,i)=>'<tr><td>'+(i+1)+'</td><td>'+lineName(s.type)+'</td><td>'+s.lengthFt.toFixed(1)+' ft</td></tr>').join('')+
@@ -3970,7 +4022,7 @@ async function restoreRoofSolarModel(){
        '<div class="metric"><span>Roof elevations</span><strong>'+Math.max(1,(state.layers||[]).length)+'</strong></div>'+
        '<div class="metric"><span>Recommended waste</span><strong>'+wasteRec+'%</strong></div>'+
      '</div>'+
-     '<h3 style="margin-top:18px">Measurement Diagram</h3><p class="muted">Every perimeter and topology segment is dimensioned. Eave/rake labels are automatically classified from DSM facet direction when available.</p>'+measureSvg+
+     '<h3 style="margin-top:18px">Measurement Diagram</h3><p class="muted">Every perimeter and topology segment is dimensioned. Eave/rake labels are automatically classified from DSM facet direction when available.'+(symmetryFixCount?' '+symmetryFixCount+' small facet'+(symmetryFixCount===1?' was':'s were')+' symmetrically cleaned for report presentation.':'')+'</p>'+measureSvg+
      '<h3 style="margin-top:18px">Pitch Diagram</h3>'+pitchSvg+
      '<h3 style="margin-top:18px">Area Diagram</h3>'+areaSvg+
      '<h3 style="margin-top:18px">Linear Measurements</h3><div class="table-wrap"><table><tbody>'+
