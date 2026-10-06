@@ -3367,10 +3367,11 @@ async function restoreRoofSolarModel(){
        const q=mercator(Number(p.lat),Number(p.lng));
        return {x:clamp(.5+(q.x-center3857.x)/(half*2)),y:clamp(.5-(q.y-center3857.y)/(half*2))};
      };
-     state.autoFacetData=(d.solarModel?.model?.facets||[]).map((f,i)=>({
-       id:i+1,z0:Number(f.z0),rise12:Number(f.rise12),azimuthDegrees:Number(f.azimuthDegrees),
-       outline:(f.outline||[]).map(toNorm),area:Number(f.slopedAreaSqFt||f.flatAreaSqFt||0)
-     })).filter(f=>f.outline.length>=3);
+     state.autoFacetData=(d.solarModel?.model?.facets||[]).map((f,i)=>{
+       const outline=(f.outline||[]).map(toNorm);
+       return {id:i+1,z0:Number(f.z0),rise12:Number(f.rise12),azimuthDegrees:Number(f.azimuthDegrees),
+         outline,autoBaseOutline:outline.map(p=>({...p})),area:Number(f.slopedAreaSqFt||f.flatAreaSqFt||0)};
+     }).filter(f=>f.outline.length>=3);
      const zFacets=state.autoFacetData.filter(f=>Number.isFinite(f.z0)).sort((a,b)=>a.z0-b.z0);
      const clusters=[];
      zFacets.forEach(f=>{
@@ -3378,7 +3379,7 @@ async function restoreRoofSolarModel(){
        if(!target){target={items:[],meanZ:f.z0};clusters.push(target);}
        target.items.push(f);target.meanZ=target.items.reduce((s,x)=>s+x.z0,0)/target.items.length;
      });
-     state.layers=clusters.map((g,i)=>({id:'elevation-'+(i+1),meanZ:g.meanZ,facetCount:g.items.length,polygons:g.items.map(x=>x.outline),source:'dsm'}));
+     state.layers=clusters.map((g,i)=>({id:'elevation-'+(i+1),meanZ:g.meanZ,facetCount:g.items.length,facetIds:g.items.map(x=>x.id),polygons:g.items.map(x=>x.outline),source:'dsm'}));
      const dominantAxis=(items,angleOf,weightOf)=>{
        let sx=0,sy=0,total=0;
        (items||[]).forEach((item,i)=>{
@@ -3472,6 +3473,17 @@ async function restoreRoofSolarModel(){
      return {x:clamp(cx+dx*ca-dy*sa+ox),y:clamp(cy+dx*sa+dy*ca+oy)};
    };
    state.outline=base.map(tx);
+   state.autoFacetData=(state.autoFacetData||[]).map(f=>{
+     const facetBase=(f.autoBaseOutline&&f.autoBaseOutline.length)?f.autoBaseOutline:(f.outline||[]);
+     return {...f,autoBaseOutline:facetBase.map(p=>({...p})),outline:facetBase.map(tx)};
+   });
+   if(state.autoFacetData.length){
+     const byId=new Map(state.autoFacetData.map(f=>[f.id,f]));
+     state.layers=(state.layers||[]).map(layer=>({
+       ...layer,
+       polygons:(layer.facetIds||[]).map(id=>byId.get(id)?.outline).filter(p=>p?.length>=3)
+     }));
+   }
    // Auto-detected ridges stay registered with the outline while the user adjusts
    // size/rotation. Once an endpoint is manually dragged we drop its base points,
    // making that line fully user-controlled.
@@ -3653,15 +3665,28 @@ async function restoreRoofSolarModel(){
    // Snap all manually drawn endpoints to the nearest structural anchor before graph solve.
    state.lines=state.lines.map((l,i)=>({...l,a:snapPoint(l.a,i),b:snapPoint(l.b,i)})).filter(l=>dist(l.a,l.b)>.004);
    const graph=buildPlanarFaces(),size=metersPerNorm(),defaultPitch=Number($('#manual-roof-default-pitch')?.value||8);
-   state.facets=graph.faces.map((f,i)=>{
-     const poly=f.ids.map(id=>graph.nodes[id]),pitch=Number(state.facetPitches[i+1]??defaultPitch);
-     const planM2=f.area*size*size,slopedM2=planM2*Math.sqrt(1+Math.pow(pitch/12,2));
-     return {id:i+1,poly,pitch,planM2,slopedM2,sectionId:'main'};
-   });
+   const detectedFacets=(state.autoFacetData||[]).filter(f=>(f.outline||[]).length>=3&&Math.abs(polygonArea(f.outline))>.00005);
+   if(detectedFacets.length>=3){
+     state.facets=detectedFacets.map((f,i)=>{
+       const id=i+1,autoPitch=Number(f.rise12),pitch=Number(state.facetPitches[id]??(Number.isFinite(autoPitch)&&autoPitch>0?Math.max(2,Math.min(18,Math.round(autoPitch))):defaultPitch));
+       const reportedSlopedFt2=Number(f.area);
+       const slopeFactor=Math.sqrt(1+Math.pow(pitch/12,2));
+       const geometricPlanM2=Math.abs(polygonArea(f.outline))*size*size;
+       const slopedM2=Number.isFinite(reportedSlopedFt2)&&reportedSlopedFt2>0?reportedSlopedFt2/SQFT_PER_M2:geometricPlanM2*slopeFactor;
+       const planM2=slopedM2/slopeFactor;
+       return {id,poly:f.outline.map(p=>({...p})),pitch,planM2,slopedM2,sectionId:'main',source:'dsm-facet',elevationZ:f.z0,autoFacetId:f.id};
+     });
+   }else{
+     state.facets=graph.faces.map((f,i)=>{
+       const poly=f.ids.map(id=>graph.nodes[id]),pitch=Number(state.facetPitches[i+1]??defaultPitch);
+       const planM2=f.area*size*size,slopedM2=planM2*Math.sqrt(1+Math.pow(pitch/12,2));
+       return {id:i+1,poly,pitch,planM2,slopedM2,sectionId:'main',source:'manual-graph'};
+     });
+   }
    (state.sections||[]).forEach(sec=>{
      const poly=sec.outline||[];if(poly.length<3)return;
      const id=state.facets.length+1,pitch=Number(state.facetPitches[id]??defaultPitch),planM2=Math.abs(polygonArea(poly))*size*size,slopedM2=planM2*Math.sqrt(1+Math.pow(pitch/12,2));
-     state.facets.push({id,poly,pitch,planM2,slopedM2,sectionId:sec.id,simpleSection:true});
+     state.facets.push({id,poly,pitch,planM2,slopedM2,sectionId:sec.id,simpleSection:true,source:'manual-section'});
    });
    if(!state.facets.length){
      if(status)status.textContent='No closed facets were created. Make sure interior lines terminate on the perimeter or on another roof line.';
@@ -3670,7 +3695,7 @@ async function restoreRoofSolarModel(){
    const table=$('#manual-roof-facet-table');
    if(table)table.innerHTML='<table><thead><tr><th>Facet</th><th>Pitch</th><th>Plan ft²</th><th>Sloped ft²</th></tr></thead><tbody>'+state.facets.map(f=>'<tr><td>F'+f.id+'</td><td><select data-manual-facet-pitch="'+f.id+'">'+[2,3,4,5,6,7,8,9,10,11,12,14,16,18].map(p=>'<option value="'+p+'"'+(p===f.pitch?' selected':'')+'>'+p+'/12</option>').join('')+'</select></td><td>'+Math.round(f.planM2*SQFT_PER_M2)+'</td><td>'+Math.round(f.slopedM2*SQFT_PER_M2)+'</td></tr>').join('')+'</tbody></table>';
    if(badge)badge.textContent=state.facets.length+' facets';
-   if(status)status.textContent='Roof graph built ✓ · '+state.facets.length+' closed facets. Review pitch, then generate/report.';
+   if(status)status.textContent='Roof geometry built ✓ · '+state.facets.length+' facets'+(detectedFacets.length>=3?' from detected DSM roof planes':' from manual topology')+'. Review pitch, then generate/report.';
    generateManualReport(graph);
    renderManualRoof();save();
  }
@@ -3838,10 +3863,10 @@ async function restoreRoofSolarModel(){
      const half=Number(state.property.cropHalfMeters||42),R=6378137,lat0=Number(state.property.lat),lng0=Number(state.property.lng);
      const merc=(lat,lng)=>({x:R*Number(lng)*Math.PI/180,y:R*Math.log(Math.tan(Math.PI/4+Math.max(-85.05112878,Math.min(85.05112878,Number(lat)))*Math.PI/360))});
      const cc=merc(lat0,lng0),toNorm=p=>{const q=merc(p.lat,p.lng);return{x:clamp(.5+(q.x-cc.x)/(half*2)),y:clamp(.5-(q.y-cc.y)/(half*2))}};
-     state.autoFacetData=facets.map((f,i)=>({id:i+1,z0:Number(f.z0),rise12:Number(f.rise12),azimuthDegrees:Number(f.azimuthDegrees),outline:(f.outline||[]).map(toNorm),area:Number(f.slopedAreaSqFt||f.flatAreaSqFt||0)})).filter(f=>f.outline.length>=3);
+     state.autoFacetData=facets.map((f,i)=>{const outline=(f.outline||[]).map(toNorm);return{id:i+1,z0:Number(f.z0),rise12:Number(f.rise12),azimuthDegrees:Number(f.azimuthDegrees),outline,autoBaseOutline:outline.map(p=>({...p})),area:Number(f.slopedAreaSqFt||f.flatAreaSqFt||0)}}).filter(f=>f.outline.length>=3);
      const z=state.autoFacetData.filter(f=>Number.isFinite(f.z0)).sort((a,b)=>a.z0-b.z0),groups=[];
      z.forEach(f=>{let g=groups.find(x=>Math.abs(x.meanZ-f.z0)<.55);if(!g){g={items:[],meanZ:f.z0};groups.push(g);}g.items.push(f);g.meanZ=g.items.reduce((sum,x)=>sum+x.z0,0)/g.items.length;});
-     state.layers=groups.map((g,i)=>({id:'elevation-'+(i+1),meanZ:g.meanZ,facetCount:g.items.length,polygons:g.items.map(x=>x.outline),source:'dsm'}));
+     state.layers=groups.map((g,i)=>({id:'elevation-'+(i+1),meanZ:g.meanZ,facetCount:g.items.length,facetIds:g.items.map(x=>x.id),polygons:g.items.map(x=>x.outline),source:'dsm'}));
      if(s)s.textContent=state.layers.length+' roof elevation'+(state.layers.length===1?'':'s')+' detected from DSM topography. Dashed overlays show the proposed elevation groups.';
      renderManualRoof();
    }catch(err){if(s)s.textContent='Elevation detection unavailable: '+(err?.message||err);}
@@ -4032,7 +4057,7 @@ async function restoreRoofSolarModel(){
  try{
    const saved=JSON.parse(localStorage.getItem('solarisManualRoof')||'null');
    if(saved){
-     state.property=saved.property||null;state.outline=saved.outline||[];state.autoOutlineBase=saved.autoOutlineBase||[];state.outlineScale=Number(saved.outlineScale||1);state.outlineRotation=Number(saved.outlineRotation||0);state.outlineOffsetX=Number(saved.outlineOffsetX||0);state.outlineOffsetY=Number(saved.outlineOffsetY||0);state.lines=saved.lines||[];state.sections=saved.sections||[];state.layers=saved.layers||[];state.autoFacetData=saved.autoFacetData||[];state.facetPitches=saved.facetPitches||{};
+     state.property=saved.property||null;state.outline=saved.outline||[];state.autoOutlineBase=saved.autoOutlineBase||[];state.outlineScale=Number(saved.outlineScale||1);state.outlineRotation=Number(saved.outlineRotation||0);state.outlineOffsetX=Number(saved.outlineOffsetX||0);state.outlineOffsetY=Number(saved.outlineOffsetY||0);state.lines=saved.lines||[];state.sections=saved.sections||[];state.layers=saved.layers||[];state.autoFacetData=(saved.autoFacetData||[]).map(f=>({...f,autoBaseOutline:(f.autoBaseOutline?.length?f.autoBaseOutline:f.outline||[]).map(p=>({...p}))}));state.facetPitches=saved.facetPitches||{};
      if($('#manual-roof-default-pitch')&&saved.defaultPitch)$('#manual-roof-default-pitch').value=String(saved.defaultPitch);
      if($('#manual-outline-scale'))$('#manual-outline-scale').value=String(Math.round((state.outlineScale||1)*100));
      if($('#manual-outline-scale-label'))$('#manual-outline-scale-label').textContent=Math.round((state.outlineScale||1)*100)+'%';
