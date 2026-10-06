@@ -1926,10 +1926,11 @@ function roofCentroid(poly){if(!poly?.length)return{x:.5,y:.5};return{x:poly.red
 function roofDiagramSvg(data){
  const sm=data.solarModel||null;
  if(sm?.outline?.length>=3&&sm?.model?.facets?.length){
-  const topology=data.topology||null,outline=sm.outline,facets=sm.model.facets||[],lines=sm.model.roofLines||[],rawExteriorEdges=sm.measurements?.exteriorEdges||[];
-  // Production diagram authority: DSM facet mesh. The held-out DSM facet count
-  // is materially more accurate than reconstructed topology face count.
-  const useTopologyFaces=false;
+  const topology=(data.graphFirstTopology?.reportEligible?data.graphFirstTopology:(data.topology||null)),outline=sm.outline,facets=sm.model.facets||[],lines=sm.model.roofLines||[],rawExteriorEdges=sm.measurements?.exteriorEdges||[];
+  // Graph-first rendering is used only when the planar solver produces a
+  // plausible face count and enough physically typed internal edges. Otherwise
+  // fall back to the raw DSM facet mesh.
+  const useTopologyFaces=Boolean(data.graphFirstTopology?.reportEligible&&topology?.faces?.length&&topology?.vertices?.length);
   const all=useTopologyFaces&&topology?.vertices?.length?topology.vertices:[...outline,...facets.flatMap(f=>f.outline||[]),...lines.flatMap(l=>[l.a,l.b]).filter(Boolean)];
   const lats=all.map(p=>Number(p.lat)).filter(Number.isFinite),lngs=all.map(p=>Number(p.lng)).filter(Number.isFinite);
   const north=Math.max(...lats),south=Math.min(...lats),east=Math.max(...lngs),west=Math.min(...lngs);
@@ -2236,14 +2237,35 @@ async function generateRoofReport(){
      profileOverrides=(cfg?.version==='topology-opt-3-holdout'&&cfg?.scopePolicy==='primary-building-only'&&cfg?.validationPolicy==='deterministic-profile-holdout')?(cfg.profileOverrides||{}):{};
     }catch{}
     d.topology=topo.buildRoofTopology(sm,{profileOverrides});
+    d.graphFirstTopology=topo.buildFacetPartitionTopology?topo.buildFacetPartitionTopology(sm,{}):null;
+    if(d.graphFirstTopology){
+      const gf=d.graphFirstTopology,faces=gf.faces||[],edges=gf.edges||[],dsmCount=sm.model.facets.length;
+      const faceRatio=dsmCount?faces.length/dsmCount:0;
+      const typed=edges.filter(e=>['ridge','hip','valley'].includes(e.type));
+      const internal=edges.filter(e=>e.type!=='perimeter');
+      const typedRatio=internal.length?typed.length/internal.length:0;
+      gf.reportEligible=faces.length>=2&&faceRatio>=.55&&faceRatio<=1.55&&typed.length>=1&&typedRatio>=.35;
+      gf.reportDiagnostics={dsmFacetCount:dsmCount,faceCount:faces.length,faceRatio,typedInternalEdges:typed.length,internalEdges:internal.length,typedRatio};
+    }
    }catch(err){console.warn('Roof topology engine unavailable',err)}
   }
   const topologyPerimFt=(d.topology?.edges||[]).filter(e=>e.type==='perimeter').reduce((s,e)=>s+Number(e.lengthMeters||0)*3.280839895,0);
   const lines=roofLineTotals(d);
+  const gf=d.graphFirstTopology?.reportEligible?d.graphFirstTopology:null;
+  if(gf){
+    const gfTotals={ridge:0,hip:0,valley:0};
+    (gf.edges||[]).forEach(e=>{if(gfTotals[e.type]!=null)gfTotals[e.type]+=Number(e.lengthMeters||0)*3.280839895;});
+    if(gfTotals.ridge>0)lines.ridge=gfTotals.ridge;
+    if(gfTotals.hip>0)lines.hip=gfTotals.hip;
+    if(gfTotals.valley>0)lines.valley=gfTotals.valley;
+  }
   const promotedRasterRidge=Number(sm?.measurementCandidates?.rasterLines?.ridgeFt);
-  if(Number.isFinite(promotedRasterRidge)&&promotedRasterRidge>=0)lines.ridge=promotedRasterRidge;
+  if((!gf||!(gf.edges||[]).some(e=>e.type==='ridge'))&&Number.isFinite(promotedRasterRidge)&&promotedRasterRidge>=0)lines.ridge=promotedRasterRidge;
   const confidenceInternal=confidenceInternalTotalsForReport(sm);
-  if(confidenceInternal){lines.hip=confidenceInternal.hip;lines.valley=confidenceInternal.valley;}
+  if(confidenceInternal){
+    if(!gf||!(gf.edges||[]).some(e=>e.type==='hip'))lines.hip=confidenceInternal.hip;
+    if(!gf||!(gf.edges||[]).some(e=>e.type==='valley'))lines.valley=confidenceInternal.valley;
+  }
   const lidarLineValidation=lidarInternalLineValidation(sm,facets,d.outline);
   if(lidarLineValidation){
     // LiDAR is an independent source. Promote only categories it physically
