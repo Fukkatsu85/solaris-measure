@@ -1,6 +1,6 @@
 export async function onRequestGet({request,env}){
-  const key=env.GOOGLE_MAPS_API_KEY;
-  if(!key)return Response.json({error:"GOOGLE_MAPS_API_KEY is not configured."},{status:500});
+  const key=env.GOOGLE_STREETVIEW_STATIC_KEY;
+  if(!key)return Response.json({error:"GOOGLE_STREETVIEW_STATIC_KEY is not configured."},{status:500});
   const u=new URL(request.url);
   const pano=(u.searchParams.get("pano")||"").trim();
   const heading=Number(u.searchParams.get("heading"));
