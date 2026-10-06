@@ -69,6 +69,12 @@
           <div class="actions" style="margin-top:12px"><button id="detect-roof" class="primary" type="button">Detect Roof Automatically</button><button id="accept-roof-outline" class="secondary" type="button" disabled>Confirm Roof Outline</button><button id="edit-roof-outline" class="secondary" type="button" disabled>Edit Points</button><button id="redetect-roof" class="secondary" type="button" disabled>Redetect</button></div>
           <p class="muted" id="mn-aerial-status">Resolving property coordinates…</p>
         </div>
+        <div id="roof-remote-imagery-panel" class="card" style="margin-top:12px">
+          <div class="card-head"><div><div class="eyebrow">REMOTE ONLINE EVIDENCE</div><h3>Street-level imagery coverage</h3><p class="muted">Online-only secondary imagery used to verify ambiguous roof relationships. No field photos are required.</p></div><span id="roof-remote-imagery-badge" class="status">Not checked</span></div>
+          <div class="actions"><button id="check-roof-remote-imagery" class="secondary" type="button">Check Online Views</button><button id="roof-view-front" class="secondary" type="button" disabled>View Roof</button><button id="roof-view-opposite" class="secondary" type="button" disabled>Opposite View</button></div>
+          <div id="roof-remote-imagery-status" class="analysis-state" style="margin-top:10px">Solaris will look for the nearest online panorama and estimate whether the roof is close enough to provide useful secondary geometry evidence.</div>
+          <div id="roof-remote-panorama" hidden style="height:360px;border-radius:12px;overflow:hidden;margin-top:12px;background:#111"></div>
+        </div>
         <div class="actions" style="margin-top:12px"><button id="roof-outline-tool" class="primary" type="button">Roof Outline</button><button id="detect-roof-lines" class="secondary" type="button">Detect Internal Roof Lines</button></div>
         <p class="muted" id="roof-workspace-status">Accept the roof outline first, then detect and classify internal roof geometry.</p>
         <details id="roof-advanced-tools" style="margin-top:12px">
