@@ -836,7 +836,12 @@ async function showRoofRemotePanorama(opposite=false){
 }
 
 document.addEventListener('click',e=>{
- if(e.target?.id==='check-roof-remote-imagery')checkRoofRemoteImagery();
+ if(e.target?.id==='check-roof-remote-imagery'||e.target?.id==='check-roof-remote-imagery-top'){
+   checkRoofRemoteImagery().then(()=>{
+     const panel=document.querySelector('#roof-remote-imagery-panel');
+     if(panel)panel.scrollIntoView({behavior:'smooth',block:'center'});
+   });
+ }
  if(e.target?.id==='roof-view-front')showRoofRemotePanorama(false);
  if(e.target?.id==='roof-view-opposite')showRoofRemotePanorama(true);
 });
