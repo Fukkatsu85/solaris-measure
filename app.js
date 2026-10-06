@@ -3645,11 +3645,103 @@ async function restoreRoofSolarModel(){
    l.manual=true;delete l.autoBaseA;delete l.autoBaseB;
    return true;
  };
+ const deriveElevationBreaksFromFacetAdjacency=()=>{
+   const facets=(state.autoFacetData||[]).filter(f=>Number.isFinite(Number(f.z0))&&(f.outline||[]).length>=3);
+   const raw=[];
+   const edgeOf=(poly,i)=>({a:poly[i],b:poly[(i+1)%poly.length]});
+   const edgeMid=e=>({x:(e.a.x+e.b.x)/2,y:(e.a.y+e.b.y)/2});
+   const project=(p,o,u)=>(p.x-o.x)*u.x+(p.y-o.y)*u.y;
+   for(let i=0;i<facets.length;i++)for(let j=i+1;j<facets.length;j++){
+     const fa=facets[i],fb=facets[j],dz=Math.abs(Number(fa.z0)-Number(fb.z0));
+     if(dz<.55)continue;
+     const pa=fa.outline,pb=fb.outline;
+     for(let ai=0;ai<pa.length;ai++)for(let bi=0;bi<pb.length;bi++){
+       const ea=edgeOf(pa,ai),eb=edgeOf(pb,bi),la=dist(ea.a,ea.b),lb=dist(eb.a,eb.b);
+       if(la<.012||lb<.012)continue;
+       if(angleDiff(lineAngle(ea.a,ea.b),lineAngle(eb.a,eb.b))>16)continue;
+       const ma=edgeMid(ea),mb=edgeMid(eb);
+       const sep=(pointSeg(ma,eb.a,eb.b).distance+pointSeg(mb,ea.a,ea.b).distance)/2;
+       if(sep>.022)continue;
+
+       let ux=(ea.b.x-ea.a.x)/la,uy=(ea.b.y-ea.a.y)/la;
+       const bvx=(eb.b.x-eb.a.x)/lb,bvy=(eb.b.y-eb.a.y)/lb;
+       if(ux*bvx+uy*bvy<0){ux=-ux;uy=-uy;}
+       const o={x:(ma.x+mb.x)/2,y:(ma.y+mb.y)/2};
+       const ia=[project(ea.a,o,{x:ux,y:uy}),project(ea.b,o,{x:ux,y:uy})].sort((a,b)=>a-b);
+       const ib=[project(eb.a,o,{x:ux,y:uy}),project(eb.b,o,{x:ux,y:uy})].sort((a,b)=>a-b);
+       const t0=Math.max(ia[0],ib[0]),t1=Math.min(ia[1],ib[1]),overlap=t1-t0;
+       if(overlap<.010)continue;
+       const a={x:clamp(o.x+ux*t0),y:clamp(o.y+uy*t0)},b={x:clamp(o.x+ux*t1),y:clamp(o.y+uy*t1)};
+       raw.push({type:'elevation_break',a,b,elevationSeparationMeters:dz,confidence:overlap/(1+sep*20),derivedFromFacets:true});
+     }
+   }
+
+   // Merge collinear fragments from the same physical height step into one
+   // straight, clean separator.
+   const merged=[];
+   raw.sort((a,b)=>b.confidence-a.confidence);
+   for(const c of raw){
+     let joined=false;
+     for(const m of merged){
+       if(angleDiff(lineAngle(c.a,c.b),lineAngle(m.a,m.b))>10)continue;
+       const cm=edgeMid(c),mm=edgeMid(m);
+       if(pointSeg(cm,m.a,m.b).distance>.020&&pointSeg(mm,c.a,c.b).distance>.020)continue;
+       const pts=[m.a,m.b,c.a,c.b];
+       const dx=m.b.x-m.a.x,dy=m.b.y-m.a.y,len=Math.hypot(dx,dy)||1,u={x:dx/len,y:dy/len};
+       const o={x:pts.reduce((s,p)=>s+p.x,0)/4,y:pts.reduce((s,p)=>s+p.y,0)/4};
+       const ts=pts.map(p=>project(p,o,u)).sort((a,b)=>a-b);
+       m.a={x:clamp(o.x+u.x*ts[0]),y:clamp(o.y+u.y*ts[0])};
+       m.b={x:clamp(o.x+u.x*ts[ts.length-1]),y:clamp(o.y+u.y*ts[ts.length-1])};
+       m.elevationSeparationMeters=Math.max(m.elevationSeparationMeters,c.elevationSeparationMeters);
+       m.confidence=Math.max(m.confidence,c.confidence);joined=true;break;
+     }
+     if(!joined)merged.push({...c});
+   }
+   return merged.filter(c=>dist(c.a,c.b)>=.018);
+ };
+ const addDerivedElevationBreaks=()=>{
+   let added=0;
+   const candidates=deriveElevationBreaksFromFacetAdjacency()
+     .sort((a,b)=>(b.elevationSeparationMeters-a.elevationSeparationMeters)||(b.confidence-a.confidence));
+   for(const c of candidates){
+     if(state.lines.some(l=>l.type==='elevation_break'&&lineNearlySame(l,c,.030)))continue;
+     let a=snapPoint(c.a),b=snapPoint(c.b);
+     const snapOrExtend=p=>{
+       if(pointTouchesPerimeter(p,.016)||state.lines.some(l=>pointSeg(p,l.a,l.b).distance<=.016))return snapPoint(p);
+       let best=null,bd=.035;
+       for(let i=0;i<state.outline.length;i++){
+         const h=pointSeg(p,state.outline[i],state.outline[(i+1)%state.outline.length]);
+         if(h.distance<bd){bd=h.distance;best=h.point;}
+       }
+       state.lines.forEach(l=>{
+         const h=pointSeg(p,l.a,l.b);if(h.distance<bd){bd=h.distance;best=h.point;}
+       });
+       return best?{...best}:p;
+     };
+     a=snapOrExtend(a);b=snapOrExtend(b);
+     if(dist(a,b)<.018)continue;
+     const aUseful=pointTouchesPerimeter(a,.018)||state.lines.some(l=>pointSeg(a,l.a,l.b).distance<=.018);
+     const bUseful=pointTouchesPerimeter(b,.018)||state.lines.some(l=>pointSeg(b,l.a,l.b).distance<=.018);
+     if(!aUseful||!bUseful)continue;
+
+     // Only keep boundaries that actually split a meaningful part of the roof.
+     const test={type:'elevation_break',a,b,autoAssisted:true,derivedFromFacets:true,elevationSeparationMeters:c.elevationSeparationMeters,confidence:c.confidence};
+     state.lines.push(test);
+     const faces=buildPlanarFaces().faces;
+     if(faces.length<2){
+       state.lines.pop();continue;
+     }
+     added++;
+     if(added>=3)break;
+   }
+   return added;
+ };
  const addHelpfulElevationBreaks=()=>{
    let added=0;
-   const candidates=(state.autoStructuralCandidates||[])
-     .filter(c=>c.type==='elevation_break'&&dist(c.a,c.b)>=.012)
-     .sort((a,b)=>(Number(b.elevationSeparationMeters||b.confidence||0)-Number(a.elevationSeparationMeters||a.confidence||0)));
+   const candidates=[
+     ...(state.autoStructuralCandidates||[]).filter(c=>c.type==='elevation_break'&&dist(c.a,c.b)>=.012),
+     ...deriveElevationBreaksFromFacetAdjacency()
+   ].sort((a,b)=>(Number(b.elevationSeparationMeters||b.confidence||0)-Number(a.elevationSeparationMeters||a.confidence||0)));
    for(const c of candidates){
      if(state.lines.some(l=>lineNearlySame(l,c)))continue;
      const a=snapPoint(c.a),b=snapPoint(c.b);
@@ -3663,6 +3755,7 @@ async function restoreRoofSolarModel(){
    return added;
  };
  const assistCompleteRoofGraph=()=>{
+   const proactiveBreaks=addDerivedElevationBreaks();
    let extended=0;
    for(let pass=0;pass<3;pass++){
      const invalid=validateStructuralLines();
@@ -3682,7 +3775,7 @@ async function restoreRoofSolarModel(){
        if(!item.bConnected&&extendDanglingEndpoint(item.index,'b'))extended++;
      });
    }
-   return {extended,addedBreaks,remaining:validateStructuralLines()};
+   return {extended,addedBreaks:addedBreaks+proactiveBreaks,proactiveBreaks,remaining:validateStructuralLines()};
  };
  const validateStructuralLines=()=>{
    const invalid=[];
@@ -3878,7 +3971,7 @@ async function restoreRoofSolarModel(){
    const table=$('#manual-roof-facet-table');
    if(table)table.innerHTML='<table><thead><tr><th>Facet</th><th>Pitch</th><th>Plan ft²</th><th>Sloped ft²</th></tr></thead><tbody>'+state.facets.map(f=>'<tr><td>F'+f.id+'</td><td><select data-manual-facet-pitch="'+f.id+'">'+[2,3,4,5,6,7,8,9,10,11,12,14,16,18].map(p=>'<option value="'+p+'"'+(p===f.pitch?' selected':'')+'>'+p+'/12</option>').join('')+'</select></td><td>'+Math.round(f.planM2*SQFT_PER_M2)+'</td><td>'+Math.round(f.slopedM2*SQFT_PER_M2)+'</td></tr>').join('')+'</tbody></table>';
    if(badge)badge.textContent=state.facets.length+' facets';
-   if(status)status.textContent='Roof geometry built ✓ · '+state.facets.length+' connected closed facet'+(state.facets.length===1?'':'s')+(assist.extended?' · '+assist.extended+' endpoint'+(assist.extended===1?'':'s')+' auto-connected':'')+(assist.addedBreaks?' · '+assist.addedBreaks+' elevation break'+(assist.addedBreaks===1?'':'s')+' added from DSM':'')+((cleanupBefore+cleanupAfter)?' · '+(cleanupBefore+cleanupAfter)+' junction adjustment'+((cleanupBefore+cleanupAfter)===1?'':'s')+' cleaned':'')+'. DSM is assisting topology and pitch without becoming report facets.';
+   if(status)status.textContent='Roof geometry built ✓ · '+state.facets.length+' connected closed facet'+(state.facets.length===1?'':'s')+(assist.extended?' · '+assist.extended+' endpoint'+(assist.extended===1?'':'s')+' auto-connected':'')+(assist.addedBreaks?' · '+assist.addedBreaks+' elevation break'+(assist.addedBreaks===1?'':'s')+' added from DSM/topography':'')+((cleanupBefore+cleanupAfter)?' · '+(cleanupBefore+cleanupAfter)+' junction adjustment'+((cleanupBefore+cleanupAfter)===1?'':'s')+' cleaned':'')+'. DSM is assisting topology and pitch without becoming report facets.';
    generateManualReport(graph);
    renderManualRoof();save();
  }
