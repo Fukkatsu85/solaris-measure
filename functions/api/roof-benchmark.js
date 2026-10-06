@@ -147,13 +147,14 @@ export async function onRequestGet({request,env}){
   const address=String(outline?.address||sm?.address||"");
   let seed=findTrainingBenchmark(address);
   if(!seed&&(address.toLowerCase().includes("1324 forest circle")||address.toLowerCase().includes("1324 forest cir"))){
-   seed={address:"1324 Forest Circle, Burnsville, MN 55306",source:"Roofr",slopedAreaFt2:2580,facetCount:15,avgPitch12:8,perimeterFt:292.4167,ridgeFt:69.5833,hipFt:20.75,valleyFt:26.6667,eaveFt:156.25,rakeFt:136.1667,facetAreasFt2:[]};
+   seed={address:"1324 Forest Circle, Burnsville, MN 55306",source:"Roofr",slopedAreaFt2:2580,facetCount:15,avgPitch12:8,perimeterFt:292.4167,ridgeFt:69.5833,hipFt:20.75,valleyFt:26.6667,eaveFt:156.25,rakeFt:136.1667,transitionFt:9.4167,ridgeCount:3,ridgeLengthsFt:[35,24,12],ridgeFamilyCount:2,majorGableSystems:2,crossGableCount:1,facetAreasFt2:[]};
   }
   if(seed&&(sm||planes)){
    const reference={
     source:seed.source||"Roofr",slopedAreaFt2:seed.slopedAreaFt2,facetCount:seed.facetCount,avgPitch12:seed.avgPitch12,
     perimeterFt:seed.perimeterFt??null,footprintAreaFt2:seed.footprintAreaFt2??null,footprintPerimeterFt:seed.footprintPerimeterFt??null,
-    ridgeFt:seed.ridgeFt??null,hipFt:seed.hipFt??null,ridgeHipFt:seed.ridgeHipFt??null,valleyFt:seed.valleyFt??null,eaveFt:seed.eaveFt??null,rakeFt:seed.rakeFt??null,
+    ridgeFt:seed.ridgeFt??null,hipFt:seed.hipFt??null,ridgeHipFt:seed.ridgeHipFt??null,valleyFt:seed.valleyFt??null,eaveFt:seed.eaveFt??null,rakeFt:seed.rakeFt??null,transitionFt:seed.transitionFt??null,
+    ridgeCount:seed.ridgeCount??null,ridgeLengthsFt:Array.isArray(seed.ridgeLengthsFt)?seed.ridgeLengthsFt:[],ridgeFamilyCount:seed.ridgeFamilyCount??null,majorGableSystems:seed.majorGableSystems??null,crossGableCount:seed.crossGableCount??null,topologyPattern:seed.topologyPattern||null,
     flatAreaFt2:seed.flatAreaFt2??null,pitchAreas:seed.pitchAreas||null,facetAreasFt2:Array.isArray(seed.facetAreasFt2)?seed.facetAreasFt2:[]
    };
    const solaris=buildSolaris(sm,planes,outline),score=scoreBenchmark(solaris,reference);
