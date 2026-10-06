@@ -19,10 +19,10 @@ export async function onRequestGet({request,env}){
   if(videoId)g.searchParams.set("videoId",videoId);else g.searchParams.set("address",address);
   const out=await googleJson(g.toString(),key);
   if(!out.ok)return Response.json({ok:false,status:out.status,error:out.error,notFound:out.status===404},{status:out.status===404?404:502});
-  const d=out.data||{};
+  const d=out.data||{},meta=d.metadata||d;
   return Response.json({
-    ok:true,mode,state:d.state||null,videoId:d.videoId||videoId||null,
-    captureDate:d.captureDate||null,duration:d.duration||null,
+    ok:true,mode,state:d.state||meta.state||null,videoId:meta.videoId||d.videoId||videoId||null,
+    captureDate:meta.captureDate||d.captureDate||null,duration:meta.duration||d.duration||null,
     uris:mode==="video"?(d.uris||{}):undefined
   },{headers:{"cache-control":"private, max-age=0, no-store"}});
 }
