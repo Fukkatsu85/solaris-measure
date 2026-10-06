@@ -3268,8 +3268,10 @@ async function restoreRoofSolarModel(){
  const renderLayerSummary=()=>{
    const el=$('#manual-roof-layer-summary');if(!el)return;
    const layers=state.layers||[],sections=state.sections||[];
+   const ridgeSystems=[...new Set(state.lines.filter(l=>l.type==='ridge'&&l.roofSystem).map(l=>l.roofSystem))];
    const detected=layers.length?'DSM elevation hints: '+layers.map((l,i)=>'Elevation '+(i+1)+(Number.isFinite(l.meanZ)?' · '+l.meanZ.toFixed(1)+' m':'')+' · '+l.facetCount+' region'+(l.facetCount===1?'':'s')).join(' | '):'No DSM elevation hints detected yet.';
-   el.textContent=detected+(sections.length?' · '+sections.length+' additional roof section'+(sections.length===1?'':'s')+' drawn.':'');
+   const systemNote=ridgeSystems.length>1?' · '+ridgeSystems.length+' distinct ridge elevation systems identified.':'';
+   el.textContent=detected+systemNote+(sections.length?' · '+sections.length+' additional roof section'+(sections.length===1?'':'s')+' drawn.':'');
  };
  function renderManualRoof(){
    const svg=$('#manual-roof-overlay');if(!svg)return;
@@ -3754,7 +3756,97 @@ async function restoreRoofSolarModel(){
    }
    return added;
  };
+ const autoFacetAtPoint=p=>{
+   let inside=null,best=null,bd=Infinity;
+   (state.autoFacetData||[]).forEach(f=>{
+     if((f.outline||[]).length>=3&&pointInPoly(p,f.outline))inside=f;
+     const c=centroid(f.outline||[]),d=dist(p,c);
+     if(d<bd){bd=d;best=f;}
+   });
+   return inside||best;
+ };
+ const ridgeJunctionPoint=(a,b)=>{
+   const pairs=[[a.a,b.a],[a.a,b.b],[a.b,b.a],[a.b,b.b]];
+   let best=null,bd=.035;
+   pairs.forEach(([p,q])=>{
+     const d=dist(p,q);
+     if(d<bd){bd=d;best={x:(p.x+q.x)/2,y:(p.y+q.y)/2,d};}
+   });
+   const h=segHit(a.a,a.b,b.a,b.b);
+   if(h)return {x:h.x,y:h.y,d:0};
+   return best;
+ };
+ const extendLineThroughPointToRoof=(origin,angleDeg)=>{
+   const r=angleDeg*Math.PI/180,dir={x:Math.cos(r),y:Math.sin(r)},hits=[];
+   const testDir=sign=>{
+     const d={x:dir.x*sign,y:dir.y*sign};
+     for(let i=0;i<state.outline.length;i++){
+       const h=raySegmentHit(origin,d,state.outline[i],state.outline[(i+1)%state.outline.length]);
+       if(h&&h.t>.002)hits.push({...h,side:sign});
+     }
+     state.lines.forEach(l=>{
+       const h=raySegmentHit(origin,d,l.a,l.b);
+       if(h&&h.t>.002)hits.push({...h,side:sign});
+     });
+   };
+   testDir(-1);testDir(1);
+   const neg=hits.filter(h=>h.side===-1).sort((a,b)=>a.t-b.t)[0];
+   const pos=hits.filter(h=>h.side===1).sort((a,b)=>a.t-b.t)[0];
+   return neg&&pos?{a:{x:neg.x,y:neg.y},b:{x:pos.x,y:pos.y}}:null;
+ };
+ const addRidgeJunctionElevationBreaks=()=>{
+   const ridges=state.lines.filter(l=>l.type==='ridge');
+   if(ridges.length<2)return 0;
+   const derived=deriveElevationBreaksFromFacetAdjacency(),added=[];
+   for(let i=0;i<ridges.length;i++)for(let j=i+1;j<ridges.length;j++){
+     const r1=ridges[i],r2=ridges[j],junction=ridgeJunctionPoint(r1,r2);
+     if(!junction||junction.d>.035)continue;
+
+     const m1={x:(r1.a.x+r1.b.x)/2,y:(r1.a.y+r1.b.y)/2},m2={x:(r2.a.x+r2.b.x)/2,y:(r2.a.y+r2.b.y)/2};
+     const f1=autoFacetAtPoint(m1),f2=autoFacetAtPoint(m2);
+     if(!f1||!f2||!Number.isFinite(Number(f1.z0))||!Number.isFinite(Number(f2.z0)))continue;
+     const dz=Math.abs(Number(f1.z0)-Number(f2.z0));
+     if(dz<.55)continue;
+
+     r1.roofElevationZ=Number(f1.z0);r2.roofElevationZ=Number(f2.z0);
+     r1.roofSystem='elev-'+Math.round(Number(f1.z0)*10);
+     r2.roofSystem='elev-'+Math.round(Number(f2.z0)*10);
+
+     let candidate=null,best=Infinity;
+     derived.forEach(c=>{
+       const h=pointSeg(junction,c.a,c.b);
+       const score=h.distance+Math.abs((c.elevationSeparationMeters||dz)-dz)*.01;
+       if(h.distance<=.06&&score<best){best=score;candidate=c;}
+     });
+
+     let sep=null;
+     if(candidate){
+       const ang=lineAngle(candidate.a,candidate.b);
+       sep=extendLineThroughPointToRoof(junction,ang);
+       if(!sep)sep={a:snapPoint(candidate.a),b:snapPoint(candidate.b)};
+     }else{
+       const a1=lineAngle(r1.a,r1.b),a2=lineAngle(r2.a,r2.b);
+       // For nearly collinear ridges, a roof step normally runs across them.
+       // For angled ridges, use the perpendicular to their mean axis.
+       let mean=a1+angleDiff(a1,a2)/2;
+       if(Math.abs(a1-a2)>90)mean=(a1+a2+180)/2;
+       const sepAngle=(mean+90)%180;
+       sep=extendLineThroughPointToRoof(junction,sepAngle);
+     }
+     if(!sep||dist(sep.a,sep.b)<.025)continue;
+
+     const test={type:'elevation_break',a:sep.a,b:sep.b,autoAssisted:true,fromRidgeJunction:true,elevationSeparationMeters:dz,confidence:1};
+     if(state.lines.some(l=>l.type==='elevation_break'&&lineNearlySame(l,test,.035)))continue;
+     state.lines.push(test);
+     const faces=buildPlanarFaces().faces;
+     if(faces.length<2){state.lines.pop();continue;}
+     added.push(test);
+     if(added.length>=3)return added.length;
+   }
+   return added.length;
+ };
  const assistCompleteRoofGraph=()=>{
+   const ridgeElevationBreaks=addRidgeJunctionElevationBreaks();
    const proactiveBreaks=addDerivedElevationBreaks();
    let extended=0;
    for(let pass=0;pass<3;pass++){
@@ -3775,7 +3867,7 @@ async function restoreRoofSolarModel(){
        if(!item.bConnected&&extendDanglingEndpoint(item.index,'b'))extended++;
      });
    }
-   return {extended,addedBreaks:addedBreaks+proactiveBreaks,proactiveBreaks,remaining:validateStructuralLines()};
+   return {extended,addedBreaks:addedBreaks+proactiveBreaks+ridgeElevationBreaks,proactiveBreaks,ridgeElevationBreaks,remaining:validateStructuralLines()};
  };
  const validateStructuralLines=()=>{
    const invalid=[];
