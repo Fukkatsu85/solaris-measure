@@ -984,6 +984,23 @@ async function checkRoofAerialView(){
    return null;
  }
 }
+async function renderRoofAerialView(){
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
+ const badge=document.querySelector('#roof-aerial-view-badge'),status=document.querySelector('#roof-aerial-view-status'),btn=document.querySelector('#render-roof-aerial-view');
+ if(!saved.address){if(status)status.textContent='Confirm the property address first.';return}
+ const old=btn?.textContent;if(btn){btn.disabled=true;btn.textContent='Requesting…'}if(badge)badge.textContent='Requesting';
+ try{
+   const r=await fetch('/api/roof-aerial-view',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({address:saved.address})});
+   const d=await r.json().catch(()=>({}));if(!r.ok||!d.ok)throw new Error(d.error||('HTTP '+r.status));
+   roofAerialViewState={available:false,state:d.state||'PROCESSING',videoId:d.videoId||null,address:saved.address,requestedAt:new Date().toISOString()};
+   localStorage.setItem('solarisRoofAerialView',JSON.stringify(roofAerialViewState));
+   if(badge)badge.textContent='Processing';
+   if(status)status.innerHTML='<strong>Aerial View generation requested.</strong> Google is processing the flyover for this address.'+(d.videoId?' Video ID '+escRoof(d.videoId)+'.':'')+' Check again later with <strong>Check Aerial View</strong>.';
+ }catch(err){
+   if(badge)badge.textContent='Request failed';
+   if(status)status.textContent='Could not request Aerial View generation: '+(err?.message||String(err));
+ }finally{if(btn){btn.disabled=false;btn.textContent=old||'Generate Aerial View'}}
+}
 async function playRoofAerialView(){
  const state=roofAerialViewState||JSON.parse(localStorage.getItem('solarisRoofAerialView')||'null')||await checkRoofAerialView();
  if(!state?.available||!state?.videoId)return;
@@ -1002,6 +1019,7 @@ async function playRoofAerialView(){
 }
 document.addEventListener('click',e=>{
  if(e.target?.id==='check-roof-aerial-view')checkRoofAerialView();
+ if(e.target?.id==='render-roof-aerial-view')renderRoofAerialView();
  if(e.target?.id==='play-roof-aerial-view')playRoofAerialView();
 });
 
