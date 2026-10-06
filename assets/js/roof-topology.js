@@ -390,7 +390,7 @@ function buildPlanarGraph(segments,nodeSnap=.35){
     const a=nodeFor(s.a),b=nodeFor(s.b);if(a===b)continue;
     const key=a<b?a+"|"+b:b+"|"+a;
     if(!map.has(key))map.set(key,{a,b,type:s.type||"internal",source:s.source||"unknown"});
-    else if(["ridge","hip","valley"].includes(s.type))map.get(key).type=s.type;
+    else if(["ridge","hip","valley","elevation_break"].includes(s.type))map.get(key).type=s.type;
   }
   return {nodes,edges:[...map.values()]};
 }
@@ -620,7 +620,7 @@ export function buildFacetPartitionTopology(solarModel,options={}){
 
   // Keep physically classified DSM lines first.
   const acceptedInternal=[];
-  roofLines.filter(l=>["ridge","hip","valley"].includes(l.type)&&l.a&&l.b).forEach(l=>{
+  roofLines.filter(l=>["ridge","hip","valley","elevation_break"].includes(l.type)&&l.a&&l.b).forEach(l=>{
     const clean=trimOrSnapInternalLine({...l,a:F.toXY(l.a),b:F.toXY(l.b)},perimeter,families);
     const mid={x:(clean.a.x+clean.b.x)/2,y:(clean.a.y+clean.b.y)/2};
     if(!pointInPoly(mid,perimeter))return;
@@ -690,7 +690,7 @@ export function buildRoofTopology(solarModel,options={}){
   const segments=[];
   for(let i=0;i<perimeter.length;i++)segments.push({a:perimeter[i],b:perimeter[(i+1)%perimeter.length],type:"perimeter",source:"perimeter"});
   const acceptedInternal=[];
-  roofLines.filter(l=>["ridge","hip","valley"].includes(l.type)&&l.a&&l.b).forEach(l=>{
+  roofLines.filter(l=>["ridge","hip","valley","elevation_break"].includes(l.type)&&l.a&&l.b).forEach(l=>{
     const clean=trimOrSnapInternalLine({...l,a:F.toXY(l.a),b:F.toXY(l.b)},perimeter,families);
     const mid={x:(clean.a.x+clean.b.x)/2,y:(clean.a.y+clean.b.y)/2};
     if(!pointInPoly(mid,perimeter))return;
