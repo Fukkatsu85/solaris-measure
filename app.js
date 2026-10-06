@@ -1823,6 +1823,10 @@ async function generateRoofReport(){
   const r=await fetch('/api/roof-report?projectId='+encodeURIComponent(projectId),{signal:controller.signal}),d=await r.json().catch(()=>({}));if(!r.ok||!d.ok)throw new Error(d.error||'Report data is incomplete.');
   const facets=(d.planes?.planes||[]).filter(p=>p.accepted),plan=Number(d.outline.measurement?.planAreaFt2||0),basePerim=Number(d.outline.measurement?.perimeterFt||0);
   const sm=d.solarModel||null,dm=sm?.measurements||{},dsmFacets=sm?.model?.facets||[];
+  const geometryVersion=String(sm?.geometryVersion||sm?.trainingVersion||'');
+  if(sm&&geometryVersion!=='r40-browser-rooftop-v6-small-edge-shadow'){
+    throw new Error('This roof was processed with an older geometry engine. Click Process Roof once, approve the refreshed measurements, then generate the report again.');
+  }
   if(sm?.model?.facets?.length){
    try{
     const topo=await import('/assets/js/roof-topology.js?v=20261005-facet-adjacency1');
@@ -2449,7 +2453,7 @@ async function runRoofSolarAnalysis(){
  try{
   const br=await fetch('/api/solar-building?lat='+encodeURIComponent(lat)+'&lng='+encodeURIComponent(lng)),building=await br.json();
   if(!br.ok||!building.ok)throw new Error(building.error||'Google Solar Building Insights is unavailable for this roof.');
-  const engine=await import('/assets/js/solar-roof-engine.js?v=20261005-area-margin-shadow1');
+  const engine=await import('/assets/js/solar-roof-engine.js?v=20261005-small-edge-shadow1');
   const result=await engine.buildSolarRoofModel(lat,lng,building.roofSegments||[]);
   const measurements=engine.buildRoofMeasurements(result.outline,result.model.facets||[],result.model.roofLines||[]);
   const detailBoundaryMeasurements=Array.isArray(result.measurementOutlineCandidate)&&result.measurementOutlineCandidate.length>=3
@@ -2458,6 +2462,8 @@ async function runRoofSolarAnalysis(){
   const rasterLineMeasurements=result.rasterLineMeasurements||null;
   roofSolarProposal={
    source:'google-solar-dsm',
+   trainingVersion:'r40-browser-rooftop-v6-small-edge-shadow',
+   geometryVersion:'r40-browser-rooftop-v6-small-edge-shadow',
    lat,lng,
    imageryQuality:building.imageryQuality||result.quality||null,
    imageryDate:building.imageryDate||null,
@@ -2468,6 +2474,9 @@ async function runRoofSolarAnalysis(){
    model:result.model,
    measurements,
    areaMarginCandidates:result.areaMarginCandidates||null,
+   areaMarginDiagnostics:result.areaMarginDiagnostics||null,
+   areaEdgeSnapCandidates:result.areaEdgeSnapCandidates||null,
+   smallFeatureExteriorCandidate:result.smallFeatureExteriorCandidate||null,
    measurementCandidates:{detailBoundary:detailBoundaryMeasurements,rasterLines:rasterLineMeasurements}
   };
   renderRoofSolarProposal(roofSolarProposal);
@@ -2634,5 +2643,10 @@ async function restoreRoofSolarModel(){
  const projectId=saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
  const r=await fetch('/api/roof-solar-model?projectId='+encodeURIComponent(projectId));if(!r.ok)return;
  const d=await r.json();if(!d.model)return;roofSolarProposal=d.model;renderRoofSolarProposal(roofSolarProposal);
- const badge=document.querySelector('#roof-solar-badge');if(d.model.accepted&&badge)badge.textContent='Accepted ✓';
+ const badge=document.querySelector('#roof-solar-badge'),summary=document.querySelector('#roof-solar-summary');
+ const stale=String(d.model.geometryVersion||d.model.trainingVersion||'')!=='r40-browser-rooftop-v6-small-edge-shadow';
+ if(stale){
+   if(badge)badge.textContent='Reprocess required';
+   if(summary)summary.innerHTML+='<br><strong>Geometry engine update available.</strong> This saved roof was built with an older DSM engine. Click Process Roof once before generating a new report.';
+ }else if(d.model.accepted&&badge)badge.textContent='Accepted ✓';
 }
