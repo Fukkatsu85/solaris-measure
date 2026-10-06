@@ -3886,61 +3886,96 @@ async function restoreRoofSolarModel(){
    const segs=classifyExteriorSegments(),eaveFt=segs.filter(s=>s.type==='eave').reduce((a,s)=>a+s.lengthFt,0),rakeFt=segs.filter(s=>s.type==='rake').reduce((a,s)=>a+s.lengthFt,0);
    return {eaveM:eaveFt/FT_PER_M,rakeM:rakeFt/FT_PER_M,segments:segs};
  }
- const beautifySmallFacetForReport=f=>{
-   const original=(f.poly||[]).map(p=>({...p})),areaFt2=Number(f.planM2||0)*SQFT_PER_M2;
-   if(original.length<3||areaFt2>260)return {poly:original,changed:false,kind:null};
-   const maxMove=.012;
-
-   if(original.length===3){
-     // Real dormer/hip triangles are very commonly symmetric. Use the longest
-     // edge as the base and center the opposite apex only when it is already
-     // close to the base's perpendicular bisector.
-     let baseI=0,best=-1;
-     for(let i=0;i<3;i++){
-       const d=dist(original[i],original[(i+1)%3]);
-       if(d>best){best=d;baseI=i;}
+ const buildCanonicalReportMesh=facets=>{
+   const nodes=[],facetNodeIds=[];
+   const perimeterSnap=p=>{
+     let nearestVertex=null,vd=.010;
+     state.outline.forEach(q=>{const d=dist(p,q);if(d<vd){vd=d;nearestVertex=q;}});
+     if(nearestVertex)return {...nearestVertex};
+     let best=null,bd=.008;
+     for(let i=0;i<state.outline.length;i++){
+       const h=pointSeg(p,state.outline[i],state.outline[(i+1)%state.outline.length]);
+       if(h.distance<bd){bd=h.distance;best=h.point;}
      }
-     const ia=baseI,ib=(baseI+1)%3,ic=(baseI+2)%3,a=original[ia],b=original[ib],c=original[ic];
-     const vx=b.x-a.x,vy=b.y-a.y,len=Math.hypot(vx,vy)||1,ux=vx/len,uy=vy/len;
-     const mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
-     const along=(c.x-mx)*ux+(c.y-my)*uy;
-     const target={x:c.x-along*ux,y:c.y-along*uy},move=dist(c,target);
-     const limit=Math.min(maxMove,len*.12);
-     if(move>0&&move<=limit){
-       const out=original.map(p=>({...p}));out[ic]=target;
-       return {poly:out,changed:true,kind:'isosceles'};
+     return best?{...best}:{...p};
+   };
+   const nodeFor=p=>{
+     const q=perimeterSnap(p);
+     let bi=-1,bd=.0065;
+     nodes.forEach((n,i)=>{const d=dist(q,n.p);if(d<bd){bd=d;bi=i;}});
+     if(bi>=0){nodes[bi].samples.push(q);return bi;}
+     nodes.push({p:{...q},samples:[q],onPerimeter:pointTouchesPerimeter(q,.009)});return nodes.length-1;
+   };
+   facets.forEach(f=>facetNodeIds.push((f.poly||[]).map(nodeFor)));
+   nodes.forEach(n=>{
+     if(n.onPerimeter){
+       n.p=perimeterSnap(n.p);
+     }else{
+       n.p={x:n.samples.reduce((s,p)=>s+p.x,0)/n.samples.length,y:n.samples.reduce((s,p)=>s+p.y,0)/n.samples.length};
      }
-   }
+   });
 
-   if(original.length===4){
-     // When opposite edges are already nearly parallel, close the small
-     // residual error into a true parallelogram while preserving the centroid.
-     const a0=lineAngle(original[0],original[1]),a1=lineAngle(original[1],original[2]),
-           a2=lineAngle(original[2],original[3]),a3=lineAngle(original[3],original[0]);
-     if(angleDiff(a0,a2)<=12&&angleDiff(a1,a3)<=12){
-       const dx=(original[1].x+original[3].x-original[0].x-original[2].x)/4;
-       const dy=(original[1].y+original[3].y-original[0].y-original[2].y)/4;
-       const move=Math.hypot(dx,dy);
-       if(move>0&&move<=maxMove){
-         const out=[
-           {x:original[0].x+dx,y:original[0].y+dy},
-           {x:original[1].x-dx,y:original[1].y-dy},
-           {x:original[2].x+dx,y:original[2].y+dy},
-           {x:original[3].x-dx,y:original[3].y-dy}
-         ].map(p=>({x:clamp(p.x),y:clamp(p.y)}));
-         return {poly:out,changed:true,kind:'parallelogram'};
+   // Symmetry proposals operate on canonical nodes, never independent polygon
+   // copies. Shared corners therefore move together and cannot create gaps.
+   const proposals=new Map(),maxMove=.009;
+   const propose=(id,p)=>{
+     if(nodes[id]?.onPerimeter)return;
+     const move=dist(nodes[id].p,p);if(move<=0||move>maxMove)return;
+     if(!proposals.has(id))proposals.set(id,[]);
+     proposals.get(id).push(p);
+   };
+   facets.forEach((f,fi)=>{
+     const ids=facetNodeIds[fi],areaFt2=Number(f.planM2||0)*SQFT_PER_M2;
+     if(areaFt2>260||ids.length<3)return;
+     const pts=ids.map(id=>nodes[id].p);
+     if(ids.length===3){
+       let baseI=0,best=-1;
+       for(let i=0;i<3;i++){const d=dist(pts[i],pts[(i+1)%3]);if(d>best){best=d;baseI=i;}}
+       const ia=baseI,ib=(baseI+1)%3,ic=(baseI+2)%3,a=pts[ia],b=pts[ib],c=pts[ic];
+       const vx=b.x-a.x,vy=b.y-a.y,len=Math.hypot(vx,vy)||1,ux=vx/len,uy=vy/len,mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
+       const along=(c.x-mx)*ux+(c.y-my)*uy,target={x:c.x-along*ux,y:c.y-along*uy};
+       if(dist(c,target)<=Math.min(maxMove,len*.10))propose(ids[ic],target);
+     }else if(ids.length===4&&!ids.some(id=>nodes[id].onPerimeter)){
+       const a0=lineAngle(pts[0],pts[1]),a1=lineAngle(pts[1],pts[2]),a2=lineAngle(pts[2],pts[3]),a3=lineAngle(pts[3],pts[0]);
+       if(angleDiff(a0,a2)<=9&&angleDiff(a1,a3)<=9){
+         const target2={x:pts[1].x+pts[3].x-pts[0].x,y:pts[1].y+pts[3].y-pts[0].y};
+         propose(ids[2],target2);
        }
      }
-   }
+   });
+   proposals.forEach((arr,id)=>{
+     const target={x:arr.reduce((s,p)=>s+p.x,0)/arr.length,y:arr.reduce((s,p)=>s+p.y,0)/arr.length};
+     if(dist(nodes[id].p,target)<=maxMove)nodes[id].p={x:clamp(target.x),y:clamp(target.y)};
+   });
 
-   return {poly:original,changed:false,kind:null};
+   const reportFacets=facets.map((f,fi)=>({...f,reportPoly:facetNodeIds[fi].map(id=>({...nodes[id].p}))}));
+
+   // Build shared internal edges directly from the final mesh. This guarantees
+   // the divider drawn in the report is the same boundary both facets use.
+   const edgeMap=new Map();
+   facetNodeIds.forEach((ids,fi)=>{
+     for(let i=0;i<ids.length;i++){
+       const a=ids[i],b=ids[(i+1)%ids.length],key=a<b?a+'|'+b:b+'|'+a;
+       if(!edgeMap.has(key))edgeMap.set(key,{a,b,facets:[fi]});else edgeMap.get(key).facets.push(fi);
+     }
+   });
+   const internalEdges=[];
+   edgeMap.forEach(e=>{
+     if(e.facets.length<2)return;
+     const a=nodes[e.a].p,b=nodes[e.b].p,mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+     let nearest=null,bd=.025;
+     state.lines.forEach(l=>{
+       const h=pointSeg(mid,l.a,l.b);
+       if(h.distance<bd){bd=h.distance;nearest=l;}
+     });
+     internalEdges.push({a:{...a},b:{...b},type:nearest?.type||'ridge',sourceLine:nearest||null});
+   });
+   return {reportFacets,internalEdges,symmetryFixCount:proposals.size};
  };
  function generateManualReport(graph=null){
    if(!state.facets.length){buildManualGeometry();return;}
    graph=graph||buildPlanarFaces();
-   const reportFacetShapes=state.facets.map(f=>beautifySmallFacetForReport(f));
-   const reportFacets=state.facets.map((f,i)=>({...f,reportPoly:reportFacetShapes[i].poly}));
-   const symmetryFixCount=reportFacetShapes.filter(x=>x.changed).length;
+   const reportMesh=buildCanonicalReportMesh(state.facets),reportFacets=reportMesh.reportFacets,reportInternalEdges=reportMesh.internalEdges,symmetryFixCount=reportMesh.symmetryFixCount;
    const size=metersPerNorm(),defaultPitch=Number($('#manual-roof-default-pitch')?.value||8);
    const planFt2=state.facets.reduce((s,f)=>s+f.planM2*SQFT_PER_M2,0),slopedFt2=state.facets.reduce((s,f)=>s+f.slopedM2*SQFT_PER_M2,0);
    const lineLengthFt=l=>normLengthM(l.a,l.b)*pitchFactor(defaultPitch,l.type)*FT_PER_M;
@@ -3951,7 +3986,7 @@ async function restoreRoofSolarModel(){
    const allSectionOutlines=[state.outline,...(state.sections||[]).map(s=>s.outline||[])].filter(p=>p.length>=3);
    const reportPoints=[
      ...allSectionOutlines.flat(),
-     ...state.lines.flatMap(l=>[l.a,l.b]),
+     ...reportInternalEdges.flatMap(l=>[l.a,l.b]),
      ...reportFacets.flatMap(f=>f.reportPoly||f.poly||[])
    ];
    let minX=Math.min(...reportPoints.map(p=>p.x))*1000,maxX=Math.max(...reportPoints.map(p=>p.x))*1000;
@@ -3976,9 +4011,10 @@ async function restoreRoofSolarModel(){
      measureSvg+='<line x1="'+ax+'" y1="'+ay+'" x2="'+bx+'" y2="'+by+'" stroke="'+colors[seg.type]+'" stroke-width="4" vector-effect="non-scaling-stroke"/>'+
        (seg.lengthFt>=3?'<text x="'+mx+'" y="'+(my-6)+'" text-anchor="middle" font-size="'+(13*labelScale)+'" font-weight="700" fill="#111827" stroke="#fff" stroke-width="4" paint-order="stroke">'+Math.round(seg.lengthFt*10)/10+"'"+'</text>':'');
    });
-   state.lines.forEach(l=>{
-     const ax=l.a.x*1000,ay=l.a.y*1000,bx=l.b.x*1000,by=l.b.y*1000,mx=(ax+bx)/2,my=(ay+by)/2,len=lineLengthFt(l);
-     measureSvg+='<line x1="'+ax+'" y1="'+ay+'" x2="'+bx+'" y2="'+by+'" stroke="'+colors[l.type]+'" stroke-width="5" '+(l.type==='elevation_break'?'stroke-dasharray="14 9" ':'')+'vector-effect="non-scaling-stroke"/>'+
+   reportInternalEdges.forEach(l=>{
+     const ax=l.a.x*1000,ay=l.a.y*1000,bx=l.b.x*1000,by=l.b.y*1000,mx=(ax+bx)/2,my=(ay+by)/2;
+     const len=normLengthM(l.a,l.b)*pitchFactor(defaultPitch,l.type)*FT_PER_M;
+     measureSvg+='<line x1="'+ax+'" y1="'+ay+'" x2="'+bx+'" y2="'+by+'" stroke="'+(colors[l.type]||'#475569')+'" stroke-width="5" '+(l.type==='elevation_break'?'stroke-dasharray="14 9" ':'')+'vector-effect="non-scaling-stroke"/>'+
        (len>=3?'<text x="'+mx+'" y="'+(my-7)+'" text-anchor="middle" font-size="'+(13*labelScale)+'" font-weight="700" fill="#111827" stroke="#fff" stroke-width="4" paint-order="stroke">'+Math.round(len*10)/10+"'"+'</text>':'');
    });
    measureSvg+='</svg>';
@@ -4022,7 +4058,7 @@ async function restoreRoofSolarModel(){
        '<div class="metric"><span>Roof elevations</span><strong>'+Math.max(1,(state.layers||[]).length)+'</strong></div>'+
        '<div class="metric"><span>Recommended waste</span><strong>'+wasteRec+'%</strong></div>'+
      '</div>'+
-     '<h3 style="margin-top:18px">Measurement Diagram</h3><p class="muted">Every perimeter and topology segment is dimensioned. Eave/rake labels are automatically classified from DSM facet direction when available.'+(symmetryFixCount?' '+symmetryFixCount+' small facet'+(symmetryFixCount===1?' was':'s were')+' symmetrically cleaned for report presentation.':'')+'</p>'+measureSvg+
+     '<h3 style="margin-top:18px">Measurement Diagram</h3><p class="muted">Every perimeter and topology segment is dimensioned. Shared facet boundaries are drawn from one canonical roof mesh so adjacent planes use identical corners and divider lines. Eave/rake labels are automatically classified from DSM facet direction when available.'+(symmetryFixCount?' '+symmetryFixCount+' small facet'+(symmetryFixCount===1?' was':'s were')+' symmetrically cleaned for report presentation.':'')+'</p>'+measureSvg+
      '<h3 style="margin-top:18px">Pitch Diagram</h3>'+pitchSvg+
      '<h3 style="margin-top:18px">Area Diagram</h3>'+areaSvg+
      '<h3 style="margin-top:18px">Linear Measurements</h3><div class="table-wrap"><table><tbody>'+
