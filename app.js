@@ -3150,7 +3150,7 @@ async function restoreRoofSolarModel(){
  const $=s=>document.querySelector(s);
  const state={
    property:null,outline:[],autoOutlineBase:[],outlineScale:1,outlineRotation:0,lines:[],tool:'ridge',pending:null,mode:'idle',
-   undo:[],redo:[],facets:[],facetPitches:{},drag:null,viewZoom:1.25
+   undo:[],redo:[],facets:[],facetPitches:{},drag:null,viewZoom:1.25,viewPanX:0,viewPanY:0,viewPanDrag:null
  };
  const save=()=>{
    try{localStorage.setItem('solarisManualRoof',JSON.stringify({
@@ -3259,6 +3259,7 @@ async function restoreRoofSolarModel(){
      if(!r.ok)throw new Error(d.error||'Could not load aerial imagery.');
      state.property={address:formatted,lat,lng,imageryUrl:d.imageryUrl,cropHalfMeters:Number(d.cropHalfMeters||42),imageryLabel:d.imageryLabel||d.source||'Aerial imagery',locationSource:'google-browser-geocode'};
      state.outline=[];state.lines=[];state.facets=[];state.facetPitches={};state.undo=[];state.redo=[];state.pending=null;
+     state.viewZoom=1.25;state.viewPanX=0;state.viewPanY=0;state.viewPanDrag=null;renderManualViewport();
      const img=$('#manual-roof-image');if(img)img.src=d.imageryUrl+'&v='+Date.now();
      const ed=$('#manual-roof-editor-card');if(ed)ed.hidden=false;
      if(status)status.textContent=formatted+' · '+(d.imageryLabel||'aerial still')+' · exact Google geocode center · draw or load the roof outline.';
@@ -3532,12 +3533,24 @@ async function restoreRoofSolarModel(){
    stage.style.maxWidth=value;
    const s=$('#manual-roof-outline-status');if(s&&state.property)s.textContent='Workspace enlarged. Outline and detected ridges remain registered to the aerial image.';
  };
- const setManualZoom=value=>{
-   state.viewZoom=Math.max(1,Math.min(3,Number(value)||1));
+ const renderManualViewport=()=>{
    const viewport=$('#manual-roof-viewport'),label=$('#manual-zoom-label');
-   if(viewport)viewport.style.transform='scale('+state.viewZoom+')';
-   const pct=Math.round(state.viewZoom*100);
-   if(label)label.textContent=pct+'%';
+   if(viewport)viewport.style.transform='translate('+state.viewPanX+'px,'+state.viewPanY+'px) scale('+state.viewZoom+')';
+   if(label)label.textContent=Math.round(state.viewZoom*100)+'%';
+ };
+ const setManualZoom=value=>{
+   const prev=state.viewZoom;
+   state.viewZoom=Math.max(1,Math.min(3,Number(value)||1));
+   if(state.viewZoom===1){state.viewPanX=0;state.viewPanY=0;}
+   else if(prev!==state.viewZoom){
+     const ratio=state.viewZoom/Math.max(1,prev);
+     state.viewPanX*=ratio;state.viewPanY*=ratio;
+   }
+   renderManualViewport();
+ };
+ const resetManualView=()=>{
+   state.viewZoom=1.25;state.viewPanX=0;state.viewPanY=0;state.viewPanDrag=null;
+   renderManualViewport();
  };
  $('#manual-view-900')?.addEventListener('click',()=>setManualStageWidth('900px'));
  $('#manual-view-1200')?.addEventListener('click',()=>setManualStageWidth('1200px'));
@@ -3545,6 +3558,7 @@ async function restoreRoofSolarModel(){
  $('#manual-zoom-out')?.addEventListener('click',()=>setManualZoom(state.viewZoom-.25));
  $('#manual-zoom-in')?.addEventListener('click',()=>setManualZoom(state.viewZoom+.25));
  $('#manual-zoom-reset')?.addEventListener('click',()=>setManualZoom(1));
+ $('#manual-view-reset')?.addEventListener('click',resetManualView);
  $('#manual-roof-load')?.addEventListener('click',loadProperty);
  $('#manual-roof-address')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();loadProperty();}});
  $('#manual-use-auto-outline')?.addEventListener('click',useExistingAutoOutline);
@@ -3594,6 +3608,12 @@ async function restoreRoofSolarModel(){
  const overlay=$('#manual-roof-overlay');
  overlay?.addEventListener('pointerdown',e=>{
    const p=svgPoint(e);
+   const clickedGeometry=!!e.target?.closest?.('[data-outline-point],[data-manual-line],[data-line-end]');
+   const wantsPan=state.viewZoom>1&&(e.button===1||e.shiftKey||(!clickedGeometry&&state.mode==='idle'&&!['ridge','hip','valley','delete','select'].includes(state.tool)));
+   if(wantsPan){
+     state.viewPanDrag={pointerId:e.pointerId,startX:e.clientX,startY:e.clientY,baseX:state.viewPanX,baseY:state.viewPanY};
+     overlay.setPointerCapture(e.pointerId);overlay.style.cursor='grabbing';e.preventDefault();return;
+   }
    if(state.mode==='draw-outline'){
      pushUndo();state.outline.push(p);renderManualRoof();return;
    }
@@ -3618,6 +3638,11 @@ async function restoreRoofSolarModel(){
    }
  });
  overlay?.addEventListener('pointermove',e=>{
+   if(state.viewPanDrag){
+     state.viewPanX=state.viewPanDrag.baseX+(e.clientX-state.viewPanDrag.startX);
+     state.viewPanY=state.viewPanDrag.baseY+(e.clientY-state.viewPanDrag.startY);
+     renderManualViewport();return;
+   }
    if(!state.drag)return;const p=snapPoint(svgPoint(e),state.drag.line);
    if(state.drag.kind==='outline')state.outline[state.drag.index]=p;
    if(state.drag.kind==='line-end'){
@@ -3628,7 +3653,14 @@ async function restoreRoofSolarModel(){
    }
    state.facets=[];renderManualRoof();
  });
- const endDrag=e=>{if(state.drag){state.drag=null;try{overlay.releasePointerCapture(e.pointerId)}catch{}renderManualRoof();}};
+ const endDrag=e=>{
+   if(state.viewPanDrag){
+     state.viewPanDrag=null;overlay.style.cursor='crosshair';
+     try{overlay.releasePointerCapture(e.pointerId)}catch{}
+     return;
+   }
+   if(state.drag){state.drag=null;try{overlay.releasePointerCapture(e.pointerId)}catch{}renderManualRoof();}
+ };
  overlay?.addEventListener('pointerup',endDrag);overlay?.addEventListener('pointercancel',endDrag);
 
  // Restore last manual project for convenience.
