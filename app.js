@@ -767,6 +767,80 @@ document.querySelector('#confirm-roof-property')?.addEventListener('click',()=>{
  const confirm=document.querySelector('#confirm-roof-property');if(confirm){confirm.textContent='Location Selected ✓';confirm.disabled=true;}
 });
 
+let roofRemotePanorama=null;
+let roofRemoteImageryState=null;
+
+function roofDistanceMeters(aLat,aLng,bLat,bLng){
+ const R=6371008.8,toRad=x=>x*Math.PI/180;
+ const p1=toRad(aLat),p2=toRad(bLat),dp=toRad(bLat-aLat),dl=toRad(bLng-aLng);
+ const h=Math.sin(dp/2)**2+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2;
+ return 2*R*Math.asin(Math.min(1,Math.sqrt(h)));
+}
+function roofBearingDegrees(aLat,aLng,bLat,bLng){
+ const toRad=x=>x*Math.PI/180,toDeg=x=>x*180/Math.PI;
+ const p1=toRad(aLat),p2=toRad(bLat),dl=toRad(bLng-aLng);
+ const y=Math.sin(dl)*Math.cos(p2);
+ const x=Math.cos(p1)*Math.sin(p2)-Math.sin(p1)*Math.cos(p2)*Math.cos(dl);
+ return (toDeg(Math.atan2(y,x))+360)%360;
+}
+async function checkRoofRemoteImagery(){
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null');
+ const badge=document.querySelector('#roof-remote-imagery-badge'),status=document.querySelector('#roof-remote-imagery-status');
+ const viewBtn=document.querySelector('#roof-view-front'),oppBtn=document.querySelector('#roof-view-opposite');
+ if(!saved?.lat||!saved?.lng){if(status)status.textContent='Confirm the roof location first.';return null}
+ if(badge)badge.textContent='Checking…';
+ try{
+  await loadRoofMapsJs();
+  const service=new google.maps.StreetViewService();
+  const result=await service.getPanorama({location:{lat:Number(saved.lat),lng:Number(saved.lng)},radius:120,preference:google.maps.StreetViewPreference.NEAREST,source:google.maps.StreetViewSource.OUTDOOR});
+  const loc=result?.data?.location?.latLng;
+  const plat=typeof loc?.lat==='function'?loc.lat():Number(loc?.lat),plng=typeof loc?.lng==='function'?loc.lng():Number(loc?.lng);
+  if(!Number.isFinite(plat)||!Number.isFinite(plng))throw new Error('No usable panorama coordinates returned.');
+  const distance=roofDistanceMeters(plat,plng,Number(saved.lat),Number(saved.lng));
+  const heading=roofBearingDegrees(plat,plng,Number(saved.lat),Number(saved.lng));
+  const quality=distance<=35?'strong':distance<=65?'moderate':distance<=100?'weak':'poor';
+  roofRemoteImageryState={pano:result.data.location.pano,lat:plat,lng:plng,distance,heading,quality};
+  if(badge)badge.textContent=quality==='strong'?'Strong coverage':quality==='moderate'?'Usable coverage':quality==='weak'?'Limited coverage':'Poor coverage';
+  if(status)status.innerHTML='<strong>Online panorama found.</strong> '+distance.toFixed(0)+' m from the roof · direct bearing '+heading.toFixed(0)+'° · '+quality+' secondary-evidence quality.'+
+    (distance<=65?' This view may help verify visible hips, valleys, dormers and roof-edge relationships.':' This panorama is probably too distant for reliable roof-line verification.');
+  if(viewBtn)viewBtn.disabled=false;if(oppBtn)oppBtn.disabled=false;
+  return roofRemoteImageryState;
+ }catch(err){
+  roofRemoteImageryState=null;
+  if(badge)badge.textContent='No usable view';
+  if(status)status.textContent='No useful online Street View panorama was found near this roof: '+(err?.message||String(err));
+  if(viewBtn)viewBtn.disabled=true;if(oppBtn)oppBtn.disabled=true;
+  return null;
+ }
+}
+async function showRoofRemotePanorama(opposite=false){
+ const state=roofRemoteImageryState||await checkRoofRemoteImagery();if(!state)return;
+ await loadRoofMapsJs();
+ const el=document.querySelector('#roof-remote-panorama');if(!el)return;
+ el.hidden=false;
+ const heading=(Number(state.heading)+(opposite?180:0))%360;
+ roofRemotePanorama=new google.maps.StreetViewPanorama(el,{
+  pano:state.pano,
+  pov:{heading,pitch:12},
+  zoom:1,
+  addressControl:false,
+  linksControl:true,
+  panControl:true,
+  enableCloseButton:false,
+  fullscreenControl:true,
+  motionTracking:false,
+  motionTrackingControl:false
+ });
+ const status=document.querySelector('#roof-remote-imagery-status');
+ if(status)status.innerHTML+='<br>Viewing online panorama toward '+heading.toFixed(0)+'°. Use the panorama to inspect whether ambiguous roof creases are actually visible.';
+}
+
+document.addEventListener('click',e=>{
+ if(e.target?.id==='check-roof-remote-imagery')checkRoofRemoteImagery();
+ if(e.target?.id==='roof-view-front')showRoofRemotePanorama(false);
+ if(e.target?.id==='roof-view-opposite')showRoofRemotePanorama(true);
+});
+
 async function openRoofGeometryWorkspace(){
  const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null');
  const project=saved||roofLocatedProperty;if(!project?.address)return;
