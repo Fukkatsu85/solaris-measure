@@ -3150,7 +3150,7 @@ async function restoreRoofSolarModel(){
  const $=s=>document.querySelector(s);
  const state={
    property:null,outline:[],autoOutlineBase:[],outlineScale:1,outlineRotation:0,lines:[],tool:'ridge',pending:null,mode:'idle',
-   undo:[],redo:[],facets:[],facetPitches:{},drag:null,viewZoom:1
+   undo:[],redo:[],facets:[],facetPitches:{},drag:null,viewZoom:1.25
  };
  const save=()=>{
    try{localStorage.setItem('solarisManualRoof',JSON.stringify({
@@ -3534,11 +3534,10 @@ async function restoreRoofSolarModel(){
  };
  const setManualZoom=value=>{
    state.viewZoom=Math.max(1,Math.min(3,Number(value)||1));
-   const viewport=$('#manual-roof-viewport'),label=$('#manual-zoom-label'),reset=$('#manual-zoom-reset');
+   const viewport=$('#manual-roof-viewport'),label=$('#manual-zoom-label');
    if(viewport)viewport.style.transform='scale('+state.viewZoom+')';
    const pct=Math.round(state.viewZoom*100);
    if(label)label.textContent=pct+'%';
-   if(reset)reset.textContent=pct+'%';
  };
  $('#manual-view-900')?.addEventListener('click',()=>setManualStageWidth('900px'));
  $('#manual-view-1200')?.addEventListener('click',()=>setManualStageWidth('1200px'));
