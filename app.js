@@ -3150,7 +3150,7 @@ async function restoreRoofSolarModel(){
  const $=s=>document.querySelector(s);
  const state={
    property:null,outline:[],autoOutlineBase:[],outlineScale:1,outlineRotation:0,lines:[],tool:'ridge',pending:null,mode:'idle',
-   undo:[],redo:[],facets:[],facetPitches:{},drag:null
+   undo:[],redo:[],facets:[],facetPitches:{},drag:null,viewZoom:1
  };
  const save=()=>{
    try{localStorage.setItem('solarisManualRoof',JSON.stringify({
@@ -3225,12 +3225,12 @@ async function restoreRoofSolarModel(){
    let out='';
    if(state.outline.length){
      out+='<polygon points="'+state.outline.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="rgba(255,255,255,.10)" stroke="#facc15" stroke-width="6" vector-effect="non-scaling-stroke"/>';
-     state.outline.forEach((p,i)=>out+='<circle data-outline-point="'+i+'" cx="'+(p.x*1000)+'" cy="'+(p.y*1000)+'" r="11" fill="#fff" stroke="#111" stroke-width="4" vector-effect="non-scaling-stroke"/>');
+     state.outline.forEach((p,i)=>out+='<circle data-outline-point="'+i+'" cx="'+(p.x*1000)+'" cy="'+(p.y*1000)+'" r="6" fill="#fff" stroke="#111" stroke-width="2.5" vector-effect="non-scaling-stroke"/>');
    }
    state.lines.forEach((l,i)=>{
-     out+='<line data-manual-line="'+i+'" x1="'+(l.a.x*1000)+'" y1="'+(l.a.y*1000)+'" x2="'+(l.b.x*1000)+'" y2="'+(l.b.y*1000)+'" stroke="'+(colors[l.type]||'#111')+'" stroke-width="8" vector-effect="non-scaling-stroke"/>';
-     out+='<circle data-line-end="'+i+':a" cx="'+(l.a.x*1000)+'" cy="'+(l.a.y*1000)+'" r="9" fill="#fff" stroke="'+(colors[l.type]||'#111')+'" stroke-width="4"/>';
-     out+='<circle data-line-end="'+i+':b" cx="'+(l.b.x*1000)+'" cy="'+(l.b.y*1000)+'" r="9" fill="#fff" stroke="'+(colors[l.type]||'#111')+'" stroke-width="4"/>';
+     out+='<line data-manual-line="'+i+'" x1="'+(l.a.x*1000)+'" y1="'+(l.a.y*1000)+'" x2="'+(l.b.x*1000)+'" y2="'+(l.b.y*1000)+'" stroke="'+(colors[l.type]||'#111')+'" stroke-width="7" vector-effect="non-scaling-stroke"/>';
+     out+='<circle data-line-end="'+i+':a" cx="'+(l.a.x*1000)+'" cy="'+(l.a.y*1000)+'" r="5.5" fill="#fff" stroke="'+(colors[l.type]||'#111')+'" stroke-width="2.5"/>';
+     out+='<circle data-line-end="'+i+':b" cx="'+(l.b.x*1000)+'" cy="'+(l.b.y*1000)+'" r="5.5" fill="#fff" stroke="'+(colors[l.type]||'#111')+'" stroke-width="2.5"/>';
    });
    if(state.pending)out+='<circle cx="'+(state.pending.x*1000)+'" cy="'+(state.pending.y*1000)+'" r="12" fill="#f59e0b" stroke="#111" stroke-width="4"/>';
    svg.innerHTML=out;
@@ -3532,9 +3532,20 @@ async function restoreRoofSolarModel(){
    stage.style.maxWidth=value;
    const s=$('#manual-roof-outline-status');if(s&&state.property)s.textContent='Workspace enlarged. Outline and detected ridges remain registered to the aerial image.';
  };
+ const setManualZoom=value=>{
+   state.viewZoom=Math.max(1,Math.min(3,Number(value)||1));
+   const viewport=$('#manual-roof-viewport'),label=$('#manual-zoom-label'),reset=$('#manual-zoom-reset');
+   if(viewport)viewport.style.transform='scale('+state.viewZoom+')';
+   const pct=Math.round(state.viewZoom*100);
+   if(label)label.textContent=pct+'%';
+   if(reset)reset.textContent=pct+'%';
+ };
  $('#manual-view-900')?.addEventListener('click',()=>setManualStageWidth('900px'));
  $('#manual-view-1200')?.addEventListener('click',()=>setManualStageWidth('1200px'));
  $('#manual-view-full')?.addEventListener('click',()=>setManualStageWidth('none'));
+ $('#manual-zoom-out')?.addEventListener('click',()=>setManualZoom(state.viewZoom-.25));
+ $('#manual-zoom-in')?.addEventListener('click',()=>setManualZoom(state.viewZoom+.25));
+ $('#manual-zoom-reset')?.addEventListener('click',()=>setManualZoom(1));
  $('#manual-roof-load')?.addEventListener('click',loadProperty);
  $('#manual-roof-address')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();loadProperty();}});
  $('#manual-use-auto-outline')?.addEventListener('click',useExistingAutoOutline);
