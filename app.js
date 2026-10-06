@@ -1014,13 +1014,118 @@ async function playRoofAerialView(){
      Object.values(uris).map(v=>v?.landscapeUri||v?.portraitUri).find(v=>typeof v==='string'&&/^https:/.test(v));
    if(!src)throw new Error('No playable Aerial View URI was returned.');
    if(video){video.src=src;video.hidden=false;video.load();}
-   if(status)status.innerHTML+='<br>Flyover loaded from a short-lived Google URI. It is not stored by Solaris.';
+   const qaBtn=document.querySelector('#start-roof-aerial-qa');if(qaBtn)qaBtn.disabled=false;
+   if(status)status.innerHTML+='<br>Flyover loaded from a short-lived Google URI. It is not stored by Solaris. Aerial QA is ready.';
  }catch(err){if(status)status.innerHTML+='<br><strong>Could not load flyover:</strong> '+escRoof(err?.message||String(err));}
 }
 document.addEventListener('click',e=>{
  if(e.target?.id==='check-roof-aerial-view')checkRoofAerialView();
  if(e.target?.id==='render-roof-aerial-view')renderRoofAerialView();
  if(e.target?.id==='play-roof-aerial-view')playRoofAerialView();
+});
+
+
+let roofAerialQaState=null;
+
+function roofQaLineKey(line,index){
+ const a=line?.a||{},b=line?.b||{};
+ return [index,line?.type||'line',
+   Number(a.lat??a.x??0).toFixed(6),Number(a.lng??a.y??0).toFixed(6),
+   Number(b.lat??b.x??0).toFixed(6),Number(b.lng??b.y??0).toFixed(6)
+ ].join('|');
+}
+function roofQaLengthFt(line){
+ return Number(line?.length3dMeters||line?.lengthMeters||0)*3.280839895;
+}
+function roofQaSaved(){
+ try{return JSON.parse(localStorage.getItem('solarisRoofAerialQa')||'null')}catch{return null}
+}
+function roofQaPersist(state){
+ roofAerialQaState=state;
+ try{localStorage.setItem('solarisRoofAerialQa',JSON.stringify(state))}catch{}
+}
+function roofQaMiniPlan(sm,currentIndex){
+ const outline=sm?.outline||[],lines=sm?.model?.roofLines||[],facets=sm?.model?.facets||[];
+ if(outline.length<3)return '<div style="padding:20px">Roof geometry unavailable.</div>';
+ const all=[...outline,...facets.flatMap(f=>f.outline||[]),...lines.flatMap(l=>[l.a,l.b]).filter(Boolean)];
+ const lats=all.map(p=>Number(p.lat)).filter(Number.isFinite),lngs=all.map(p=>Number(p.lng)).filter(Number.isFinite);
+ if(!lats.length||!lngs.length)return '<div style="padding:20px">Roof geometry unavailable.</div>';
+ const north=Math.max(...lats),south=Math.min(...lats),east=Math.max(...lngs),west=Math.min(...lngs);
+ const cos=Math.max(.2,Math.cos(((north+south)/2)*Math.PI/180));
+ const width=Math.max(1e-9,(east-west)*cos),height=Math.max(1e-9,north-south),scale=520/Math.max(width,height),ox=(620-width*scale)/2,oy=(620-height*scale)/2;
+ const pt=p=>({x:ox+((Number(p.lng)-west)*cos)*scale,y:oy+(north-Number(p.lat))*scale});
+ const P=p=>{const q=pt(p);return q.x.toFixed(1)+','+q.y.toFixed(1)};
+ let s='<svg viewBox="0 0 620 620" style="display:block;width:100%;max-height:520px" aria-label="Aerial QA roof plan"><rect width="620" height="620" fill="#fff"/>';
+ facets.forEach(f=>{if((f.outline||[]).length>=3)s+='<polygon points="'+f.outline.map(P).join(' ')+'" fill="#eef2f7" stroke="#cbd5e1" stroke-width="2"/>'});
+ s+='<polygon points="'+outline.map(P).join(' ')+'" fill="none" stroke="#111827" stroke-width="6"/>';
+ lines.filter(l=>['ridge','hip','valley'].includes(l.type)).forEach((l,i)=>{
+   const a=pt(l.a),b=pt(l.b),active=i===currentIndex,stroke=active?'#f59e0b':(l.type==='ridge'?'#16a34a':l.type==='hip'?'#2563eb':'#dc2626');
+   s+='<line x1="'+a.x.toFixed(1)+'" y1="'+a.y.toFixed(1)+'" x2="'+b.x.toFixed(1)+'" y2="'+b.y.toFixed(1)+'" stroke="'+stroke+'" stroke-width="'+(active?10:5)+'"/>';
+   const mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
+   s+='<text x="'+mx.toFixed(1)+'" y="'+(my-7).toFixed(1)+'" text-anchor="middle" font-size="18" font-weight="700" fill="#111" stroke="#fff" stroke-width="5" paint-order="stroke">'+(i+1)+'</text>';
+ });
+ return s+'</svg>';
+}
+function renderRoofAerialQa(){
+ const state=roofAerialQaState||roofQaSaved(),panel=document.querySelector('#roof-aerial-qa-panel'),list=document.querySelector('#roof-aerial-qa-list'),plan=document.querySelector('#roof-aerial-qa-plan'),cur=document.querySelector('#roof-aerial-qa-current'),badge=document.querySelector('#roof-aerial-qa-badge');
+ if(!state||!panel||!list)return;
+ panel.hidden=false;
+ const lines=state.lines||[],current=Math.max(0,Math.min(Number(state.currentIndex||0),Math.max(0,lines.length-1)));
+ state.currentIndex=current;
+ if(plan)plan.innerHTML=roofQaMiniPlan(state.solarModel,current);
+ const reviewed=lines.filter(x=>x.status==='confirmed'||x.status==='rejected').length;
+ const unresolved=lines.filter(x=>x.status==='unresolved').length;
+ if(badge)badge.textContent=reviewed+'/'+lines.length+' reviewed';
+ const q=lines[current];
+ if(cur&&q)cur.innerHTML='<strong>Line '+(current+1)+' · '+escRoof(q.classification)+'</strong> · '+q.lengthFt.toFixed(1)+' ft · '+escRoof(q.status)+'. Use the flyover angles above, then confirm/reclassify/reject.';
+ list.innerHTML=lines.map((q,i)=>
+   '<div data-qa-row="'+i+'" style="display:grid;grid-template-columns:70px 110px 90px 1fr;gap:8px;align-items:center;padding:9px 0;border-bottom:1px solid #d8e0e8">'+
+   '<button type="button" class="'+(i===current?'primary':'secondary')+'" data-qa-select="'+i+'">Line '+(i+1)+'</button>'+
+   '<select data-qa-class="'+i+'" style="padding:8px;border-radius:8px"><option value="ridge"'+(q.classification==='ridge'?' selected':'')+'>Ridge</option><option value="hip"'+(q.classification==='hip'?' selected':'')+'>Hip</option><option value="valley"'+(q.classification==='valley'?' selected':'')+'>Valley</option></select>'+
+   '<span>'+q.lengthFt.toFixed(1)+' ft</span>'+
+   '<div class="actions" style="margin:0"><button type="button" class="secondary" data-qa-status="'+i+'" data-status="confirmed">Confirm</button><button type="button" class="secondary" data-qa-status="'+i+'" data-status="rejected">Reject</button><button type="button" class="secondary" data-qa-status="'+i+'" data-status="unresolved">Unresolved</button><strong style="min-width:86px">'+escRoof(q.status)+'</strong></div>'+
+   '</div>'
+ ).join('');
+ roofQaPersist(state);
+}
+async function startRoofAerialQa(){
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{},status=document.querySelector('#roof-aerial-view-status');
+ const projectId=saved.projectId||('roof-'+Number(saved.lat).toFixed(6)+'-'+Number(saved.lng).toFixed(6));
+ try{
+   const r=await fetch('/api/roof-report?projectId='+encodeURIComponent(projectId),{cache:'no-store'}),d=await r.json().catch(()=>({}));
+   if(!r.ok||!d.ok)throw new Error(d.error||'Could not load processed roof geometry.');
+   const sm=d.solarModel||null,raw=(sm?.model?.roofLines||[]).filter(l=>['ridge','hip','valley'].includes(l?.type)&&l?.a&&l?.b);
+   if(!raw.length)throw new Error('No DSM ridge / hip / valley lines are available. Process the roof first.');
+   const prior=roofQaSaved();
+   const priorByKey=new Map((prior?.lines||[]).map(x=>[x.key,x]));
+   const lines=raw.map((l,i)=>{
+     const key=roofQaLineKey(l,i),old=priorByKey.get(key);
+     return {key,index:i,originalType:l.type,classification:old?.classification||l.type,status:old?.status||'unresolved',lengthFt:roofQaLengthFt(l)};
+   });
+   roofAerialQaState={projectId,address:saved.address||'',geometryVersion:String(sm?.geometryVersion||sm?.trainingVersion||''),updatedAt:new Date().toISOString(),currentIndex:0,lines,solarModel:sm};
+   roofQaPersist(roofAerialQaState);renderRoofAerialQa();
+   document.querySelector('#roof-aerial-qa-panel')?.scrollIntoView({behavior:'smooth',block:'start'});
+ }catch(err){if(status)status.innerHTML+='<br><strong>Aerial QA could not start:</strong> '+escRoof(err?.message||String(err));}
+}
+document.addEventListener('click',e=>{
+ if(e.target?.id==='start-roof-aerial-qa')startRoofAerialQa();
+ const s=e.target?.dataset?.qaSelect;if(s!==undefined&&roofAerialQaState){roofAerialQaState.currentIndex=Number(s);renderRoofAerialQa();}
+ const st=e.target?.dataset?.qaStatus;if(st!==undefined&&roofAerialQaState){
+   const q=roofAerialQaState.lines[Number(st)];if(q){q.status=e.target.dataset.status;roofAerialQaState.currentIndex=Number(st);roofAerialQaState.updatedAt=new Date().toISOString();renderRoofAerialQa();}
+ }
+ if(e.target?.dataset?.aerialTime){
+   const v=document.querySelector('#roof-aerial-view-video');if(v){v.currentTime=Number(e.target.dataset.aerialTime)||0;v.play().catch(()=>{});}
+ }
+ if(e.target?.id==='save-roof-aerial-qa'&&roofAerialQaState){
+   roofAerialQaState.updatedAt=new Date().toISOString();roofQaPersist(roofAerialQaState);
+   const badge=document.querySelector('#roof-aerial-qa-badge'),n=roofAerialQaState.lines.filter(x=>x.status==='confirmed'||x.status==='rejected').length;
+   if(badge)badge.textContent=n+'/'+roofAerialQaState.lines.length+' saved';
+ }
+});
+document.addEventListener('change',e=>{
+ const i=e.target?.dataset?.qaClass;if(i!==undefined&&roofAerialQaState){
+   const q=roofAerialQaState.lines[Number(i)];if(q){q.classification=e.target.value;q.status='unresolved';roofAerialQaState.currentIndex=Number(i);renderRoofAerialQa();}
+ }
 });
 
 async function openRoofGeometryWorkspace(){
@@ -1864,9 +1969,12 @@ function roofDiagramSvg(data){
    });
    s+='<polygon points="'+outline.map(P).join(' ')+'" fill="none" stroke="#111" stroke-width="7"/>';
    const auth=data.reportLineOverlay||{};
-   lines.filter(l=>['ridge','hip','valley'].includes(l.type)).forEach(l=>{
-    const a=pt(l.a),b=pt(l.b),verified=l.type==='ridge'?auth.ridgeVerified:(l.type==='hip'?auth.hipVerified:auth.valleyVerified);
-    const stroke=verified?lc[l.type]:'#9ca3af',dash=verified?'':' stroke-dasharray="12 9"';
+   lines.filter(l=>['ridge','hip','valley'].includes(l.type)).forEach((l,i)=>{
+    const a=pt(l.a),b=pt(l.b),qa=auth.aerialQaComplete?auth.aerialQaLines?.[i]:null;
+    const effectiveType=qa?.classification||l.type;
+    const verified=qa?qa.status==='confirmed':(l.type==='ridge'?auth.ridgeVerified:(l.type==='hip'?auth.hipVerified:auth.valleyVerified));
+    if(qa?.status==='rejected')return;
+    const stroke=verified?(lc[effectiveType]||'#111'):'#9ca3af',dash=verified?'':' stroke-dasharray="12 9"';
     s+='<line x1="'+a.x.toFixed(1)+'" y1="'+a.y.toFixed(1)+'" x2="'+b.x.toFixed(1)+'" y2="'+b.y.toFixed(1)+'" stroke="'+stroke+'" stroke-width="'+(verified?7:4)+'"'+dash+'/>';
    });
   }
@@ -2125,6 +2233,16 @@ async function generateRoofReport(){
     if(Number(lidarLineValidation.verifiedTotals?.hip)>0)lines.hip=Number(lidarLineValidation.verifiedTotals.hip);
     if(Number(lidarLineValidation.verifiedTotals?.valley)>0)lines.valley=Number(lidarLineValidation.verifiedTotals.valley);
   }
+  const aerialQa=roofQaSaved();
+  const aerialQaMatches=Boolean(aerialQa&&aerialQa.projectId===projectId&&String(aerialQa.geometryVersion||'')===geometryVersion);
+  const aerialQaLines=aerialQaMatches?(aerialQa.lines||[]):[];
+  const aerialQaUnresolved=aerialQaLines.filter(x=>x.status==='unresolved').length;
+  const aerialQaComplete=aerialQaLines.length>0&&aerialQaUnresolved===0;
+  if(aerialQaComplete){
+    const qaTotals={ridge:0,hip:0,valley:0};
+    aerialQaLines.filter(x=>x.status==='confirmed').forEach(x=>{if(qaTotals[x.classification]!=null)qaTotals[x.classification]+=Number(x.lengthFt||0)});
+    lines.ridge=qaTotals.ridge;lines.hip=qaTotals.hip;lines.valley=qaTotals.valley;
+  }
   const physicalExterior=physicalExteriorTotalsForReport(sm);
   if(physicalExterior){lines.eave=physicalExterior.eave;lines.rake=physicalExterior.rake;}
   const exteriorCalibrationApplied=dsmFacets.length>=7;
@@ -2248,6 +2366,7 @@ async function generateRoofReport(){
     {id:'hip',label:'Hip geometry',pass:detectedHipCount===0||Number(lines.hip||0)>0,detail:detectedHipCount===0?'No hip candidates detected':(Number(lines.hip||0)>0?lines.hip.toFixed(1)+' ft production · '+detectedHipCount+' candidate line(s)':'Hip candidates exist but none are production-verified')},
     {id:'valley',label:'Valley geometry',pass:detectedValleyCount===0||Number(lines.valley||0)>0,detail:detectedValleyCount===0?'No valley candidates detected':(Number(lines.valley||0)>0?lines.valley.toFixed(1)+' ft production · '+detectedValleyCount+' candidate line(s)':'Valley candidates exist but none are production-verified')},
     {id:'internalSupport',label:'Internal-line support',pass:!complexRoof||!lidarLineValidation||!Number.isFinite(internalSupportRatio)||internalSupportRatio>=.45,detail:!complexRoof?'Simple-roof guard':(lidarLineValidation&&Number.isFinite(internalSupportRatio)?Math.round(internalSupportRatio*100)+'% independently supported':'Independent line support unavailable')},
+    {id:'aerialQa',label:'Aerial internal-line QA',pass:!complexRoof||aerialQaComplete,detail:!complexRoof?'Simple-roof guard':(aerialQaMatches?(aerialQaComplete?'Complete · '+aerialQaLines.length+' lines resolved':aerialQaUnresolved+' unresolved of '+aerialQaLines.length):'Not completed for current geometry')},
     {id:'exterior',label:'Exterior geometry',pass:Number(lines.eave||0)>0&&Number(lines.rake||0)>0,detail:(Number(lines.eave||0)+Number(lines.rake||0)).toFixed(1)+' ft eave+rake'},
     {id:'lidarArea',label:'Independent area cross-check',pass:!lidarQualityGood||Boolean(lidarConfirmsProduction),detail:lidarQualityGood?(lidarConfirmsProduction?'LiDAR agrees':'LiDAR disagreement '+(Number.isFinite(lidarVsProductionPct)?lidarVsProductionPct.toFixed(1)+'%':'—')):'LiDAR unavailable / not quality-screened'},
     {id:'lidarTopology',label:'Independent topology cross-check',pass:!lidarQualityGood||Boolean(lidarTopologyAgrees),detail:lidarQualityGood?(lidarTopologyAgrees?'Major geometry agrees':'Needs review'):'LiDAR unavailable / not quality-screened'}
@@ -2270,7 +2389,9 @@ async function generateRoofReport(){
     valleyFt:Number(lines.valley||0),
     ridgeVerified:Number(lines.ridge||0)>0,
     hipVerified:Number(lines.hip||0)>0,
-    valleyVerified:Number(lines.valley||0)>0
+    valleyVerified:Number(lines.valley||0)>0,
+    aerialQaComplete,
+    aerialQaLines:aerialQaComplete?aerialQaLines:[]
   };
   const facetRows=(dsmFacets.length?dsmFacets:facets).map((p,i)=>{
    const isDsm=dsmFacets.length>0,pitch=wholePitch(isDsm?p.rise12:p.pitch12),slope=isDsm?Number(p.pitchDegrees||0):Number(p.slopeDeg||0),planArea=isDsm?Number(p.flatAreaSqFt||0):Number(p.planAreaFt2||0),slopedArea=isDsm?Number(p.slopedAreaSqFt||0):Number(p.slopedAreaFt2||0);
