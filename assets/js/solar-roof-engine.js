@@ -1227,6 +1227,124 @@ function dedupeRoofLines(lines=[]){
   return kept.sort((a,b)=>Number(b.lengthMeters||0)-Number(a.lengthMeters||0));
 }
 
+
+function lineAngleDegreesLL(line){
+  const f=polygonLocalFrame([line.a,line.b]),a=f.toXY(line.a),b=f.toXY(line.b);
+  return normalize180(Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI);
+}
+function lineMidpointLL(line){return {lat:(Number(line.a.lat)+Number(line.b.lat))/2,lng:(Number(line.a.lng)+Number(line.b.lng))/2};}
+function closestPointOnOutlineLL(point,outline){
+  if(!point||!Array.isArray(outline)||outline.length<2)return null;
+  const f=polygonLocalFrame([point,...outline]),p=f.toXY(point);let best=null;
+  for(let i=0;i<outline.length;i++){
+    const a=f.toXY(outline[i]),b=f.toXY(outline[(i+1)%outline.length]),dx=b.x-a.x,dy=b.y-a.y,l2=dx*dx+dy*dy||1;
+    const t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/l2));
+    const q={x:a.x+dx*t,y:a.y+dy*t},d=Math.hypot(p.x-q.x,p.y-q.y);
+    if(!best||d<best.distance)best={distance:d,point:f.toLL(q)};
+  }
+  return best;
+}
+function roofLineEvidenceScore(line){
+  const plane=Math.max(0,Number(line?.planeStrength||0));
+  const crease=Math.max(0,Number(line?.creaseStrength||0));
+  const trace=Math.max(0,Number(line?.traceSupport||0));
+  const rms=Number(line?.rmsMeters);
+  const fitPenalty=Number.isFinite(rms)?Math.min(.5,rms/2):0;
+  return plane*1.6+crease*2.2+trace*.7-fitPenalty;
+}
+function lineLooksDuplicate(candidate,kept){
+  const ca=lineAngleDegreesLL(candidate),cm=lineMidpointLL(candidate);
+  return kept.some(k=>{
+    if(!k?.a||!k?.b)return false;
+    if(lineAngleDiff(ca,lineAngleDegreesLL(k))>10)return false;
+    const d=pointSegmentDistanceMetersLL(cm,k.a,k.b);
+    if(d>1.15)return false;
+    const aNear=pointSegmentDistanceMetersLL(candidate.a,k.a,k.b);
+    const bNear=pointSegmentDistanceMetersLL(candidate.b,k.a,k.b);
+    return Math.min(aNear,bNear)<=1.5||d<=.65;
+  });
+}
+function snapRoofLineGraph(lines,outline){
+  if(!Array.isArray(lines)||!lines.length||!Array.isArray(outline)||outline.length<3)return lines||[];
+  const f=polygonLocalFrame([...outline,...lines.flatMap(l=>[l.a,l.b])]),roof=outline.map(f.toXY);
+  const work=lines.map(l=>({...l,_a:f.toXY(l.a),_b:f.toXY(l.b)}));
+  const inside=p=>pointInPolygonXY(p,roof);
+  const segParam=(p,a,b)=>{
+    const dx=b.x-a.x,dy=b.y-a.y,l2=dx*dx+dy*dy||1;
+    return ((p.x-a.x)*dx+(p.y-a.y)*dy)/l2;
+  };
+  // Snap nearby line endpoints onto physically plausible line-line junctions.
+  for(let i=0;i<work.length;i++)for(let j=i+1;j<work.length;j++){
+    const a=work[i],b=work[j],hit=infiniteLineIntersection(a._a,a._b,b._a,b._b);
+    if(!hit||!inside(hit))continue;
+    const ta=segParam(hit,a._a,a._b),tb=segParam(hit,b._a,b._b);
+    if(ta<-.12||ta>1.12||tb<-.12||tb>1.12)continue;
+    const endpoints=[[a,"_a"],[a,"_b"],[b,"_a"],[b,"_b"]];
+    const near=endpoints.filter(([l,k])=>Math.hypot(l[k].x-hit.x,l[k].y-hit.y)<=1.65);
+    if(near.length<2)continue;
+    near.forEach(([l,k])=>{l[k]={x:hit.x,y:hit.y};});
+  }
+  // Cluster endpoints that represent one junction but missed exact intersection.
+  const refs=[];work.forEach((l,i)=>{refs.push({i,k:"_a",p:l._a});refs.push({i,k:"_b",p:l._b});});
+  const used=new Set();
+  for(let i=0;i<refs.length;i++){
+    if(used.has(i))continue;
+    const cluster=[i];used.add(i);
+    for(let j=i+1;j<refs.length;j++){
+      if(used.has(j)||refs[j].i===refs[i].i)continue;
+      if(Math.hypot(refs[i].p.x-refs[j].p.x,refs[i].p.y-refs[j].p.y)<=1.05){cluster.push(j);used.add(j);}
+    }
+    if(cluster.length<2)continue;
+    const x=cluster.reduce((s,q)=>s+refs[q].p.x,0)/cluster.length,y=cluster.reduce((s,q)=>s+refs[q].p.y,0)/cluster.length;
+    if(!inside({x,y}))continue;
+    cluster.forEach(q=>{work[refs[q].i][refs[q].k]={x,y};});
+  }
+  return work.map(l=>{
+    let a=f.toLL(l._a),b=f.toLL(l._b);
+    // A dangling endpoint close to the roof perimeter should terminate cleanly on it.
+    const ca=closestPointOnOutlineLL(a,outline),cb=closestPointOnOutlineLL(b,outline);
+    if(ca&&ca.distance<=.65)a=ca.point;
+    if(cb&&cb.distance<=.65)b=cb.point;
+    const lengthMeters=metersBetween(a,b);
+    return {...l,a,b,lengthMeters,length3dMeters:Number(l.length3dMeters)>0?Number(l.length3dMeters)*lengthMeters/Math.max(.01,Number(l.lengthMeters)||lengthMeters):lengthMeters,_a:undefined,_b:undefined};
+  }).filter(l=>Number(l.lengthMeters)>=.7);
+}
+function fuseRoofLineEvidence(primaryLines=[],rasterLines=[],outline=[]){
+  const primary=(primaryLines||[]).filter(l=>["ridge","hip","valley"].includes(l?.type)&&l?.a&&l?.b).map(l=>({...l,evidenceSource:l.source||"plane"}));
+  const accepted=[...primary],added=[];
+  for(const line of (rasterLines||[]).filter(l=>["ridge","hip","valley"].includes(l?.type)&&l?.a&&l?.b)){
+    const len=Number(line.lengthMeters||metersBetween(line.a,line.b));
+    if(!Number.isFinite(len)||len<1.25||lineLooksDuplicate(line,accepted))continue;
+    const score=roofLineEvidenceScore(line);
+    const typeMissing=!accepted.some(x=>x.type===line.type);
+    // Missing valleys/hips matter disproportionately on compound roofs. Allow
+    // a lower threshold only when a category is otherwise absent; otherwise
+    // require independent DSM crease evidence before adding raster geometry.
+    const threshold=typeMissing?(line.type==="valley"?.035:.08):.14;
+    const crease=Math.max(0,Number(line.creaseStrength||0));
+    if(score<threshold&&crease<threshold)continue;
+    const promoted={...line,lengthMeters:len,evidenceSource:"dsm-raster-adjacency",fusionScore:score,source:"fusion-raster-v1"};
+    accepted.push(promoted);added.push(promoted);
+  }
+  const deduped=dedupeRoofLines(accepted);
+  const snapped=snapRoofLineGraph(deduped,outline);
+  return {
+    lines:snapped,
+    diagnostics:{
+      primaryCount:primary.length,
+      rasterCandidateCount:(rasterLines||[]).length,
+      addedCount:added.length,
+      addedByType:{
+        ridge:added.filter(l=>l.type==="ridge").length,
+        hip:added.filter(l=>l.type==="hip").length,
+        valley:added.filter(l=>l.type==="valley").length
+      },
+      finalCount:snapped.length,
+      version:"multi-evidence-topology-fusion-v1"
+    }
+  };
+}
+
 function extractSharedRoofLines(mask,component,labels,candidates,dsm){
   const pairs=new Map();
   const add=(a,b,x,y)=>{
@@ -2116,6 +2234,16 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
   let finalRoofLines=facetResult.roofLines||[];
   let geometryMode=planeFacetResult?("plane_intersection_"+planeFacetResult.engine+"_selected"):"detailed_raster_fallback";
 
+  // Production topology fusion: plane intersections remain the primary source,
+  // while independently detected DSM raster adjacencies can fill missing
+  // ridge/hip/valley categories. Junction snapping converts the result into a
+  // coherent roof graph before measurements/reporting.
+  const topologyFusion=fuseRoofLineEvidence(finalRoofLines,rasterFacetResult.roofLines||[],outline);
+  if(topologyFusion.lines.length){
+    finalRoofLines=topologyFusion.lines;
+    geometryMode+="_fused";
+  }
+
   const simple=regularizeSimpleGable(rawOutline,finalFacets,finalRoofLines);
   if(simple){
     outline=simple.outline;
@@ -2143,7 +2271,7 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
   model.rawCandidatePlaneCount=facetResult.rawCandidateCount??null;
   model.candidatePlaneCount=facetResult.candidateCount??null;
   model.facetCap=facetResult.facetCap??null;
-  model.lineEngineVersion="plane-dsm-trace-v5-restored";
+  model.lineEngineVersion="multi-evidence-topology-fusion-v1";
   model.facetEngineVersion=planeFacetResult?(
     planeFacetResult.engine==="plane-v4-wide-dsm"?"plane-v4-wide-dsm-selected":
     planeFacetResult.engine==="plane-v4-wide-google"?"plane-v4-wide-google-selected":
@@ -2161,7 +2289,8 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
     dsmRegionCandidateCount:Number.isFinite(Number(planeFacetResult?.dsmRegionCandidateCount))?Number(planeFacetResult.dsmRegionCandidateCount):null,
     googleOnly:{valid:Boolean(planeV2.valid),qualityScore:Number.isFinite(Number(planeV2.qualityScore))?Number(planeV2.qualityScore):null,facets:Array.isArray(planeV2.facets)?planeV2.facets.length:0,lines:Array.isArray(planeV2.roofLines)?planeV2.roofLines.length:0},
     dsmAugmented:{valid:Boolean(planeV3.valid),qualityScore:Number.isFinite(Number(planeV3.qualityScore))?Number(planeV3.qualityScore):null,facets:Array.isArray(planeV3.facets)?planeV3.facets.length:0,lines:Array.isArray(planeV3.roofLines)?planeV3.roofLines.length:0},
-    wide:{valid:Boolean(planeWide.valid),engine:planeWide.engine||null,qualityScore:Number.isFinite(Number(planeWide.qualityScore))?Number(planeWide.qualityScore):null,facets:Array.isArray(planeWide.facets)?planeWide.facets.length:0,lines:Array.isArray(planeWide.roofLines)?planeWide.roofLines.length:0,totalInternalLineMeters:Number(planeWide.totalInternalLineMeters||0)}
+    wide:{valid:Boolean(planeWide.valid),engine:planeWide.engine||null,qualityScore:Number.isFinite(Number(planeWide.qualityScore))?Number(planeWide.qualityScore):null,facets:Array.isArray(planeWide.facets)?planeWide.facets.length:0,lines:Array.isArray(planeWide.roofLines)?planeWide.roofLines.length:0,totalInternalLineMeters:Number(planeWide.totalInternalLineMeters||0)},
+    topologyFusion:topologyFusion.diagnostics
   };
 
   // Shadow candidate: the raster adjacency solver sees only boundaries between
