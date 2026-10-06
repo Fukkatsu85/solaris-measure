@@ -4209,6 +4209,18 @@ async function restoreRoofSolarModel(){
    if(state.outline.length<3){if(status)status.textContent='Confirm the outline first.';return;}
    pushUndo();
 
+   // Migration: remove legacy DSM-derived elevation fragments from older
+   // Manual Roof builds. They were evidence lines, not real roof topology.
+   // Preserve anything the user explicitly drew and the new clean section breaks.
+   const beforeLegacy=state.lines.length;
+   state.lines=state.lines.filter(l=>!(
+     l.type==='elevation_break' &&
+     !l.manual &&
+     !l.cleanSectionBreak &&
+     (l.autoAssisted||l.derivedFromFacets||l.fromRidgeJunction||l.autoDetected)
+   ));
+   const removedLegacyBreaks=beforeLegacy-state.lines.length;
+
    // Snap every structural endpoint to a real roof anchor. This includes corners,
    // perimeter edges, line endpoints, line interiors and line intersections.
    state.lines=state.lines.map((l,i)=>({...l,a:snapPoint(l.a,i),b:snapPoint(l.b,i)})).filter(l=>dist(l.a,l.b)>.004);
@@ -4257,7 +4269,7 @@ async function restoreRoofSolarModel(){
    const table=$('#manual-roof-facet-table');
    if(table)table.innerHTML='<table><thead><tr><th>Facet</th><th>Pitch</th><th>Plan ft²</th><th>Sloped ft²</th></tr></thead><tbody>'+state.facets.map(f=>'<tr><td>F'+f.id+'</td><td><select data-manual-facet-pitch="'+f.id+'">'+[2,3,4,5,6,7,8,9,10,11,12,14,16,18].map(p=>'<option value="'+p+'"'+(p===f.pitch?' selected':'')+'>'+p+'/12</option>').join('')+'</select></td><td>'+Math.round(f.planM2*SQFT_PER_M2)+'</td><td>'+Math.round(f.slopedM2*SQFT_PER_M2)+'</td></tr>').join('')+'</tbody></table>';
    if(badge)badge.textContent=state.facets.length+' facets';
-   if(status)status.textContent='Roof geometry built ✓ · '+state.facets.length+' connected closed facet'+(state.facets.length===1?'':'s')+(assist.extended?' · '+assist.extended+' endpoint'+(assist.extended===1?'':'s')+' auto-connected':'')+(assist.addedBreaks?' · '+assist.addedBreaks+' elevation break'+(assist.addedBreaks===1?'':'s')+' added from DSM/topography':'')+(assist.symmetryAdjustments?' · '+assist.symmetryAdjustments+' auto line'+(assist.symmetryAdjustments===1?'':'s')+' symmetry-corrected':'')+((cleanupBefore+cleanupAfter)?' · '+(cleanupBefore+cleanupAfter)+' junction adjustment'+((cleanupBefore+cleanupAfter)===1?'':'s')+' cleaned':'')+'. DSM is assisting topology and pitch without becoming report facets.';
+   if(status)status.textContent='Roof geometry built ✓ · '+state.facets.length+' connected closed facet'+(state.facets.length===1?'':'s')+(removedLegacyBreaks?' · removed '+removedLegacyBreaks+' legacy DSM break fragment'+(removedLegacyBreaks===1?'':'s'):'')+(assist.extended?' · '+assist.extended+' endpoint'+(assist.extended===1?'':'s')+' auto-connected':'')+(assist.addedBreaks?' · '+assist.addedBreaks+' elevation break'+(assist.addedBreaks===1?'':'s')+' added from DSM/topography':'')+(assist.symmetryAdjustments?' · '+assist.symmetryAdjustments+' auto line'+(assist.symmetryAdjustments===1?'':'s')+' symmetry-corrected':'')+((cleanupBefore+cleanupAfter)?' · '+(cleanupBefore+cleanupAfter)+' junction adjustment'+((cleanupBefore+cleanupAfter)===1?'':'s')+' cleaned':'')+'. DSM is assisting topology and pitch without becoming report facets.';
    generateManualReport(graph);
    renderManualRoof();save();
  }
