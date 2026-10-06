@@ -3710,7 +3710,7 @@ async function restoreRoofSolarModel(){
      let a=snapPoint(c.a),b=snapPoint(c.b);
      const snapOrExtend=p=>{
        if(pointTouchesPerimeter(p,.016)||state.lines.some(l=>pointSeg(p,l.a,l.b).distance<=.016))return snapPoint(p);
-       let best=null,bd=.035;
+       let best=null,bd=.055;
        for(let i=0;i<state.outline.length;i++){
          const h=pointSeg(p,state.outline[i],state.outline[(i+1)%state.outline.length]);
          if(h.distance<bd){bd=h.distance;best=h.point;}
@@ -3800,7 +3800,7 @@ async function restoreRoofSolarModel(){
    const derived=deriveElevationBreaksFromFacetAdjacency(),added=[];
    for(let i=0;i<ridges.length;i++)for(let j=i+1;j<ridges.length;j++){
      const r1=ridges[i],r2=ridges[j],junction=ridgeJunctionPoint(r1,r2);
-     if(!junction||junction.d>.035)continue;
+     if(!junction||junction.d>.055)continue;
 
      const m1={x:(r1.a.x+r1.b.x)/2,y:(r1.a.y+r1.b.y)/2},m2={x:(r2.a.x+r2.b.x)/2,y:(r2.a.y+r2.b.y)/2};
      const f1=autoFacetAtPoint(m1),f2=autoFacetAtPoint(m2);
@@ -3845,9 +3845,126 @@ async function restoreRoofSolarModel(){
    }
    return added.length;
  };
+ const dominantRoofAxes=()=>{
+   const weighted=[];
+   for(let i=0;i<state.outline.length;i++){
+     const a=state.outline[i],b=state.outline[(i+1)%state.outline.length],w=dist(a,b);
+     if(w>=.02)weighted.push({angle:lineAngle(a,b),weight:w});
+   }
+   state.lines.filter(l=>l.type==='ridge'&&!l.autoAssisted).forEach(l=>weighted.push({angle:lineAngle(l.a,l.b),weight:dist(l.a,l.b)*2}));
+   if(!weighted.length)return [0,90];
+   const candidates=[];
+   weighted.forEach(w=>{
+     for(const base of [w.angle,w.angle+90]){
+       let score=0;
+       weighted.forEach(x=>{
+         const d=Math.min(angleDiff(x.angle,base),angleDiff(x.angle,base+90));
+         score+=x.weight*Math.max(0,1-d/22);
+       });
+       candidates.push({angle:((base%180)+180)%180,score});
+     }
+   });
+   candidates.sort((a,b)=>b.score-a.score);
+   const primary=candidates[0]?.angle||0;
+   return [primary,(primary+90)%180];
+ };
+ const closestAxis=(angle,axes,extra=[])=>{
+   const all=[...axes,...extra.map(a=>((a%180)+180)%180)];
+   let best=all[0],bd=Infinity;
+   all.forEach(a=>{const d=angleDiff(angle,a);if(d<bd){bd=d;best=a;}});
+   return best;
+ };
+ const resetLineAroundMid=(l,angleDeg,length=dist(l.a,l.b))=>{
+   const mid={x:(l.a.x+l.b.x)/2,y:(l.a.y+l.b.y)/2},r=angleDeg*Math.PI/180,dx=Math.cos(r)*length/2,dy=Math.sin(r)*length/2;
+   l.a={x:clamp(mid.x-dx),y:clamp(mid.y-dy)};
+   l.b={x:clamp(mid.x+dx),y:clamp(mid.y+dy)};
+ };
+ const regularizeAutoRoofTopology=()=>{
+   const axes=dominantRoofAxes(),primary=axes[0];
+   let changed=0;
+
+   state.lines.forEach((l,i)=>{
+     if(l.manual||(!l.autoDetected&&!l.autoAssisted&&!l.fromRidgeJunction&&!l.derivedFromFacets))return;
+     const oldA={...l.a},oldB={...l.b},ang=lineAngle(l.a,l.b);
+     let target=ang;
+
+     if(l.type==='ridge'){
+       target=closestAxis(ang,axes);
+     }else if(l.type==='elevation_break'){
+       const mid={x:(l.a.x+l.b.x)/2,y:(l.a.y+l.b.y)/2};
+       let nearestRidge=null,bd=Infinity;
+       state.lines.filter(x=>x.type==='ridge').forEach(r=>{
+         const h=pointSeg(mid,r.a,r.b);
+         if(h.distance<bd){bd=h.distance;nearestRidge=r;}
+       });
+       const ridgeAxis=nearestRidge?lineAngle(nearestRidge.a,nearestRidge.b):primary;
+       target=(ridgeAxis+90)%180;
+     }else if(l.type==='hip'||l.type==='valley'){
+       const diagonalAxes=[
+         (primary+45)%180,
+         (primary+135)%180
+       ];
+       target=closestAxis(ang,diagonalAxes);
+     }
+
+     if(angleDiff(ang,target)<=22&&angleDiff(ang,target)>.35){
+       resetLineAroundMid(l,target);
+       // Pull each end back onto a physical roof anchor after straightening.
+       l.a=snapPoint(l.a,i);l.b=snapPoint(l.b,i);
+       changed++;
+     }
+
+     if(l.type==='elevation_break'){
+       const mid={x:(l.a.x+l.b.x)/2,y:(l.a.y+l.b.y)/2};
+       const extended=extendLineThroughPointToRoof(mid,target);
+       if(extended&&dist(extended.a,extended.b)>.025){
+         l.a=extended.a;l.b=extended.b;changed++;
+       }
+     }
+
+     if(dist(l.a,l.b)<.006){l.a=oldA;l.b=oldB;}
+   });
+
+   // Mirror same-type hip/valley pairs around a shared junction. This turns
+   // slightly lopsided auto-generated gable/hip geometry into the symmetric
+   // roof shape normally built in the field.
+   const diagonals=state.lines.map((l,i)=>({l,i})).filter(x=>(x.l.type==='hip'||x.l.type==='valley')&&(x.l.autoDetected||x.l.autoAssisted));
+   for(let i=0;i<diagonals.length;i++)for(let j=i+1;j<diagonals.length;j++){
+     const A=diagonals[i],B=diagonals[j];
+     if(A.l.type!==B.l.type)continue;
+     const pairs=[
+       ['a','a'],['a','b'],['b','a'],['b','b']
+     ].map(([ea,eb])=>({ea,eb,d:dist(A.l[ea],B.l[eb])})).sort((x,y)=>x.d-y.d);
+     const hit=pairs[0];if(hit.d>.014)continue;
+     const junction={x:(A.l[hit.ea].x+B.l[hit.eb].x)/2,y:(A.l[hit.ea].y+B.l[hit.eb].y)/2};
+     const oa=hit.ea==='a'?'b':'a',ob=hit.eb==='a'?'b':'a';
+     const va={x:A.l[oa].x-junction.x,y:A.l[oa].y-junction.y},vb={x:B.l[ob].x-junction.x,y:B.l[ob].y-junction.y};
+     const la=Math.hypot(va.x,va.y),lb=Math.hypot(vb.x,vb.y);if(la<.01||lb<.01)continue;
+     const aAng=lineAngle(junction,A.l[oa]),bAng=lineAngle(junction,B.l[ob]);
+     let ridgeAxis=primary,bestR=Infinity;
+     state.lines.filter(l=>l.type==='ridge').forEach(r=>{
+       const h=pointSeg(junction,r.a,r.b);
+       if(h.distance<bestR){bestR=h.distance;ridgeAxis=lineAngle(r.a,r.b);}
+     });
+     const da=angleDiff(aAng,ridgeAxis),db=angleDiff(bAng,ridgeAxis);
+     if(Math.abs(da-db)>20)continue;
+     const d=Math.max(25,Math.min(55,(da+db)/2)),len=(la+lb)/2;
+     const sideA=Math.sin((aAng-ridgeAxis)*Math.PI/180)>=0?1:-1;
+     const ta=(ridgeAxis+sideA*d+180)%180,tb=(ridgeAxis-sideA*d+180)%180;
+     const ra=ta*Math.PI/180,rb=tb*Math.PI/180;
+     A.l[hit.ea]={...junction};B.l[hit.eb]={...junction};
+     A.l[oa]={x:clamp(junction.x+Math.cos(ra)*len),y:clamp(junction.y+Math.sin(ra)*len)};
+     B.l[ob]={x:clamp(junction.x+Math.cos(rb)*len),y:clamp(junction.y+Math.sin(rb)*len)};
+     A.l[oa]=snapPoint(A.l[oa],A.i);B.l[ob]=snapPoint(B.l[ob],B.i);
+     changed+=2;
+   }
+
+   return changed;
+ };
  const assistCompleteRoofGraph=()=>{
    const ridgeElevationBreaks=addRidgeJunctionElevationBreaks();
    const proactiveBreaks=addDerivedElevationBreaks();
+   const symmetryAdjustments=regularizeAutoRoofTopology();
    let extended=0;
    for(let pass=0;pass<3;pass++){
      const invalid=validateStructuralLines();
@@ -3867,7 +3984,7 @@ async function restoreRoofSolarModel(){
        if(!item.bConnected&&extendDanglingEndpoint(item.index,'b'))extended++;
      });
    }
-   return {extended,addedBreaks:addedBreaks+proactiveBreaks+ridgeElevationBreaks,proactiveBreaks,ridgeElevationBreaks,remaining:validateStructuralLines()};
+   return {extended,addedBreaks:addedBreaks+proactiveBreaks+ridgeElevationBreaks,proactiveBreaks,ridgeElevationBreaks,symmetryAdjustments,remaining:validateStructuralLines()};
  };
  const validateStructuralLines=()=>{
    const invalid=[];
@@ -4063,7 +4180,7 @@ async function restoreRoofSolarModel(){
    const table=$('#manual-roof-facet-table');
    if(table)table.innerHTML='<table><thead><tr><th>Facet</th><th>Pitch</th><th>Plan ft²</th><th>Sloped ft²</th></tr></thead><tbody>'+state.facets.map(f=>'<tr><td>F'+f.id+'</td><td><select data-manual-facet-pitch="'+f.id+'">'+[2,3,4,5,6,7,8,9,10,11,12,14,16,18].map(p=>'<option value="'+p+'"'+(p===f.pitch?' selected':'')+'>'+p+'/12</option>').join('')+'</select></td><td>'+Math.round(f.planM2*SQFT_PER_M2)+'</td><td>'+Math.round(f.slopedM2*SQFT_PER_M2)+'</td></tr>').join('')+'</tbody></table>';
    if(badge)badge.textContent=state.facets.length+' facets';
-   if(status)status.textContent='Roof geometry built ✓ · '+state.facets.length+' connected closed facet'+(state.facets.length===1?'':'s')+(assist.extended?' · '+assist.extended+' endpoint'+(assist.extended===1?'':'s')+' auto-connected':'')+(assist.addedBreaks?' · '+assist.addedBreaks+' elevation break'+(assist.addedBreaks===1?'':'s')+' added from DSM/topography':'')+((cleanupBefore+cleanupAfter)?' · '+(cleanupBefore+cleanupAfter)+' junction adjustment'+((cleanupBefore+cleanupAfter)===1?'':'s')+' cleaned':'')+'. DSM is assisting topology and pitch without becoming report facets.';
+   if(status)status.textContent='Roof geometry built ✓ · '+state.facets.length+' connected closed facet'+(state.facets.length===1?'':'s')+(assist.extended?' · '+assist.extended+' endpoint'+(assist.extended===1?'':'s')+' auto-connected':'')+(assist.addedBreaks?' · '+assist.addedBreaks+' elevation break'+(assist.addedBreaks===1?'':'s')+' added from DSM/topography':'')+(assist.symmetryAdjustments?' · '+assist.symmetryAdjustments+' auto line'+(assist.symmetryAdjustments===1?'':'s')+' symmetry-corrected':'')+((cleanupBefore+cleanupAfter)?' · '+(cleanupBefore+cleanupAfter)+' junction adjustment'+((cleanupBefore+cleanupAfter)===1?'':'s')+' cleaned':'')+'. DSM is assisting topology and pitch without becoming report facets.';
    generateManualReport(graph);
    renderManualRoof();save();
  }
