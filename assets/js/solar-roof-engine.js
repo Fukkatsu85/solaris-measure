@@ -621,10 +621,56 @@ async function decodeSolarRaster(layer,lat,lng){
     south:Math.min(p1.lat,p2.lat),north:Math.max(p1.lat,p2.lat)
   };
   if(!(bounds.east>bounds.west&&bounds.north>bounds.south))throw new Error(layer.toUpperCase()+" raster location data is invalid.");
-  return {raster,bands,width,height,bounds,quality,pixelSize};
+
+  // Preserve the GeoTIFF's true pixel-to-world affine transform. The previous
+  // bounds interpolation silently discarded rotation/skew, which could make a
+  // correctly-shaped roof mask appear axis-aligned when overlaid on north-up
+  // MnGeo imagery.
+  let geoAffine=null;
+  try{
+    const fd=image.fileDirectory;
+    let pixelToModel=null;
+    if(fd?.hasTag?.("ModelTransformation")){
+      const m=fd.getValue("ModelTransformation");
+      if(m&&m.length>=16){
+        pixelToModel=(i,j)=>({
+          x:Number(m[0])*i+Number(m[1])*j+Number(m[3]),
+          y:Number(m[4])*i+Number(m[5])*j+Number(m[7])
+        });
+      }
+    }else if(fd?.hasTag?.("ModelTiepoint")&&fd?.hasTag?.("ModelPixelScale")){
+      const t=fd.getValue("ModelTiepoint"),s=fd.getValue("ModelPixelScale");
+      if(t&&t.length>=6&&s&&s.length>=2){
+        const pi=Number(t[0]),pj=Number(t[1]),gx=Number(t[3]),gy=Number(t[4]),sx=Number(s[0]),sy=Number(s[1]);
+        pixelToModel=(i,j)=>({x:gx+(i-pi)*sx,y:gy-(j-pj)*sy});
+      }
+    }
+    if(pixelToModel){
+      const a=convert(pixelToModel(0,0).x,pixelToModel(0,0).y);
+      const bx=convert(pixelToModel(width,0).x,pixelToModel(width,0).y);
+      const by=convert(pixelToModel(0,height).x,pixelToModel(0,height).y);
+      const col={lat:(bx.lat-a.lat)/width,lng:(bx.lng-a.lng)/width};
+      const row={lat:(by.lat-a.lat)/height,lng:(by.lng-a.lng)/height};
+      const det=col.lng*row.lat-row.lng*col.lat;
+      if([a.lat,a.lng,col.lat,col.lng,row.lat,row.lng,det].every(Number.isFinite)&&Math.abs(det)>1e-15){
+        geoAffine={origin:a,col,row,det};
+      }
+    }
+  }catch{}
+
+  return {raster,bands,width,height,bounds,geoAffine,quality,pixelSize};
 }
 
 function rasterPixelForLatLng(data,lat,lng){
+  if(data?.geoAffine){
+    const g=data.geoAffine,dlng=Number(lng)-g.origin.lng,dlat=Number(lat)-g.origin.lat;
+    const x=(dlng*g.row.lat-g.row.lng*dlat)/g.det;
+    const y=(g.col.lng*dlat-dlng*g.col.lat)/g.det;
+    return {
+      x:Math.max(0,Math.min(data.width-1,Math.round(x))),
+      y:Math.max(0,Math.min(data.height-1,Math.round(y)))
+    };
+  }
   return {
     x:Math.max(0,Math.min(data.width-1,Math.round((lng-data.bounds.west)/(data.bounds.east-data.bounds.west)*(data.width-1)))),
     y:Math.max(0,Math.min(data.height-1,Math.round((data.bounds.north-lat)/(data.bounds.north-data.bounds.south)*(data.height-1))))
@@ -632,6 +678,13 @@ function rasterPixelForLatLng(data,lat,lng){
 }
 
 function rasterLatLng(data,x,y){
+  if(data?.geoAffine){
+    const g=data.geoAffine;
+    return {
+      lat:g.origin.lat+Number(x)*g.col.lat+Number(y)*g.row.lat,
+      lng:g.origin.lng+Number(x)*g.col.lng+Number(y)*g.row.lng
+    };
+  }
   return {
     lat:data.bounds.north-(y/data.height)*(data.bounds.north-data.bounds.south),
     lng:data.bounds.west+(x/data.width)*(data.bounds.east-data.bounds.west)
