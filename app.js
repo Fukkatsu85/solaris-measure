@@ -3191,11 +3191,17 @@ async function restoreRoofSolarModel(){
    return {x:clamp((e.clientX-r.left)/r.width),y:clamp((e.clientY-r.top)/r.height)};
  };
  const snapPoint=(p,excludeLine=-1)=>{
-   const threshold=.010,candidates=[];
-   state.outline.forEach((q,i)=>candidates.push({p:q,d:dist(p,q),kind:'outline',i}));
+   const threshold=.012,candidates=[];
+   state.outline.forEach((q,i)=>{
+     candidates.push({p:q,d:dist(p,q),kind:'outline',i});
+     const b=state.outline[(i+1)%state.outline.length],hit=pointSeg(p,q,b);
+     candidates.push({p:hit.point,d:hit.distance,kind:'perimeter-edge',i});
+   });
    state.lines.forEach((l,i)=>{
      if(i===excludeLine)return;
      candidates.push({p:l.a,d:dist(p,l.a),kind:'line',i,end:'a'},{p:l.b,d:dist(p,l.b),kind:'line',i,end:'b'});
+     const hit=pointSeg(p,l.a,l.b);
+     candidates.push({p:hit.point,d:hit.distance,kind:'line-segment',i});
    });
    // Snap to existing line-line intersections.
    for(let i=0;i<state.lines.length;i++)for(let j=i+1;j<state.lines.length;j++){
@@ -3262,7 +3268,7 @@ async function restoreRoofSolarModel(){
  const renderLayerSummary=()=>{
    const el=$('#manual-roof-layer-summary');if(!el)return;
    const layers=state.layers||[],sections=state.sections||[];
-   const detected=layers.length?layers.map((l,i)=>'Elevation '+(i+1)+(Number.isFinite(l.meanZ)?' · '+l.meanZ.toFixed(1)+' m':'')+' · '+l.facetCount+' facet'+(l.facetCount===1?'':'s')).join(' | '):'No DSM elevation groups detected yet.';
+   const detected=layers.length?'DSM elevation hints: '+layers.map((l,i)=>'Elevation '+(i+1)+(Number.isFinite(l.meanZ)?' · '+l.meanZ.toFixed(1)+' m':'')+' · '+l.facetCount+' region'+(l.facetCount===1?'':'s')).join(' | '):'No DSM elevation hints detected yet.';
    el.textContent=detected+(sections.length?' · '+sections.length+' additional roof section'+(sections.length===1?'':'s')+' drawn.':'');
  };
  function renderManualRoof(){
@@ -3270,7 +3276,7 @@ async function restoreRoofSolarModel(){
    const colors={ridge:'#16a34a',hip:'#2563eb',valley:'#dc2626',elevation_break:'#f59e0b'};
    let out='';
    (state.layers||[]).forEach((layer,i)=>(layer.polygons||[]).forEach(poly=>{
-     if(poly.length>=3)out+='<polygon points="'+poly.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="'+(i%2?'rgba(14,165,233,.10)':'rgba(168,85,247,.10)')+'" stroke="'+(i%2?'#0ea5e9':'#a855f7')+'" stroke-width="2" stroke-dasharray="10 8" vector-effect="non-scaling-stroke"/>';
+     if(poly.length>=3)out+='<polygon points="'+poly.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="none" stroke="'+(i%2?'rgba(14,165,233,.45)':'rgba(168,85,247,.45)')+'" stroke-width="1.5" stroke-dasharray="8 10" pointer-events="none" vector-effect="non-scaling-stroke"/>';
    }));
    if(state.outline.length){
      out+='<polygon points="'+state.outline.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="rgba(255,255,255,.10)" stroke="#facc15" stroke-width="6" vector-effect="non-scaling-stroke"/>';
@@ -3590,6 +3596,26 @@ async function restoreRoofSolarModel(){
    const status=$('#manual-roof-outline-status');if(status)status.textContent='Auto outline restored to its original size and rotation.';
  }
  function clearOutline(){pushUndo();state.outline=[];state.lines=[];state.facets=[];state.pending=null;renderManualRoof();}
+ const pointTouchesPerimeter=(p,tol=.006)=>{
+   for(let i=0;i<state.outline.length;i++)if(pointSeg(p,state.outline[i],state.outline[(i+1)%state.outline.length]).distance<=tol)return true;
+   return false;
+ };
+ const pointTouchesOtherLine=(p,lineIndex,tol=.006)=>{
+   for(let i=0;i<state.lines.length;i++){
+     if(i===lineIndex)continue;
+     if(pointSeg(p,state.lines[i].a,state.lines[i].b).distance<=tol)return true;
+   }
+   return false;
+ };
+ const validateStructuralLines=()=>{
+   const invalid=[];
+   state.lines.forEach((l,i)=>{
+     const aConnected=pointTouchesPerimeter(l.a)||pointTouchesOtherLine(l.a,i);
+     const bConnected=pointTouchesPerimeter(l.b)||pointTouchesOtherLine(l.b,i);
+     if(!aConnected||!bConnected)invalid.push({index:i,aConnected,bConnected,type:l.type});
+   });
+   return invalid;
+ };
  function splitSegmentsForGraph(){
    const segs=[];
    for(let i=0;i<state.outline.length;i++)segs.push({a:state.outline[i],b:state.outline[(i+1)%state.outline.length],type:'perimeter'});
@@ -3662,40 +3688,52 @@ async function restoreRoofSolarModel(){
    const status=$('#manual-roof-line-status'),badge=$('#manual-roof-facet-badge');
    if(state.outline.length<3){if(status)status.textContent='Confirm the outline first.';return;}
    pushUndo();
-   // Snap all manually drawn endpoints to the nearest structural anchor before graph solve.
+
+   // Snap every structural endpoint to a real roof anchor. This includes corners,
+   // perimeter edges, line endpoints, line interiors and line intersections.
    state.lines=state.lines.map((l,i)=>({...l,a:snapPoint(l.a,i),b:snapPoint(l.b,i)})).filter(l=>dist(l.a,l.b)>.004);
-   const graph=buildPlanarFaces(),size=metersPerNorm(),defaultPitch=Number($('#manual-roof-default-pitch')?.value||8);
-   const detectedFacets=(state.autoFacetData||[]).filter(f=>(f.outline||[]).length>=3&&Math.abs(polygonArea(f.outline))>.00005);
-   if(detectedFacets.length>=3){
-     state.facets=detectedFacets.map((f,i)=>{
-       const id=i+1,autoPitch=Number(f.rise12),pitch=Number(state.facetPitches[id]??(Number.isFinite(autoPitch)&&autoPitch>0?Math.max(2,Math.min(18,Math.round(autoPitch))):defaultPitch));
-       const reportedSlopedFt2=Number(f.area);
-       const slopeFactor=Math.sqrt(1+Math.pow(pitch/12,2));
-       const geometricPlanM2=Math.abs(polygonArea(f.outline))*size*size;
-       const slopedM2=Number.isFinite(reportedSlopedFt2)&&reportedSlopedFt2>0?reportedSlopedFt2/SQFT_PER_M2:geometricPlanM2*slopeFactor;
-       const planM2=slopedM2/slopeFactor;
-       return {id,poly:f.outline.map(p=>({...p})),pitch,planM2,slopedM2,sectionId:'main',source:'dsm-facet',elevationZ:f.z0,autoFacetId:f.id};
-     });
-   }else{
-     state.facets=graph.faces.map((f,i)=>{
-       const poly=f.ids.map(id=>graph.nodes[id]),pitch=Number(state.facetPitches[i+1]??defaultPitch);
-       const planM2=f.area*size*size,slopedM2=planM2*Math.sqrt(1+Math.pow(pitch/12,2));
-       return {id:i+1,poly,pitch,planM2,slopedM2,sectionId:'main',source:'manual-graph'};
-     });
+
+   // A real roof facet cannot be created from a floating structural segment.
+   // Every end of every ridge/hip/valley/transition must terminate on the roof
+   // perimeter or another structural line.
+   const invalid=validateStructuralLines();
+   if(invalid.length){
+     state.facets=[];
+     if(badge)badge.textContent='Fix floating lines';
+     const nums=invalid.map(x=>x.index+1).join(', ');
+     if(status)status.textContent='Cannot build facets: roof line'+(invalid.length===1?' ':'s ')+nums+' '+(invalid.length===1?'is':'are')+' not connected at both ends. Snap each endpoint to the perimeter or another ridge / hip / valley / transition.';
+     renderManualRoof();save();return;
    }
+
+   const graph=buildPlanarFaces(),size=metersPerNorm(),defaultPitch=Number($('#manual-roof-default-pitch')?.value||8);
+   state.facets=graph.faces.map((f,i)=>{
+     const poly=f.ids.map(id=>graph.nodes[id]),center=centroid(poly);
+     const dsm=nearestAutoFacet(center),autoPitch=Number(dsm?.rise12);
+     const pitch=Number(state.facetPitches[i+1]??(Number.isFinite(autoPitch)&&autoPitch>0?Math.max(2,Math.min(18,Math.round(autoPitch))):defaultPitch));
+     const planM2=f.area*size*size,slopedM2=planM2*Math.sqrt(1+Math.pow(pitch/12,2));
+     return {id:i+1,poly,pitch,planM2,slopedM2,sectionId:'main',source:'connected-roof-graph',dsmAssistId:dsm?.id||null};
+   });
+
+   // Additional Roof Sections are true separate perimeter polygons/elevations,
+   // not DSM fragments. They remain independent roof sections until internal
+   // topology is drawn for them.
    (state.sections||[]).forEach(sec=>{
      const poly=sec.outline||[];if(poly.length<3)return;
-     const id=state.facets.length+1,pitch=Number(state.facetPitches[id]??defaultPitch),planM2=Math.abs(polygonArea(poly))*size*size,slopedM2=planM2*Math.sqrt(1+Math.pow(pitch/12,2));
+     const id=state.facets.length+1,center=centroid(poly),dsm=nearestAutoFacet(center),autoPitch=Number(dsm?.rise12);
+     const pitch=Number(state.facetPitches[id]??(Number.isFinite(autoPitch)&&autoPitch>0?Math.max(2,Math.min(18,Math.round(autoPitch))):defaultPitch));
+     const planM2=Math.abs(polygonArea(poly))*size*size,slopedM2=planM2*Math.sqrt(1+Math.pow(pitch/12,2));
      state.facets.push({id,poly,pitch,planM2,slopedM2,sectionId:sec.id,simpleSection:true,source:'manual-section'});
    });
+
    if(!state.facets.length){
-     if(status)status.textContent='No closed facets were created. Make sure interior lines terminate on the perimeter or on another roof line.';
-     if(badge)badge.textContent='Needs line connections';renderManualRoof();return;
+     if(status)status.textContent='No valid closed roof facets were created. Structural lines must connect perimeter-to-perimeter or into another connected ridge / hip / valley / transition.';
+     if(badge)badge.textContent='Needs connected topology';renderManualRoof();save();return;
    }
+
    const table=$('#manual-roof-facet-table');
    if(table)table.innerHTML='<table><thead><tr><th>Facet</th><th>Pitch</th><th>Plan ft²</th><th>Sloped ft²</th></tr></thead><tbody>'+state.facets.map(f=>'<tr><td>F'+f.id+'</td><td><select data-manual-facet-pitch="'+f.id+'">'+[2,3,4,5,6,7,8,9,10,11,12,14,16,18].map(p=>'<option value="'+p+'"'+(p===f.pitch?' selected':'')+'>'+p+'/12</option>').join('')+'</select></td><td>'+Math.round(f.planM2*SQFT_PER_M2)+'</td><td>'+Math.round(f.slopedM2*SQFT_PER_M2)+'</td></tr>').join('')+'</tbody></table>';
    if(badge)badge.textContent=state.facets.length+' facets';
-   if(status)status.textContent='Roof geometry built ✓ · '+state.facets.length+' facets'+(detectedFacets.length>=3?' from detected DSM roof planes':' from manual topology')+'. Review pitch, then generate/report.';
+   if(status)status.textContent='Roof geometry built ✓ · '+state.facets.length+' connected closed facet'+(state.facets.length===1?'':'s')+'. DSM is being used only to assist pitch/elevation interpretation.';
    generateManualReport(graph);
    renderManualRoof();save();
  }
