@@ -3151,12 +3151,12 @@ async function restoreRoofSolarModel(){
  const state={
    property:null,outline:[],autoOutlineBase:[],outlineScale:1,outlineRotation:0,lines:[],tool:'ridge',pending:null,mode:'idle',
    undo:[],redo:[],facets:[],facetPitches:{},drag:null,viewZoom:1.25,viewPanX:0,viewPanY:0,viewPanDrag:null,outlineOffsetX:0,outlineOffsetY:0,
-   sections:[],sectionDraft:[],layers:[],autoFacetData:[],autoStructuralCandidates:[],roofSystems:[]
+   sections:[],sectionDraft:[],layers:[],autoFacetData:[],autoStructuralCandidates:[],roofSystems:[],referenceTruth:null
  };
  const save=()=>{
    try{localStorage.setItem('solarisManualRoof',JSON.stringify({
      property:state.property,outline:state.outline,autoOutlineBase:state.autoOutlineBase,outlineScale:state.outlineScale,outlineRotation:state.outlineRotation,outlineOffsetX:state.outlineOffsetX,outlineOffsetY:state.outlineOffsetY,lines:state.lines,
-     facetPitches:state.facetPitches,sections:state.sections,layers:state.layers,autoFacetData:state.autoFacetData,autoStructuralCandidates:state.autoStructuralCandidates,roofSystems:state.roofSystems,defaultPitch:Number($('#manual-roof-default-pitch')?.value||8)
+     facetPitches:state.facetPitches,sections:state.sections,layers:state.layers,autoFacetData:state.autoFacetData,autoStructuralCandidates:state.autoStructuralCandidates,roofSystems:state.roofSystems,referenceTruth:state.referenceTruth,defaultPitch:Number($('#manual-roof-default-pitch')?.value||8)
    }))}catch{}
  };
  const snapshot=()=>({outline:JSON.parse(JSON.stringify(state.outline)),lines:JSON.parse(JSON.stringify(state.lines)),sections:JSON.parse(JSON.stringify(state.sections)),layers:JSON.parse(JSON.stringify(state.layers)),facetPitches:{...state.facetPitches},outlineScale:state.outlineScale,outlineRotation:state.outlineRotation,outlineOffsetX:state.outlineOffsetX,outlineOffsetY:state.outlineOffsetY});
@@ -3310,6 +3310,36 @@ async function restoreRoofSolarModel(){
    renderLayerSummary();
    save();
  }
+ async function loadManualRoofReferenceTruth(){
+   if(!state.property)return null;
+   const projectId='roof-'+Number(state.property.lat).toFixed(6)+'-'+Number(state.property.lng).toFixed(6);
+   try{
+     const r=await fetch('/api/roof-benchmark?projectId='+encodeURIComponent(projectId),{cache:'no-store'});
+     const d=await r.json().catch(()=>({}));
+     const ref=d?.benchmark?.reference||null;
+     state.referenceTruth=ref&&Number(ref.facetCount)>0?ref:null;
+     return state.referenceTruth;
+   }catch{
+     state.referenceTruth=null;return null;
+   }
+ }
+ const manualReferenceFit=()=>{
+   const ref=state.referenceTruth;if(!ref)return null;
+   const sizeFt=metersPerNorm()*FT_PER_M;
+   const ridges=state.lines.filter(l=>l.type==='ridge'),ridgeLengths=ridges.map(l=>dist(l.a,l.b)*sizeFt).sort((a,b)=>b-a);
+   const countErr=Number(ref.ridgeCount)>0?Math.abs(ridges.length-Number(ref.ridgeCount))/Number(ref.ridgeCount)*100:null;
+   const facetErr=Number(ref.facetCount)>0?Math.abs(state.facets.length-Number(ref.facetCount))/Number(ref.facetCount)*100:null;
+   const area=state.facets.reduce((s,f)=>s+f.slopedM2*SQFT_PER_M2,0),areaErr=Number(ref.slopedAreaFt2)>0?Math.abs(area-Number(ref.slopedAreaFt2))/Number(ref.slopedAreaFt2)*100:null;
+   let ridgeLenErr=null;
+   if(Array.isArray(ref.ridgeLengthsFt)&&ref.ridgeLengthsFt.length){
+     const rr=[...ref.ridgeLengthsFt].map(Number).filter(Number.isFinite).sort((a,b)=>b-a),n=Math.max(rr.length,ridgeLengths.length);
+     let sum=0;
+     for(let i=0;i<n;i++)sum+=(rr[i]!=null&&ridgeLengths[i]!=null)?Math.abs(ridgeLengths[i]-rr[i])/Math.max(1,rr[i])*100:100;
+     ridgeLenErr=sum/n;
+   }
+   const errs=[facetErr,areaErr,countErr,ridgeLenErr].filter(Number.isFinite);
+   return {score:errs.length?Math.max(0,100-errs.reduce((a,b)=>a+b,0)/errs.length):null,facetErr,areaErr,countErr,ridgeLenErr,ridgeLengths};
+ };
  async function loadProperty(){
    const address=$('#manual-roof-address')?.value?.trim(),status=$('#manual-roof-property-status'),badge=$('#manual-roof-status-badge');
    if(!address){if(status)status.textContent='Enter a property address first.';return;}
@@ -3327,7 +3357,8 @@ async function restoreRoofSolarModel(){
      const r=await fetch('/api/mn-aerial?lat='+encodeURIComponent(lat)+'&lng='+encodeURIComponent(lng)+'&address='+encodeURIComponent(formatted),{cache:'no-store'}),d=await r.json().catch(()=>({}));
      if(!r.ok)throw new Error(d.error||'Could not load aerial imagery.');
      state.property={address:formatted,lat,lng,imageryUrl:d.imageryUrl,cropHalfMeters:Number(d.cropHalfMeters||42),imageryLabel:d.imageryLabel||d.source||'Aerial imagery',locationSource:'google-browser-geocode'};
-     state.outline=[];state.autoOutlineBase=[];state.lines=[];state.facets=[];state.facetPitches={};state.sections=[];state.sectionDraft=[];state.layers=[];state.autoFacetData=[];state.autoStructuralCandidates=[];state.roofSystems=[];state.undo=[];state.redo=[];state.pending=null;
+     await loadManualRoofReferenceTruth();
+     state.outline=[];state.autoOutlineBase=[];state.lines=[];state.facets=[];state.facetPitches={};state.sections=[];state.sectionDraft=[];state.layers=[];state.autoFacetData=[];state.autoStructuralCandidates=[];state.roofSystems=[];state.referenceTruth=null;state.undo=[];state.redo=[];state.pending=null;
      state.outlineScale=1;state.outlineRotation=0;state.outlineOffsetX=0;state.outlineOffsetY=0;
      state.viewZoom=1.25;state.viewPanX=0;state.viewPanY=0;state.viewPanDrag=null;renderManualViewport();
      const img=$('#manual-roof-image');
@@ -3438,10 +3469,23 @@ async function restoreRoofSolarModel(){
          const a=toNorm(l.a),b=toNorm(l.b);
          return {type:l.type,a:{...a},b:{...b},autoBaseA:{...a},autoBaseB:{...b},confidence:Number(l.creaseStrength||l.traceSupport||l.elevationSeparationMeters||0),elevationSeparationMeters:Number(l.elevationSeparationMeters||0)};
        });
-     const detectedRoofLines=state.autoStructuralCandidates
+     const ridgeCandidates=state.autoStructuralCandidates
        .filter(l=>l.type==='ridge')
-       .filter(l=>dist(l.a,l.b)>=.018)
-       .map(l=>({...l,autoDetected:true}));
+       .filter(l=>dist(l.a,l.b)>=.018);
+     const refRidges=Array.isArray(state.referenceTruth?.ridgeLengthsFt)?state.referenceTruth.ridgeLengthsFt.map(Number).filter(Number.isFinite).sort((a,b)=>b-a):[];
+     const targetCount=Math.max(1,Number(state.referenceTruth?.ridgeCount||0)||Math.min(4,ridgeCandidates.length));
+     const sizeFt=metersPerNorm()*FT_PER_M;
+     const remaining=[...ridgeCandidates],selected=[];
+     for(let i=0;i<targetCount&&remaining.length;i++){
+       const target=refRidges[i];
+       remaining.sort((a,b)=>{
+         const la=dist(a.a,a.b)*sizeFt,lb=dist(b.a,b.b)*sizeFt;
+         if(Number.isFinite(target))return Math.abs(la-target)-Math.abs(lb-target);
+         return Number(b.confidence||0)-Number(a.confidence||0)||lb-la;
+       });
+       selected.push(remaining.shift());
+     }
+     const detectedRoofLines=selected.map(l=>({...l,autoDetected:true}));
      state.lines=detectedRoofLines;
      state.outlineScale=1;state.outlineRotation=0;state.outlineOffsetX=0;state.outlineOffsetY=0;
      if(autoRotation)applyAutoOutlineTransform(1,autoRotation,false);
@@ -3450,9 +3494,10 @@ async function restoreRoofSolarModel(){
      state.facets=[];state.facetPitches={};
      const ridgeCount=detectedRoofLines.filter(l=>l.type==='ridge').length,breakCount=detectedRoofLines.filter(l=>l.type==='elevation_break').length;
      const ridgeNote=(ridgeCount||breakCount)?' · '+ridgeCount+' ridge'+(ridgeCount===1?'':'s')+(breakCount?' + '+breakCount+' elevation break'+(breakCount===1?'':'s'):'')+' loaded as editable lines.':' · no reliable saved ridge/elevation-break candidate was available.';
+     const refNote=state.referenceTruth?' Reference target: '+state.referenceTruth.facetCount+' facets'+(state.referenceTruth.ridgeCount?' · '+state.referenceTruth.ridgeCount+' ridges':'')+(state.referenceTruth.slopedAreaFt2?' · '+Math.round(state.referenceTruth.slopedAreaFt2).toLocaleString()+' ft²':'')+'.':'';
      if(status)status.textContent=(autoRotation
        ?'Existing Solaris outline loaded and auto-aligned '+(autoRotation>0?'+':'')+autoRotation.toFixed(1)+'° from the saved roof-plane orientation.'
-       :'Existing Solaris outline loaded with saved orientation.')+ridgeNote+' Use Move / Select to drag ridge endpoints or Delete to remove a bad ridge.';
+       :'Existing Solaris outline loaded with saved orientation.')+ridgeNote+refNote+' Use Move / Select to drag ridge endpoints or Delete to remove a bad ridge.';
      renderManualRoof();
      await autoFitRoofOutline();
      return true;
@@ -4398,7 +4443,10 @@ async function restoreRoofSolarModel(){
    const table=$('#manual-roof-facet-table');
    if(table)table.innerHTML='<table><thead><tr><th>Facet</th><th>Pitch</th><th>Plan ft²</th><th>Sloped ft²</th></tr></thead><tbody>'+state.facets.map(f=>'<tr><td>F'+f.id+'</td><td><select data-manual-facet-pitch="'+f.id+'">'+[2,3,4,5,6,7,8,9,10,11,12,14,16,18].map(p=>'<option value="'+p+'"'+(p===f.pitch?' selected':'')+'>'+p+'/12</option>').join('')+'</select></td><td>'+Math.round(f.planM2*SQFT_PER_M2)+'</td><td>'+Math.round(f.slopedM2*SQFT_PER_M2)+'</td></tr>').join('')+'</tbody></table>';
    if(badge)badge.textContent=state.facets.length+' facets';
-   if(status)status.textContent='Roof geometry built ✓ · '+state.facets.length+' connected closed facet'+(state.facets.length===1?'':'s')+(removedLegacyBreaks?' · removed '+removedLegacyBreaks+' legacy DSM break fragment'+(removedLegacyBreaks===1?'':'s'):'')+(assist.extended?' · '+assist.extended+' endpoint'+(assist.extended===1?'':'s')+' auto-connected':'')+(state.roofSystems.length?' · '+state.roofSystems.length+' major roof system'+(state.roofSystems.length===1?'':'s')+' reconstructed from ridges':'')+(assist.elevatedEaves?' · '+assist.elevatedEaves+' elevated eave'+(assist.elevatedEaves===1?'':'s')+' inferred from height-separated roof systems':'')+(assist.addedBreaks?' · '+assist.addedBreaks+' clean section boundar'+(assist.addedBreaks===1?'y':'ies')+' added':'')+(assist.symmetryAdjustments?' · '+assist.symmetryAdjustments+' auto line'+(assist.symmetryAdjustments===1?'':'s')+' symmetry-corrected':'')+((cleanupBefore+cleanupAfter)?' · '+(cleanupBefore+cleanupAfter)+' junction adjustment'+((cleanupBefore+cleanupAfter)===1?'':'s')+' cleaned':'')+'. DSM is assisting topology and pitch without becoming report facets.';
+   if(status){
+     const fit=manualReferenceFit(),fitNote=fit&&Number.isFinite(fit.score)?' · Reference fit '+fit.score.toFixed(0)+'/100'+(Number.isFinite(fit.facetErr)?' · facet err '+fit.facetErr.toFixed(0)+'%':'')+(Number.isFinite(fit.areaErr)?' · area err '+fit.areaErr.toFixed(1)+'%':''):'';
+     status.textContent='Roof geometry built ✓ · '+state.facets.length+' connected closed facet'+(state.facets.length===1?'':'s')+(removedLegacyBreaks?' · removed '+removedLegacyBreaks+' legacy DSM break fragment'+(removedLegacyBreaks===1?'':'s'):'')+(assist.extended?' · '+assist.extended+' endpoint'+(assist.extended===1?'':'s')+' auto-connected':'')+(state.roofSystems.length?' · '+state.roofSystems.length+' major roof system'+(state.roofSystems.length===1?'':'s')+' reconstructed from ridges':'')+(assist.elevatedEaves?' · '+assist.elevatedEaves+' elevated eave'+(assist.elevatedEaves===1?'':'s')+' inferred from height-separated roof systems':'')+(assist.symmetryAdjustments?' · '+assist.symmetryAdjustments+' auto line'+(assist.symmetryAdjustments===1?'':'s')+' symmetry-corrected':'')+((cleanupBefore+cleanupAfter)?' · '+(cleanupBefore+cleanupAfter)+' junction adjustment'+((cleanupBefore+cleanupAfter)===1?'':'s')+' cleaned':'')+fitNote+'.';
+   }
    generateManualReport(graph);
    renderManualRoof();save();
  }
@@ -4848,7 +4896,7 @@ async function restoreRoofSolarModel(){
  try{
    const saved=JSON.parse(localStorage.getItem('solarisManualRoof')||'null');
    if(saved){
-     state.property=saved.property||null;state.outline=saved.outline||[];state.autoOutlineBase=saved.autoOutlineBase||[];state.outlineScale=Number(saved.outlineScale||1);state.outlineRotation=Number(saved.outlineRotation||0);state.outlineOffsetX=Number(saved.outlineOffsetX||0);state.outlineOffsetY=Number(saved.outlineOffsetY||0);state.lines=saved.lines||[];state.sections=saved.sections||[];state.layers=saved.layers||[];state.autoFacetData=(saved.autoFacetData||[]).map(f=>({...f,autoBaseOutline:(f.autoBaseOutline?.length?f.autoBaseOutline:f.outline||[]).map(p=>({...p}))}));state.autoStructuralCandidates=saved.autoStructuralCandidates||[];state.roofSystems=saved.roofSystems||[];state.facetPitches=saved.facetPitches||{};
+     state.property=saved.property||null;state.outline=saved.outline||[];state.autoOutlineBase=saved.autoOutlineBase||[];state.outlineScale=Number(saved.outlineScale||1);state.outlineRotation=Number(saved.outlineRotation||0);state.outlineOffsetX=Number(saved.outlineOffsetX||0);state.outlineOffsetY=Number(saved.outlineOffsetY||0);state.lines=saved.lines||[];state.sections=saved.sections||[];state.layers=saved.layers||[];state.autoFacetData=(saved.autoFacetData||[]).map(f=>({...f,autoBaseOutline:(f.autoBaseOutline?.length?f.autoBaseOutline:f.outline||[]).map(p=>({...p}))}));state.autoStructuralCandidates=saved.autoStructuralCandidates||[];state.roofSystems=saved.roofSystems||[];state.referenceTruth=saved.referenceTruth||null;state.facetPitches=saved.facetPitches||{};
    state.lines=(state.lines||[]).filter(l=>!(l.type==='elevation_break'&&!l.manual));
      if($('#manual-roof-default-pitch')&&saved.defaultPitch)$('#manual-roof-default-pitch').value=String(saved.defaultPitch);
      if($('#manual-outline-scale'))$('#manual-outline-scale').value=String(Math.round((state.outlineScale||1)*100));
