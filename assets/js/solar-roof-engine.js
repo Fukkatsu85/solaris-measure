@@ -1320,7 +1320,7 @@ function fuseRoofLineEvidence(primaryLines=[],rasterLines=[],outline=[]){
     // Missing valleys/hips matter disproportionately on compound roofs. Allow
     // a lower threshold only when a category is otherwise absent; otherwise
     // require independent DSM crease evidence before adding raster geometry.
-    const threshold=typeMissing?(line.type==="valley"?.035:.08):.14;
+    const threshold=typeMissing?(line.type==="valley" ? 0.035 : 0.08):0.14;
     const crease=Math.max(0,Number(line.creaseStrength||0));
     if(score<threshold&&crease<threshold)continue;
     const promoted={...line,lengthMeters:len,evidenceSource:"dsm-raster-adjacency",fusionScore:score,source:"fusion-raster-v1"};
