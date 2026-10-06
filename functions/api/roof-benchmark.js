@@ -5,6 +5,30 @@ async function read(env,key){const o=await env.MEASURE_PHOTOS.get(key);if(!o)ret
 const num=v=>Number.isFinite(Number(v))?Number(v):null;
 const pct=(a,b)=>Number.isFinite(a)&&Number.isFinite(b)&&b!==0?Math.abs(a-b)/Math.abs(b)*100:null;
 const clamp=v=>Math.max(0,Math.min(100,v));
+function lineAngleLL(l){
+ if(!l?.a||!l?.b)return null;
+ const lat=(Number(l.a.lat)+Number(l.b.lat))/2*Math.PI/180,dx=(Number(l.b.lng)-Number(l.a.lng))*Math.max(.2,Math.cos(lat)),dy=Number(l.b.lat)-Number(l.a.lat);
+ let a=Math.atan2(dy,dx)*180/Math.PI;a=((a%180)+180)%180;return a;
+}
+function angleDiff180(a,b){const d=Math.abs(a-b)%180;return Math.min(d,180-d)}
+function ridgeFamilyCount(lines,tol=15){
+ const families=[];
+ for(const l of lines||[]){
+  const a=lineAngleLL(l);if(!Number.isFinite(a))continue;
+  let f=families.find(x=>angleDiff180(x.angle,a)<=tol);
+  if(!f){families.push({angle:a,count:1});continue}
+  f.angle=(f.angle*f.count+a)/(f.count+1);f.count++;
+ }
+ return families.length;
+}
+function rankedLengthComparison(solar,reference){
+ const a=(solar||[]).map(Number).filter(Number.isFinite).sort((x,y)=>y-x),r=(reference||[]).map(Number).filter(Number.isFinite).sort((x,y)=>y-x);
+ if(!a.length||!r.length)return {available:false};
+ const n=Math.max(a.length,r.length),errs=[];
+ for(let i=0;i<n;i++)errs.push(a[i]!=null&&r[i]!=null?pct(a[i],r[i]):100);
+ const mean=errs.reduce((s,x)=>s+x,0)/errs.length;
+ return {available:true,errorPct:mean,score:metricScore(mean,5,30),solaris:a,reference:r};
+}
 function metricScore(errorPct,soft=5,hard=25){
  if(!Number.isFinite(errorPct))return null;
  if(errorPct<=soft)return 100;
@@ -37,16 +61,23 @@ function buildSolaris(sm,planes,outline){
  const weights=facets.map((f,i)=>({pitch:num(isDsm?f.rise12:f.pitch12),area:facetAreas[i]||0})).filter(x=>x.pitch!=null);
  const wsum=weights.reduce((a,x)=>a+x.area,0);
  const avgPitch=weights.length?(wsum>0?weights.reduce((a,x)=>a+x.pitch*x.area,0)/wsum:weights.reduce((a,x)=>a+x.pitch,0)/weights.length):null;
- const m=sm?.measurements||{};
+ const m=sm?.measurements||{},roofLines=Array.isArray(sm?.model?.roofLines)?sm.model.roofLines:[],
+       ridgeLines=roofLines.filter(l=>l?.type==="ridge"&&l?.a&&l?.b),
+       lineFt=l=>Number(l?.length3dMeters||l?.lengthMeters||0)*3.280839895,
+       elevationBreakLines=roofLines.filter(l=>["elevation_break","transition"].includes(l?.type)&&l?.a&&l?.b);
  return {
   facetCount:facets.length,
+  ridgeCount:ridgeLines.length,
+  ridgeLengthsFt:ridgeLines.map(lineFt).filter(Number.isFinite).sort((a,b)=>b-a),
+  ridgeFamilyCount:ridgeFamilyCount(ridgeLines),
+  elevationBreakCount:elevationBreakLines.length,
   slopedAreaFt2:slopedArea,
   avgPitch12:avgPitch,
   perimeterFt:num(m.perimeterFt),
   footprintAreaFt2:num(outline?.measurement?.planAreaFt2),
   footprintPerimeterFt:num(outline?.measurement?.perimeterFt),
   ridgeFt:num(m.ridgeFt),hipFt:num(m.hipFt),ridgeHipFt:(num(m.ridgeFt)!=null||num(m.hipFt)!=null)?Number(num(m.ridgeFt)||0)+Number(num(m.hipFt)||0):null,
-  valleyFt:num(m.valleyFt),eaveFt:num(m.eaveFt),rakeFt:num(m.rakeFt),
+  valleyFt:num(m.valleyFt),transitionFt:num(m.transitionFt)??elevationBreakLines.reduce((s,l)=>s+lineFt(l),0),eaveFt:num(m.eaveFt),rakeFt:num(m.rakeFt),
   facetAreasFt2:facetAreas
  };
 }
@@ -58,6 +89,17 @@ function scoreBenchmark(solaris,reference){
  const areaScore=metricScore(areaErr,2,15);
  const pitchScore=metricScore(pitchErr,4,25);
  const facetAreas=facetAreaComparison(solaris.facetAreasFt2,reference.facetAreasFt2);
+ const ridgeCountErr=(Number.isFinite(Number(reference.ridgeCount))&&Number(reference.ridgeCount)>0)?pct(Number(solaris.ridgeCount||0),Number(reference.ridgeCount)):null;
+ const ridgeFamiliesErr=(Number.isFinite(Number(reference.ridgeFamilyCount))&&Number(reference.ridgeFamilyCount)>0)?pct(Number(solaris.ridgeFamilyCount||0),Number(reference.ridgeFamilyCount)):null;
+ const ridgeProfile=rankedLengthComparison(solaris.ridgeLengthsFt,reference.ridgeLengthsFt);
+ const transitionErr=(Number.isFinite(Number(reference.transitionFt))&&Number(reference.transitionFt)>0)?pct(Number(solaris.transitionFt||0),Number(reference.transitionFt)):null;
+ const structureParts=[
+   metricScore(ridgeCountErr,0,50),
+   metricScore(ridgeFamiliesErr,0,50),
+   ridgeProfile.available?ridgeProfile.score:null,
+   metricScore(transitionErr,8,60)
+ ].filter(v=>v!=null);
+ const structureScore=structureParts.length?structureParts.reduce((a,b)=>a+b,0)/structureParts.length:null;
  const edgeKeys=(reference.ridgeHipFt!=null?["ridgeHipFt"]:["ridgeFt","hipFt"]).concat(["valleyFt","eaveFt","rakeFt","perimeterFt"]);
  const edges=edgeKeys.map(k=>edgeMetric(k,solaris[k],reference[k]));
  const edgeScores=edges.filter(x=>x.score!=null).map(x=>x.score);
@@ -68,18 +110,22 @@ function scoreBenchmark(solaris,reference){
  const footprintScore=footprintScores.length?footprintScores.reduce((a,b)=>a+b,0)/footprintScores.length:null;
  const componentScores={
   topology:topologyScore,
+  structure:structureScore,
   edges:edgeScore,
   pitch:pitchScore,
   facetAreas:facetAreas.available?facetAreas.score:null,
   totalArea:areaScore,
   footprint:footprintScore
  };
- const weights={topology:.30,edges:.20,pitch:.10,facetAreas:.10,totalArea:.15,footprint:.15};
+ const weights={topology:.22,structure:.18,edges:.17,pitch:.08,facetAreas:.10,totalArea:.15,footprint:.10};
  let weighted=0,used=0;
  for(const [k,w] of Object.entries(weights)){const s=componentScores[k];if(s!=null){weighted+=s*w;used+=w}}
  const overall=used?weighted/used:null;
  const issues=[];
  if(Number.isFinite(facetErr)&&facetErr>8)issues.push({type:"topology",message:"Facet count differs from the reference; investigate split/merge topology."});
+ if(Number.isFinite(ridgeCountErr)&&ridgeCountErr>20)issues.push({type:"structure",message:"Major ridge count differs from the reference roof structure."});
+ if(ridgeProfile.available&&ridgeProfile.errorPct>18)issues.push({type:"structure",message:"Ridge-run lengths do not match the reference structural pattern."});
+ if(Number.isFinite(transitionErr)&&transitionErr>30)issues.push({type:"structure",message:"Elevation/transition separation is missing or materially wrong."});
  if(Number.isFinite(areaErr)&&areaErr>5)issues.push({type:"area",message:"Total sloped area differs materially from the reference."});
  if(Number.isFinite(edgeScore)&&edgeScore<70)issues.push({type:"edges",message:"Roof-line totals differ materially; review ridge/hip/valley classification and intersections."});
  if(facetAreas.available&&facetAreas.meanAbsoluteErrorPct>10)issues.push({type:"facet-area",message:"Per-facet areas are not matching closely; inspect facet boundaries and shared junctions."});
