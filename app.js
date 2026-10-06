@@ -2389,11 +2389,11 @@ async function generateRoofReport(){
     {id:'lidarArea',label:'Independent area cross-check',pass:!lidarQualityGood||Boolean(lidarConfirmsProduction),detail:lidarQualityGood?(lidarConfirmsProduction?'LiDAR agrees':'LiDAR disagreement '+(Number.isFinite(lidarVsProductionPct)?lidarVsProductionPct.toFixed(1)+'%':'—')):'LiDAR unavailable / not quality-screened'},
     {id:'lidarTopology',label:'Independent topology cross-check',pass:!lidarQualityGood||Boolean(lidarTopologyAgrees),detail:lidarQualityGood?(lidarTopologyAgrees?'Major geometry agrees':'Needs review'):'LiDAR unavailable / not quality-screened'}
   ];
-  const aerialQa=JSON.parse(localStorage.getItem('solarisRoofAerialView')||'null');
+  const aerialViewQa=JSON.parse(localStorage.getItem('solarisRoofAerialView')||'null');
   const streetQa=roofRemoteImageryState||null;
   const remoteQaRows=[
     '<tr><th>Street-level visual QA</th><td>'+(streetQa?.views?.length?(streetQa.views.length+' online view(s) · best '+streetQa.distance.toFixed(0)+' m · '+streetQa.quality+' coverage'):'Not checked in this session')+'</td></tr>',
-    '<tr><th>Aerial flyover QA</th><td>'+(aerialQa?.available?('Available'+(aerialQa.captureDate?' · capture '+roofAerialDate(aerialQa.captureDate):'')):(aerialQa?'Checked · unavailable':'Not checked'))+'</td></tr>'
+    '<tr><th>Aerial flyover QA</th><td>'+(aerialViewQa?.available?('Available'+(aerialViewQa.captureDate?' · capture '+roofAerialDate(aerialViewQa.captureDate):'')):(aerialViewQa?'Checked · unavailable':'Not checked'))+'</td></tr>'
   ].join('');
   const failedReadiness=readinessChecks.filter(x=>!x.pass);
   const orderReady=failedReadiness.length===0;
