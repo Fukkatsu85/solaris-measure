@@ -617,17 +617,21 @@ async function runPixelGeometryWorker(){
 }
 
 function setMeasureTab(tab){
- const siding=document.querySelector('#siding-tool'),roof=document.querySelector('#roof-tool'),sb=document.querySelector('#tab-siding'),rb=document.querySelector('#tab-roof');
- const isRoof=tab==='roof';
- if(siding){siding.hidden=isRoof;if(isRoof)siding.setAttribute('hidden','');else siding.removeAttribute('hidden');}
- if(roof){roof.hidden=!isRoof;if(isRoof)roof.removeAttribute('hidden');else roof.setAttribute('hidden','');}
- if(sb){sb.className=isRoof?'secondary':'primary';sb.setAttribute('aria-selected',String(!isRoof));}
+ const siding=document.querySelector('#siding-tool'),roof=document.querySelector('#roof-tool'),manual=document.querySelector('#manual-roof-tool');
+ const sb=document.querySelector('#tab-siding'),rb=document.querySelector('#tab-roof'),mb=document.querySelector('#tab-manual-roof');
+ const isRoof=tab==='roof',isManual=tab==='manual-roof',isSiding=!isRoof&&!isManual;
+ const show=(el,on)=>{if(!el)return;el.hidden=!on;if(on)el.removeAttribute('hidden');else el.setAttribute('hidden','');};
+ show(siding,isSiding);show(roof,isRoof);show(manual,isManual);
+ if(sb){sb.className=isSiding?'primary':'secondary';sb.setAttribute('aria-selected',String(isSiding));}
  if(rb){rb.className=isRoof?'primary':'secondary';rb.setAttribute('aria-selected',String(isRoof));}
- localStorage.setItem('solarisMeasureTab',isRoof?'roof':'siding');
- if(isRoof)requestAnimationFrame(()=>roof?.scrollIntoView({behavior:'smooth',block:'start'}));
+ if(mb){mb.className=isManual?'primary':'secondary';mb.setAttribute('aria-selected',String(isManual));}
+ localStorage.setItem('solarisMeasureTab',isManual?'manual-roof':(isRoof?'roof':'siding'));
+ const target=isManual?manual:(isRoof?roof:siding);
+ requestAnimationFrame(()=>target?.scrollIntoView({behavior:'smooth',block:'start'}));
 }
 document.querySelector('#tab-siding')?.addEventListener('click',()=>setMeasureTab('siding'));
 document.querySelector('#tab-roof')?.addEventListener('click',()=>setMeasureTab('roof'));
+document.querySelector('#tab-manual-roof')?.addEventListener('click',()=>setMeasureTab('manual-roof'));
 document.querySelector('#new-roof-measurement')?.addEventListener('click',()=>{
  const name=prompt('Roof measurement name or address:','Roof '+new Date().toISOString().slice(0,10));if(!name)return;
  localStorage.setItem('solarisRoofProject',JSON.stringify({name:name,createdAt:new Date().toISOString()}));
@@ -1198,6 +1202,7 @@ document.querySelector('#start-roof-geometry')?.addEventListener('click',openRoo
 document.addEventListener('click',e=>{
  const id=e.target?.closest?.('button')?.id;
  if(id==='tab-roof'){e.preventDefault();setMeasureTab('roof');}
+ if(id==='tab-manual-roof'){e.preventDefault();setMeasureTab('manual-roof');}
  if(id==='tab-siding'){e.preventDefault();setMeasureTab('siding');}
  if(id==='start-roof-geometry'){e.preventDefault();openRoofGeometryWorkspace();}
 });
@@ -3134,3 +3139,361 @@ async function restoreRoofSolarModel(){
    if(summary)summary.innerHTML+='<br><strong>Geometry engine update available.</strong> This saved roof was built with an older DSM engine. Click Process Roof once before generating a new report.';
  }else if(d.model.accepted&&badge)badge.textContent='Accepted ✓';
 }
+
+
+/* ============================================================================
+   MANUAL ROOF — guided human-topology workflow
+   Address -> still image -> outline -> ridge/hip/valley -> graph -> pitch -> report
+   ========================================================================== */
+(()=>{
+ const FT_PER_M=3.280839895,SQFT_PER_M2=10.7639104167;
+ const $=s=>document.querySelector(s);
+ const state={
+   property:null,outline:[],lines:[],tool:'ridge',pending:null,mode:'idle',
+   undo:[],redo:[],facets:[],facetPitches:{},drag:null
+ };
+ const save=()=>{
+   try{localStorage.setItem('solarisManualRoof',JSON.stringify({
+     property:state.property,outline:state.outline,lines:state.lines,
+     facetPitches:state.facetPitches,defaultPitch:Number($('#manual-roof-default-pitch')?.value||8)
+   }))}catch{}
+ };
+ const snapshot=()=>({outline:JSON.parse(JSON.stringify(state.outline)),lines:JSON.parse(JSON.stringify(state.lines)),facetPitches:{...state.facetPitches}});
+ const pushUndo=()=>{state.undo.push(snapshot());if(state.undo.length>80)state.undo.shift();state.redo=[];};
+ const restore=s=>{if(!s)return;state.outline=s.outline||[];state.lines=s.lines||[];state.facetPitches=s.facetPitches||{};state.pending=null;state.facets=[];renderManualRoof();};
+ const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+ const clamp=v=>Math.max(0,Math.min(1,v));
+ const lineAngle=(a,b)=>{let x=Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI%180;if(x<0)x+=180;return x;};
+ const angleDiff=(a,b)=>{let d=Math.abs(a-b)%180;return Math.min(d,180-d)};
+ const pointSeg=(p,a,b)=>{
+   const dx=b.x-a.x,dy=b.y-a.y,l2=dx*dx+dy*dy||1,t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/l2));
+   const q={x:a.x+dx*t,y:a.y+dy*t};return {point:q,t,distance:dist(p,q)};
+ };
+ const segHit=(a,b,c,d)=>{
+   const rx=b.x-a.x,ry=b.y-a.y,sx=d.x-c.x,sy=d.y-c.y,den=rx*sy-ry*sx;
+   if(Math.abs(den)<1e-9)return null;
+   const qx=c.x-a.x,qy=c.y-a.y,t=(qx*sy-qy*sx)/den,u=(qx*ry-qy*rx)/den;
+   if(t<-1e-7||t>1+1e-7||u<-1e-7||u>1+1e-7)return null;
+   return {x:a.x+t*rx,y:a.y+t*ry,t,u};
+ };
+ const polygonArea=poly=>{
+   let a=0;for(let i=0;i<poly.length;i++){const p=poly[i],q=poly[(i+1)%poly.length];a+=p.x*q.y-q.x*p.y}return a/2;
+ };
+ const pointInPoly=(p,poly)=>{
+   let inside=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+     const a=poly[i],b=poly[j],hit=((a.y>p.y)!==(b.y>p.y))&&(p.x<(b.x-a.x)*(p.y-a.y)/((b.y-a.y)||1e-12)+a.x);
+     if(hit)inside=!inside;
+   }return inside;
+ };
+ const svgPoint=e=>{
+   const svg=$('#manual-roof-overlay'),r=svg.getBoundingClientRect();
+   return {x:clamp((e.clientX-r.left)/r.width),y:clamp((e.clientY-r.top)/r.height)};
+ };
+ const snapPoint=(p,excludeLine=-1)=>{
+   const threshold=.018,candidates=[];
+   state.outline.forEach((q,i)=>candidates.push({p:q,d:dist(p,q),kind:'outline',i}));
+   state.lines.forEach((l,i)=>{
+     if(i===excludeLine)return;
+     candidates.push({p:l.a,d:dist(p,l.a),kind:'line',i,end:'a'},{p:l.b,d:dist(p,l.b),kind:'line',i,end:'b'});
+   });
+   // Snap to existing line-line intersections.
+   for(let i=0;i<state.lines.length;i++)for(let j=i+1;j<state.lines.length;j++){
+     const h=segHit(state.lines[i].a,state.lines[i].b,state.lines[j].a,state.lines[j].b);
+     if(h)candidates.push({p:h,d:dist(p,h),kind:'intersection'});
+   }
+   candidates.sort((a,b)=>a.d-b.d);
+   return candidates[0]&&candidates[0].d<=threshold?{...candidates[0].p}:p;
+ };
+ const nearestLineIndex=p=>{
+   let best=-1,bd=.022;state.lines.forEach((l,i)=>{const d=pointSeg(p,l.a,l.b).distance;if(d<bd){bd=d;best=i}});return best;
+ };
+ const nearestEndpoint=p=>{
+   let best=null,bd=.022;state.lines.forEach((l,i)=>['a','b'].forEach(end=>{const d=dist(p,l[end]);if(d<bd){bd=d;best={line:i,end}}}));return best;
+ };
+ const metersPerNorm=()=>Math.max(1,Number(state.property?.cropHalfMeters||42)*2);
+ const normLengthM=(a,b)=>dist(a,b)*metersPerNorm();
+ const pitchFactor=(pitch,type)=>{
+   const r=Math.atan(Number(pitch||0)/12);
+   if(type==='ridge')return 1;
+   // Generic 45-degree hip/valley rise factor. User-entered topology controls plan length.
+   const runSlope=Math.tan(r)/Math.SQRT2;
+   return Math.sqrt(1+runSlope*runSlope);
+ };
+ function renderManualRoof(){
+   const svg=$('#manual-roof-overlay');if(!svg)return;
+   const colors={ridge:'#16a34a',hip:'#2563eb',valley:'#dc2626'};
+   let out='';
+   if(state.outline.length){
+     out+='<polygon points="'+state.outline.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="rgba(255,255,255,.10)" stroke="#facc15" stroke-width="6" vector-effect="non-scaling-stroke"/>';
+     state.outline.forEach((p,i)=>out+='<circle data-outline-point="'+i+'" cx="'+(p.x*1000)+'" cy="'+(p.y*1000)+'" r="11" fill="#fff" stroke="#111" stroke-width="4" vector-effect="non-scaling-stroke"/>');
+   }
+   state.lines.forEach((l,i)=>{
+     out+='<line data-manual-line="'+i+'" x1="'+(l.a.x*1000)+'" y1="'+(l.a.y*1000)+'" x2="'+(l.b.x*1000)+'" y2="'+(l.b.y*1000)+'" stroke="'+(colors[l.type]||'#111')+'" stroke-width="8" vector-effect="non-scaling-stroke"/>';
+     out+='<circle data-line-end="'+i+':a" cx="'+(l.a.x*1000)+'" cy="'+(l.a.y*1000)+'" r="9" fill="#fff" stroke="'+(colors[l.type]||'#111')+'" stroke-width="4"/>';
+     out+='<circle data-line-end="'+i+':b" cx="'+(l.b.x*1000)+'" cy="'+(l.b.y*1000)+'" r="9" fill="#fff" stroke="'+(colors[l.type]||'#111')+'" stroke-width="4"/>';
+   });
+   if(state.pending)out+='<circle cx="'+(state.pending.x*1000)+'" cy="'+(state.pending.y*1000)+'" r="12" fill="#f59e0b" stroke="#111" stroke-width="4"/>';
+   svg.innerHTML=out;
+   const lb=$('#manual-roof-lines-badge');if(lb)lb.textContent=state.lines.length+' line'+(state.lines.length===1?'':'s');
+   const ob=$('#manual-roof-outline-badge');if(ob)ob.textContent=state.outline.length>=3?'Outline ready':'Not confirmed';
+   const lc=$('#manual-roof-lines-card');if(lc)lc.hidden=state.outline.length<3;
+   const pc=$('#manual-roof-pitch-card');if(pc)pc.hidden=state.outline.length<3;
+   document.querySelectorAll('[data-manual-tool]').forEach(b=>b.className=b.dataset.manualTool===state.tool?'primary':'secondary');
+   save();
+ }
+ async function loadProperty(){
+   const address=$('#manual-roof-address')?.value?.trim(),status=$('#manual-roof-property-status'),badge=$('#manual-roof-status-badge');
+   if(!address){if(status)status.textContent='Enter a property address first.';return;}
+   if(badge)badge.textContent='Loading';if(status)status.textContent='Locating property and loading aerial still…';
+   try{
+     const r=await fetch('/api/mn-aerial?address='+encodeURIComponent(address),{cache:'no-store'}),d=await r.json().catch(()=>({}));
+     if(!r.ok)throw new Error(d.error||'Could not load aerial imagery.');
+     state.property={address:d.address||address,lat:Number(d.lat),lng:Number(d.lng),imageryUrl:d.imageryUrl,cropHalfMeters:Number(d.cropHalfMeters||42),imageryLabel:d.imageryLabel||d.source||'Aerial imagery'};
+     state.outline=[];state.lines=[];state.facets=[];state.facetPitches={};state.undo=[];state.redo=[];state.pending=null;
+     const img=$('#manual-roof-image');if(img)img.src=d.imageryUrl;
+     const ed=$('#manual-roof-editor-card');if(ed)ed.hidden=false;
+     if(status)status.textContent=(d.address||address)+' · '+(d.imageryLabel||'aerial still')+' · draw or load the roof outline.';
+     if(badge)badge.textContent='Property loaded';
+     renderManualRoof();save();
+   }catch(err){if(status)status.textContent='Could not load property: '+(err?.message||err);if(badge)badge.textContent='Error';}
+ }
+ async function useExistingAutoOutline(){
+   const status=$('#manual-roof-outline-status');if(!state.property){if(status)status.textContent='Load a property first.';return;}
+   const projectId='roof-'+Number(state.property.lat).toFixed(6)+'-'+Number(state.property.lng).toFixed(6);
+   if(status)status.textContent='Checking for a saved Solaris roof outline…';
+   try{
+     const r=await fetch('/api/roof-report?projectId='+encodeURIComponent(projectId),{cache:'no-store'}),d=await r.json().catch(()=>({}));
+     if(!r.ok||!d?.solarModel?.outline?.length)throw new Error('No existing processed outline found for this address.');
+     const half=Number(state.property.cropHalfMeters||42),lat0=Number(state.property.lat),lng0=Number(state.property.lng),cos=Math.max(.2,Math.cos(lat0*Math.PI/180));
+     const toNorm=p=>{
+       const east=(Number(p.lng)-lng0)*111320*cos,north=(Number(p.lat)-lat0)*111320;
+       return {x:clamp(.5+east/(half*2)),y:clamp(.5-north/(half*2))};
+     };
+     pushUndo();state.outline=d.solarModel.outline.map(toNorm);state.lines=[];state.facets=[];state.facetPitches={};
+     if(status)status.textContent='Existing Solaris outline loaded. Edit points if needed, then draw the interior roof lines.';
+     renderManualRoof();
+   }catch(err){if(status)status.textContent=err.message+' Use Draw Outline instead.';}
+ }
+ function setTool(tool){
+   state.tool=tool;state.pending=null;
+   const s=$('#manual-roof-line-status');if(s)s.textContent=tool==='select'?'Drag a line endpoint to move it.':tool==='delete'?'Click a line to delete it.':'Click the start and end point for the '+tool+'.';
+   renderManualRoof();
+ }
+ function finishOutline(){
+   const status=$('#manual-roof-outline-status');
+   if(state.outline.length<3){if(status)status.textContent='Outline needs at least 3 points.';return;}
+   state.mode='idle';if(status)status.textContent='Outline confirmed. Draw ridges, hips and valleys.';renderManualRoof();
+ }
+ function clearOutline(){pushUndo();state.outline=[];state.lines=[];state.facets=[];state.pending=null;renderManualRoof();}
+ function splitSegmentsForGraph(){
+   const segs=[];
+   for(let i=0;i<state.outline.length;i++)segs.push({a:state.outline[i],b:state.outline[(i+1)%state.outline.length],type:'perimeter'});
+   state.lines.forEach(l=>segs.push({...l}));
+   const cuts=segs.map(()=>[0,1]);
+   for(let i=0;i<segs.length;i++)for(let j=i+1;j<segs.length;j++){
+     const h=segHit(segs[i].a,segs[i].b,segs[j].a,segs[j].b);if(!h)continue;
+     if(h.t>1e-5&&h.t<1-1e-5)cuts[i].push(h.t);
+     if(h.u>1e-5&&h.u<1-1e-5)cuts[j].push(h.u);
+   }
+   const pieces=[];
+   segs.forEach((s,i)=>{
+     const ts=[...new Set(cuts[i].map(x=>Math.round(x*1e6)/1e6))].sort((a,b)=>a-b);
+     for(let k=0;k<ts.length-1;k++){
+       const t0=ts[k],t1=ts[k+1];if(t1-t0<1e-5)continue;
+       const a={x:s.a.x+(s.b.x-s.a.x)*t0,y:s.a.y+(s.b.y-s.a.y)*t0},b={x:s.a.x+(s.b.x-s.a.x)*t1,y:s.a.y+(s.b.y-s.a.y)*t1};
+       if(dist(a,b)>.002)pieces.push({...s,a,b});
+     }
+   });
+   return pieces;
+ }
+ function buildPlanarFaces(){
+   const pieces=splitSegmentsForGraph(),nodes=[],edges=[];
+   const nodeFor=p=>{
+     let bi=-1,bd=.004;
+     nodes.forEach((n,i)=>{const d=dist(n,p);if(d<bd){bd=d;bi=i}});
+     if(bi>=0){nodes[bi]={x:(nodes[bi].x+p.x)/2,y:(nodes[bi].y+p.y)/2};return bi;}
+     nodes.push({...p});return nodes.length-1;
+   };
+   const map=new Map();
+   pieces.forEach(s=>{
+     const a=nodeFor(s.a),b=nodeFor(s.b);if(a===b)return;
+     const key=a<b?a+'|'+b:b+'|'+a;
+     if(!map.has(key))map.set(key,{a,b,type:s.type});
+     else if(['ridge','hip','valley'].includes(s.type))map.get(key).type=s.type;
+   });
+   edges.push(...map.values());
+   const adj=Array.from({length:nodes.length},()=>[]);
+   edges.forEach((e,ei)=>{adj[e.a].push({to:e.b,ei});adj[e.b].push({to:e.a,ei});});
+   adj.forEach((arr,i)=>arr.sort((u,v)=>Math.atan2(nodes[u.to].y-nodes[i].y,nodes[u.to].x-nodes[i].x)-Math.atan2(nodes[v.to].y-nodes[i].y,nodes[v.to].x-nodes[i].x)));
+   const used=new Set(),faces=[],key=(a,b)=>a+'>'+b;
+   for(let a=0;a<nodes.length;a++)for(const first of adj[a]){
+     if(used.has(key(a,first.to)))continue;
+     let u=a,v=first.to,guard=0;const cyc=[];
+     while(guard++<edges.length*6+30){
+       const k=key(u,v);if(used.has(k))break;used.add(k);cyc.push(u);
+       const around=adj[v],idx=around.findIndex(x=>x.to===u);if(idx<0)break;
+       const next=around[(idx-1+around.length)%around.length].to;u=v;v=next;
+       if(u===a&&v===first.to)break;
+     }
+     if(cyc.length<3)continue;
+     const poly=cyc.map(i=>nodes[i]),area=polygonArea(poly),cent={x:poly.reduce((s,p)=>s+p.x,0)/poly.length,y:poly.reduce((s,p)=>s+p.y,0)/poly.length};
+     if(Math.abs(area)<.00015||!pointInPoly(cent,state.outline))continue;
+     faces.push({ids:area>0?cyc:[...cyc].reverse(),area:Math.abs(area)});
+   }
+   const uniq=new Map();
+   faces.forEach(f=>{
+     const ids=f.ids,rots=[];
+     for(const seq of [ids,[...ids].reverse()])for(let i=0;i<seq.length;i++)rots.push(seq.slice(i).concat(seq.slice(0,i)));
+     rots.sort((a,b)=>a.join('-').localeCompare(b.join('-'),undefined,{numeric:true}));
+     const k=rots[0].join('-');if(!uniq.has(k))uniq.set(k,{ids:rots[0],area:f.area});
+   });
+   let final=[...uniq.values()];
+   // Remove any cycle approximating the whole exterior roof if internal faces exist.
+   const outer=Math.abs(polygonArea(state.outline));
+   if(final.length>1)final=final.filter(f=>!(f.area/outer>.93&&final.some(g=>g!==f&&g.area<.8*outer)));
+   return {nodes,edges,faces:final};
+ }
+ function buildManualGeometry(){
+   const status=$('#manual-roof-line-status'),badge=$('#manual-roof-facet-badge');
+   if(state.outline.length<3){if(status)status.textContent='Confirm the outline first.';return;}
+   pushUndo();
+   // Snap all manually drawn endpoints to the nearest structural anchor before graph solve.
+   state.lines=state.lines.map((l,i)=>({...l,a:snapPoint(l.a,i),b:snapPoint(l.b,i)})).filter(l=>dist(l.a,l.b)>.004);
+   const graph=buildPlanarFaces(),size=metersPerNorm(),defaultPitch=Number($('#manual-roof-default-pitch')?.value||8);
+   state.facets=graph.faces.map((f,i)=>{
+     const poly=f.ids.map(id=>graph.nodes[id]),pitch=Number(state.facetPitches[i+1]??defaultPitch);
+     const planM2=f.area*size*size,slopedM2=planM2*Math.sqrt(1+Math.pow(pitch/12,2));
+     return {id:i+1,poly,pitch,planM2,slopedM2};
+   });
+   if(!state.facets.length){
+     if(status)status.textContent='No closed facets were created. Make sure interior lines terminate on the perimeter or on another roof line.';
+     if(badge)badge.textContent='Needs line connections';renderManualRoof();return;
+   }
+   const table=$('#manual-roof-facet-table');
+   if(table)table.innerHTML='<table><thead><tr><th>Facet</th><th>Pitch</th><th>Plan ft²</th><th>Sloped ft²</th></tr></thead><tbody>'+state.facets.map(f=>'<tr><td>F'+f.id+'</td><td><select data-manual-facet-pitch="'+f.id+'">'+[2,3,4,5,6,7,8,9,10,11,12,14,16,18].map(p=>'<option value="'+p+'"'+(p===f.pitch?' selected':'')+'>'+p+'/12</option>').join('')+'</select></td><td>'+Math.round(f.planM2*SQFT_PER_M2)+'</td><td>'+Math.round(f.slopedM2*SQFT_PER_M2)+'</td></tr>').join('')+'</tbody></table>';
+   if(badge)badge.textContent=state.facets.length+' facets';
+   if(status)status.textContent='Roof graph built ✓ · '+state.facets.length+' closed facets. Review pitch, then generate/report.';
+   generateManualReport(graph);
+   renderManualRoof();save();
+ }
+ function exteriorTotals(){
+   const size=metersPerNorm(),ridges=state.lines.filter(l=>l.type==='ridge'),dominant=ridges.length?lineAngle(ridges.sort((a,b)=>dist(b.a,b.b)-dist(a.a,a.b))[0].a,ridges[0].b):null;
+   let eaveM=0,rakeM=0;
+   for(let i=0;i<state.outline.length;i++){
+     const a=state.outline[i],b=state.outline[(i+1)%state.outline.length],m=dist(a,b)*size,ang=lineAngle(a,b);
+     if(dominant==null||angleDiff(ang,dominant)<=28)eaveM+=m;else rakeM+=m;
+   }
+   return {eaveM,rakeM};
+ }
+ function generateManualReport(graph=null){
+   if(!state.facets.length){buildManualGeometry();return;}
+   graph=graph||buildPlanarFaces();
+   const size=metersPerNorm(),defaultPitch=Number($('#manual-roof-default-pitch')?.value||8);
+   const planFt2=state.facets.reduce((s,f)=>s+f.planM2*SQFT_PER_M2,0),slopedFt2=state.facets.reduce((s,f)=>s+f.slopedM2*SQFT_PER_M2,0);
+   const lineTotal=type=>state.lines.filter(l=>l.type===type).reduce((s,l)=>{
+     const pitch=defaultPitch,m=normLengthM(l.a,l.b)*pitchFactor(pitch,type);return s+m*FT_PER_M;
+   },0);
+   const ridge=lineTotal('ridge'),hip=lineTotal('hip'),valley=lineTotal('valley'),ext=exteriorTotals(),eave=ext.eaveM*FT_PER_M,rake=ext.rakeM*FT_PER_M;
+   const colors={ridge:'#16a34a',hip:'#2563eb',valley:'#dc2626'};
+   let svg='<svg viewBox="0 0 1000 1000" style="width:100%;max-height:650px;background:#fff;border:1px solid #dbe2ea;border-radius:12px"><rect width="1000" height="1000" fill="#fff"/>';
+   state.facets.forEach((f,i)=>{
+     svg+='<polygon points="'+f.poly.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="'+['#e8eef5','#dbe7f0','#e6e2f3','#e3efe7','#f2e8dc','#e0ebeb'][i%6]+'" stroke="#64748b" stroke-width="3"/>';
+     const cx=f.poly.reduce((s,p)=>s+p.x,0)/f.poly.length*1000,cy=f.poly.reduce((s,p)=>s+p.y,0)/f.poly.length*1000;
+     svg+='<text x="'+cx+'" y="'+cy+'" text-anchor="middle" font-size="26" font-weight="700">F'+f.id+'</text><text x="'+cx+'" y="'+(cy+30)+'" text-anchor="middle" font-size="18">'+f.pitch+'/12 · '+Math.round(f.slopedM2*SQFT_PER_M2)+' ft²</text>';
+   });
+   svg+='<polygon points="'+state.outline.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="none" stroke="#111" stroke-width="8"/>';
+   state.lines.forEach(l=>svg+='<line x1="'+(l.a.x*1000)+'" y1="'+(l.a.y*1000)+'" x2="'+(l.b.x*1000)+'" y2="'+(l.b.y*1000)+'" stroke="'+colors[l.type]+'" stroke-width="8"/>');
+   svg+='</svg>';
+   const rows=state.facets.map(f=>'<tr><td>F'+f.id+'</td><td>'+f.pitch+'/12</td><td>'+Math.round(f.planM2*SQFT_PER_M2)+'</td><td>'+Math.round(f.slopedM2*SQFT_PER_M2)+'</td></tr>').join('');
+   const report=$('#manual-roof-report');
+   if(report)report.innerHTML=
+     '<h2>'+escRoof(state.property?.address||'Manual Roof Report')+'</h2>'+
+     '<div class="metrics" style="grid-template-columns:repeat(auto-fit,minmax(145px,1fr))">'+
+       '<div class="metric"><span>Plan area</span><strong>'+Math.round(planFt2).toLocaleString()+' ft²</strong></div>'+
+       '<div class="metric"><span>Sloped area</span><strong>'+Math.round(slopedFt2).toLocaleString()+' ft²</strong></div>'+
+       '<div class="metric"><span>Squares</span><strong>'+(slopedFt2/100).toFixed(2)+'</strong></div>'+
+       '<div class="metric"><span>Facets</span><strong>'+state.facets.length+'</strong></div>'+
+     '</div>'+
+     '<h3 style="margin-top:18px">2D Roof Diagram</h3>'+svg+
+     '<h3 style="margin-top:18px">Linear Measurements</h3><div class="table-wrap"><table><tbody>'+
+       '<tr><th>Ridge</th><td>'+ridge.toFixed(1)+' ft</td></tr><tr><th>Hip</th><td>'+hip.toFixed(1)+' ft</td></tr><tr><th>Valley</th><td>'+valley.toFixed(1)+' ft</td></tr><tr><th>Eave</th><td>'+eave.toFixed(1)+' ft</td></tr><tr><th>Rake</th><td>'+rake.toFixed(1)+' ft</td></tr>'+
+     '</tbody></table></div>'+
+     '<h3 style="margin-top:18px">Facet Measurements</h3><div class="table-wrap"><table><thead><tr><th>Facet</th><th>Pitch</th><th>Plan ft²</th><th>Sloped ft²</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+     '<h3 style="margin-top:18px">Waste Options</h3><div class="table-wrap"><table><thead><tr><th>Waste</th><th>Area</th><th>Squares</th></tr></thead><tbody>'+
+       [10,12,15].map(w=>'<tr><td>'+w+'%</td><td>'+Math.round(slopedFt2*(1+w/100)).toLocaleString()+' ft²</td><td>'+(slopedFt2*(1+w/100)/100).toFixed(2)+'</td></tr>').join('')+
+     '</tbody></table></div>'+
+     '<p class="muted">Manual topology authority: user-confirmed outline and ridge / hip / valley geometry. Pitch is assigned by the user per facet. Exterior eave/rake split is an assisted estimate and should be reviewed before ordering.</p>';
+   const rc=$('#manual-roof-report-card');if(rc)rc.hidden=false;
+   save();
+ }
+ // UI events
+ $('#manual-roof-load')?.addEventListener('click',loadProperty);
+ $('#manual-roof-address')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();loadProperty();}});
+ $('#manual-use-auto-outline')?.addEventListener('click',useExistingAutoOutline);
+ $('#manual-draw-outline')?.addEventListener('click',()=>{pushUndo();state.mode='draw-outline';state.outline=[];state.lines=[];state.pending=null;const s=$('#manual-roof-outline-status');if(s)s.textContent='Click around the roof perimeter in order.';renderManualRoof();});
+ $('#manual-finish-outline')?.addEventListener('click',finishOutline);
+ $('#manual-edit-outline')?.addEventListener('click',()=>{state.mode='edit-outline';const s=$('#manual-roof-outline-status');if(s)s.textContent='Drag the white outline points to correct the roof boundary.';});
+ $('#manual-clear-outline')?.addEventListener('click',clearOutline);
+ document.querySelectorAll('[data-manual-tool]').forEach(b=>b.addEventListener('click',()=>setTool(b.dataset.manualTool)));
+ $('#manual-roof-clear-lines')?.addEventListener('click',()=>{pushUndo();state.lines=[];state.pending=null;state.facets=[];renderManualRoof();});
+ $('#manual-roof-undo')?.addEventListener('click',()=>{if(!state.undo.length)return;state.redo.push(snapshot());restore(state.undo.pop());});
+ $('#manual-roof-redo')?.addEventListener('click',()=>{if(!state.redo.length)return;state.undo.push(snapshot());restore(state.redo.pop());});
+ $('#manual-roof-build')?.addEventListener('click',buildManualGeometry);
+ $('#manual-roof-recalculate')?.addEventListener('click',()=>{buildManualGeometry();});
+ $('#manual-roof-print')?.addEventListener('click',()=>window.print());
+ $('#manual-roof-default-pitch')?.addEventListener('change',()=>{state.facetPitches={};if(state.facets.length)buildManualGeometry();});
+ document.addEventListener('change',e=>{
+   const id=e.target?.dataset?.manualFacetPitch;if(id){
+     state.facetPitches[Number(id)]=Number(e.target.value);buildManualGeometry();
+   }
+ });
+ const overlay=$('#manual-roof-overlay');
+ overlay?.addEventListener('pointerdown',e=>{
+   const p=svgPoint(e);
+   if(state.mode==='draw-outline'){
+     pushUndo();state.outline.push(p);renderManualRoof();return;
+   }
+   if(state.mode==='edit-outline'){
+     let bi=-1,bd=.025;state.outline.forEach((q,i)=>{const d=dist(p,q);if(d<bd){bd=d;bi=i}});
+     if(bi>=0){pushUndo();state.drag={kind:'outline',index:bi};overlay.setPointerCapture(e.pointerId);}return;
+   }
+   if(state.tool==='delete'){
+     const i=nearestLineIndex(p);if(i>=0){pushUndo();state.lines.splice(i,1);state.facets=[];renderManualRoof();}return;
+   }
+   if(state.tool==='select'){
+     const ep=nearestEndpoint(p);if(ep){pushUndo();state.drag={kind:'line-end',...ep};overlay.setPointerCapture(e.pointerId);}return;
+   }
+   if(['ridge','hip','valley'].includes(state.tool)){
+     const q=snapPoint(p);
+     if(!state.pending){state.pending=q;renderManualRoof();}
+     else{
+       const a=state.pending,b=snapPoint(q);state.pending=null;
+       if(dist(a,b)>.006){pushUndo();state.lines.push({type:state.tool,a,b,manual:true});state.facets=[];}
+       renderManualRoof();
+     }
+   }
+ });
+ overlay?.addEventListener('pointermove',e=>{
+   if(!state.drag)return;const p=snapPoint(svgPoint(e),state.drag.line);
+   if(state.drag.kind==='outline')state.outline[state.drag.index]=p;
+   if(state.drag.kind==='line-end')state.lines[state.drag.line][state.drag.end]=p;
+   state.facets=[];renderManualRoof();
+ });
+ const endDrag=e=>{if(state.drag){state.drag=null;try{overlay.releasePointerCapture(e.pointerId)}catch{}renderManualRoof();}};
+ overlay?.addEventListener('pointerup',endDrag);overlay?.addEventListener('pointercancel',endDrag);
+
+ // Restore last manual project for convenience.
+ try{
+   const saved=JSON.parse(localStorage.getItem('solarisManualRoof')||'null');
+   if(saved){
+     state.property=saved.property||null;state.outline=saved.outline||[];state.lines=saved.lines||[];state.facetPitches=saved.facetPitches||{};
+     if($('#manual-roof-default-pitch')&&saved.defaultPitch)$('#manual-roof-default-pitch').value=String(saved.defaultPitch);
+     if(state.property){
+       $('#manual-roof-address').value=state.property.address||'';
+       $('#manual-roof-image').src=state.property.imageryUrl||'';
+       $('#manual-roof-editor-card').hidden=false;
+     }
+     renderManualRoof();
+   }
+ }catch{}
+})();
