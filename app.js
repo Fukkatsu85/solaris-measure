@@ -989,7 +989,9 @@ async function playRoofAerialView(){
    const r=await fetch('/api/roof-aerial-view?mode=video&videoId='+encodeURIComponent(state.videoId),{cache:'no-store'});
    const d=await r.json().catch(()=>({}));if(!r.ok||!d.ok)throw new Error(d.error||('HTTP '+r.status));
    const uris=d.uris||{};
-   const src=uris.MP4_HIGH||uris.MP4_MEDIUM||uris.MP4_LOW||uris.mp4High||uris.mp4Medium||uris.mp4Low||Object.values(uris).find(v=>typeof v==='string'&&/^https:/.test(v));
+   const media=uris.MP4_HIGH||uris.MP4_MEDIUM||uris.MP4_LOW||uris.HLS||{};
+   const src=media.landscapeUri||media.portraitUri||
+     Object.values(uris).map(v=>v?.landscapeUri||v?.portraitUri).find(v=>typeof v==='string'&&/^https:/.test(v));
    if(!src)throw new Error('No playable Aerial View URI was returned.');
    if(video){video.src=src;video.hidden=false;video.load();}
    if(status)status.innerHTML+='<br>Flyover loaded from a short-lived Google URI. It is not stored by Solaris.';
