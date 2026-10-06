@@ -1309,9 +1309,87 @@ function snapRoofLineGraph(lines,outline){
     return {...l,a,b,lengthMeters,length3dMeters:Number(l.length3dMeters)>0?Number(l.length3dMeters)*lengthMeters/Math.max(.01,Number(l.lengthMeters)||lengthMeters):lengthMeters,_a:undefined,_b:undefined};
   }).filter(l=>Number(l.lengthMeters)>=.7);
 }
-function fuseRoofLineEvidence(primaryLines=[],rasterLines=[],outline=[]){
+
+function facetBoundaryAdjacencyLines(facets=[],dsm=null){
+  const out=[];
+  const segAngle=e=>{
+    const f=polygonLocalFrame([e.a,e.b]),a=f.toXY(e.a),b=f.toXY(e.b);
+    return normalize180(Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI);
+  };
+  const overlapCandidate=(ea,eb)=>{
+    const f=polygonLocalFrame([ea.a,ea.b,eb.a,eb.b]);
+    const a1=f.toXY(ea.a),a2=f.toXY(ea.b),b1=f.toXY(eb.a),b2=f.toXY(eb.b);
+    const dx=a2.x-a1.x,dy=a2.y-a1.y,len=Math.hypot(dx,dy);
+    if(len<.55)return null;
+    const ux=dx/len,uy=dy/len,nx=-uy,ny=ux;
+    const ta=[0,len],tb=[(b1.x-a1.x)*ux+(b1.y-a1.y)*uy,(b2.x-a1.x)*ux+(b2.y-a1.y)*uy].sort((x,y)=>x-y);
+    const lo=Math.max(0,tb[0]),hi=Math.min(len,tb[1]);
+    if(hi-lo<.7)return null;
+    const normalA=0;
+    const normalB=((b1.x-a1.x)*nx+(b1.y-a1.y)*ny+(b2.x-a1.x)*nx+(b2.y-a1.y)*ny)/2;
+    if(Math.abs(normalB)>1.15)return null;
+    const no=normalB/2;
+    const p=t=>f.toLL({x:a1.x+ux*t+nx*no,y:a1.y+uy*t+ny*no});
+    return {a:p(lo),b:p(hi),lengthMeters:hi-lo,separationMeters:Math.abs(normalB)};
+  };
+  for(let i=0;i<facets.length;i++){
+    const fa=facets[i],pa=fa?.outline||[];if(pa.length<3)continue;
+    for(let j=i+1;j<facets.length;j++){
+      const fb=facets[j],pb=fb?.outline||[];if(pb.length<3)continue;
+      let best=null;
+      for(let ai=0;ai<pa.length;ai++){
+        const ea={a:pa[ai],b:pa[(ai+1)%pa.length]};
+        const aa=segAngle(ea);
+        for(let bi=0;bi<pb.length;bi++){
+          const eb={a:pb[bi],b:pb[(bi+1)%pb.length]};
+          if(lineAngleDiff(aa,segAngle(eb))>11)continue;
+          const cand=overlapCandidate(ea,eb);if(!cand)continue;
+          const score=cand.lengthMeters-Math.min(1,cand.separationMeters)*.8;
+          if(!best||score>best.score)best={...cand,score};
+        }
+      }
+      if(!best||best.lengthMeters<.8)continue;
+      let classified=classifySharedRoofLine(best,fa,fb,dsm);
+      let rawType=classified.type;
+      if(rawType==="transition"){
+        const ta=slopeTowardSharedLine(best,fa,dsm),tb=slopeTowardSharedLine(best,fb,dsm);
+        if(Number.isFinite(ta)&&Number.isFinite(tb)){
+          if(ta>.11&&tb>.11)rawType="valley";
+          else if(ta<-.11&&tb<-.11)rawType="ridge_or_hip";
+        }
+      }
+      if(rawType==="transition"||rawType==="unknown")continue;
+      const refined=classified.line||best;
+      const type=rawType==="ridge_or_hip"?ridgeOrHipType(fa,fb,dsm):rawType;
+      const line={type,facetA:i,facetB:j,a:refined.a,b:refined.b,
+        lengthMeters:metersBetween(refined.a,refined.b),
+        length3dMeters:roofLine3dMeters(refined,fa,fb),
+        creaseStrength:Number(classified.creaseStrength||0),
+        planeStrength:Number(classified.planeStrength||0),
+        boundarySeparationMeters:best.separationMeters,
+        source:"facet-boundary-adjacency-v1"};
+      if(line.lengthMeters>=.8)out.push(line);
+    }
+  }
+  return dedupeRoofLines(out);
+}
+
+function fuseRoofLineEvidence(primaryLines=[],rasterLines=[],facetAdjacencyLines=[],outline=[]){
   const primary=(primaryLines||[]).filter(l=>["ridge","hip","valley"].includes(l?.type)&&l?.a&&l?.b).map(l=>({...l,evidenceSource:l.source||"plane"}));
-  const accepted=[...primary],added=[];
+  const accepted=[...primary],added=[],facetAdded=[];
+  // Facet-boundary adjacency is structural evidence: two fitted roof planes
+  // actually share an edge in the partition. Prefer it over image-only raster
+  // proposals when it adds a missing category or closes a graph gap.
+  for(const line of (facetAdjacencyLines||[]).filter(l=>["ridge","hip","valley"].includes(l?.type)&&l?.a&&l?.b)){
+    const len=Number(line.lengthMeters||metersBetween(line.a,line.b));
+    if(!Number.isFinite(len)||len<.8||lineLooksDuplicate(line,accepted))continue;
+    const typeMissing=!accepted.some(x=>x.type===line.type);
+    const evidence=roofLineEvidenceScore(line);
+    const structurallyTight=Number(line.boundarySeparationMeters||99)<=.65;
+    if(!typeMissing&&!structurallyTight&&evidence<.10)continue;
+    const promoted={...line,lengthMeters:len,evidenceSource:"facet-boundary-adjacency",fusionScore:evidence,source:"fusion-facet-adjacency-v2"};
+    accepted.push(promoted);added.push(promoted);facetAdded.push(promoted);
+  }
   for(const line of (rasterLines||[]).filter(l=>["ridge","hip","valley"].includes(l?.type)&&l?.a&&l?.b)){
     const len=Number(line.lengthMeters||metersBetween(line.a,line.b));
     if(!Number.isFinite(len)||len<1.25||lineLooksDuplicate(line,accepted))continue;
@@ -1333,6 +1411,8 @@ function fuseRoofLineEvidence(primaryLines=[],rasterLines=[],outline=[]){
     diagnostics:{
       primaryCount:primary.length,
       rasterCandidateCount:(rasterLines||[]).length,
+      facetAdjacencyCandidateCount:(facetAdjacencyLines||[]).length,
+      facetAdjacencyAddedCount:facetAdded.length,
       addedCount:added.length,
       addedByType:{
         ridge:added.filter(l=>l.type==="ridge").length,
@@ -1340,7 +1420,7 @@ function fuseRoofLineEvidence(primaryLines=[],rasterLines=[],outline=[]){
         valley:added.filter(l=>l.type==="valley").length
       },
       finalCount:snapped.length,
-      version:"multi-evidence-topology-fusion-v1"
+      version:"multi-evidence-topology-fusion-v2"
     }
   };
 }
@@ -2238,7 +2318,8 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
   // while independently detected DSM raster adjacencies can fill missing
   // ridge/hip/valley categories. Junction snapping converts the result into a
   // coherent roof graph before measurements/reporting.
-  const topologyFusion=fuseRoofLineEvidence(finalRoofLines,rasterFacetResult.roofLines||[],outline);
+  const facetAdjacencyCandidates=facetBoundaryAdjacencyLines(finalFacets,dsm);
+  const topologyFusion=fuseRoofLineEvidence(finalRoofLines,rasterFacetResult.roofLines||[],facetAdjacencyCandidates,outline);
   if(topologyFusion.lines.length){
     finalRoofLines=topologyFusion.lines;
     geometryMode+="_fused";
@@ -2271,7 +2352,7 @@ async function buildSolarRoofModel(lat,lng,solarSegments=[]){
   model.rawCandidatePlaneCount=facetResult.rawCandidateCount??null;
   model.candidatePlaneCount=facetResult.candidateCount??null;
   model.facetCap=facetResult.facetCap??null;
-  model.lineEngineVersion="multi-evidence-topology-fusion-v1";
+  model.lineEngineVersion="multi-evidence-topology-fusion-v2";
   model.facetEngineVersion=planeFacetResult?(
     planeFacetResult.engine==="plane-v4-wide-dsm"?"plane-v4-wide-dsm-selected":
     planeFacetResult.engine==="plane-v4-wide-google"?"plane-v4-wide-google-selected":
