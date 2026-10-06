@@ -18,7 +18,8 @@ const COUNTY_LAYERS={
 const METRO=new Set(["Anoka County","Carver County","Dakota County","Hennepin County","Ramsey County","Scott County","Washington County"]);
 export async function onRequestGet({request,env}){
  const url=new URL(request.url),address=(url.searchParams.get("address")||"").trim();
- const qLat=Number(url.searchParams.get("lat")),qLng=Number(url.searchParams.get("lng"));
+ const rawLat=url.searchParams.get("lat"),rawLng=url.searchParams.get("lng");
+ const qLat=rawLat===null||rawLat===""?NaN:Number(rawLat),qLng=rawLng===null||rawLng===""?NaN:Number(rawLng);
  const hasCoords=Number.isFinite(qLat)&&Number.isFinite(qLng);
  if(!address&&!hasCoords)return Response.json({error:"address or lat/lng is required"},{status:400});
  let lat=hasCoords?qLat:null,lng=hasCoords?qLng:null,formattedAddress=address,county="";
