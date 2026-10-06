@@ -2239,7 +2239,7 @@ async function generateRoofReport(){
     try{
      const cr=await fetch('/api/training-topology-optimizer',{cache:'no-store'}),cd=await cr.json().catch(()=>({}));
      const cfg=cd?.config||null;
-     profileOverrides=(cfg?.version==='topology-opt-3-holdout'&&cfg?.scopePolicy==='primary-building-only'&&cfg?.validationPolicy==='deterministic-profile-holdout')?(cfg.profileOverrides||{}):{};
+     profileOverrides=(cfg?.version==='topology-opt-4-grammar-holdout'&&cfg?.scopePolicy==='primary-building-only'&&cfg?.validationPolicy==='deterministic-profile-holdout')?(cfg.profileOverrides||{}):{};
     }catch{}
     d.topology=topo.buildRoofTopology(sm,{profileOverrides});
     d.graphFirstTopology=topo.buildFacetPartitionTopology?topo.buildFacetPartitionTopology(sm,{}):null;
@@ -2544,7 +2544,7 @@ function renderBenchmarkScore(b){
  const fmt=v=>Number.isFinite(Number(v))?Number(v).toFixed(1):'—';
  if(badge)badge.textContent=s.overallScore!=null?'Score '+fmt(s.overallScore):'Scored';
  out.innerHTML='<strong>Benchmark score: '+fmt(s.overallScore)+'/100</strong><br>'+
-  'Topology '+fmt(cs.topology)+' · Roof lines '+fmt(cs.edges)+' · Pitch '+fmt(cs.pitch)+' · Facet areas '+fmt(cs.facetAreas)+' · Total area '+fmt(cs.totalArea)+' · Footprint '+fmt(cs.footprint)+
+  'Topology '+fmt(cs.topology)+' · Structure '+fmt(cs.structure)+' · Roof lines '+fmt(cs.edges)+' · Pitch '+fmt(cs.pitch)+' · Facet areas '+fmt(cs.facetAreas)+' · Total area '+fmt(cs.totalArea)+' · Footprint '+fmt(cs.footprint)+
   '<br><span class="muted">Area error '+fmt(err.totalAreaPct)+'% · Facet-count error '+fmt(err.facetCountPct)+'% · Pitch error '+fmt(err.pitchPct)+'% · Footprint area error '+fmt(err.footprintAreaPct)+'%</span>'+
   (issues.length?'<div style="margin-top:8px">'+issues.map(x=>'• '+escRoof(x.message)).join('<br>')+'</div>':'<div style="margin-top:8px">No material benchmark issues were flagged by the current thresholds.</div>');
 }
