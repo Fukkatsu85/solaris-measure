@@ -3693,6 +3693,64 @@ async function restoreRoofSolarModel(){
    });
    return invalid;
  };
+ const projectToPerimeter=p=>{
+   let best=null,bd=Infinity;
+   for(let i=0;i<state.outline.length;i++){
+     const h=pointSeg(p,state.outline[i],state.outline[(i+1)%state.outline.length]);
+     if(h.distance<bd){bd=h.distance;best=h.point;}
+   }
+   return best&&bd<=.010?best:null;
+ };
+ const cleanStructuralTopology=()=>{
+   let changes=0;
+   // First snap endpoints to exact perimeter or exact positions on another line.
+   for(let pass=0;pass<3;pass++){
+     state.lines.forEach((l,i)=>{
+       for(const end of ['a','b']){
+         const p=l[end],per=projectToPerimeter(p);
+         if(per&&dist(p,per)>.00001){l[end]={...per};changes++;continue;}
+         let best=null,bd=.010;
+         state.lines.forEach((q,j)=>{
+           if(i===j)return;
+           const h=pointSeg(p,q.a,q.b);
+           if(h.distance<bd){bd=h.distance;best=h.point;}
+         });
+         if(best&&dist(p,best)>.00001){l[end]={...best};changes++;}
+       }
+     });
+   }
+
+   // Collapse endpoint clusters into one canonical junction. Prefer an exact
+   // perimeter projection when the cluster lies on the roof boundary.
+   const refs=[];
+   state.lines.forEach((l,i)=>{refs.push({line:i,end:'a',p:l.a});refs.push({line:i,end:'b',p:l.b});});
+   const used=new Set();
+   for(let i=0;i<refs.length;i++){
+     if(used.has(i))continue;
+     const cluster=[i];used.add(i);
+     for(let j=i+1;j<refs.length;j++){
+       if(!used.has(j)&&dist(refs[i].p,refs[j].p)<=.007){cluster.push(j);used.add(j);}
+     }
+     if(cluster.length<2)continue;
+     let x=0,y=0;cluster.forEach(k=>{x+=refs[k].p.x;y+=refs[k].p.y;});
+     let target={x:x/cluster.length,y:y/cluster.length};
+     const per=projectToPerimeter(target);if(per)target=per;
+     cluster.forEach(k=>{
+       const r=refs[k],line=state.lines[r.line];
+       if(dist(line[r.end],target)>.00001){line[r.end]={...target};changes++;}
+     });
+   }
+
+   // If an intersection lands extremely close to an endpoint, make it the same
+   // exact graph node rather than creating a tiny triangular/sliver face.
+   for(let i=0;i<state.lines.length;i++)for(let j=i+1;j<state.lines.length;j++){
+     const a=state.lines[i],b=state.lines[j],h=segHit(a.a,a.b,b.a,b.b);if(!h)continue;
+     for(const ref of [[a,'a'],[a,'b'],[b,'a'],[b,'b']]){
+       if(dist(ref[0][ref[1]],h)<=.007&&dist(ref[0][ref[1]],h)>.00001){ref[0][ref[1]]={x:h.x,y:h.y};changes++;}
+     }
+   }
+   return changes;
+ };
  function splitSegmentsForGraph(){
    const segs=[];
    for(let i=0;i<state.outline.length;i++)segs.push({a:state.outline[i],b:state.outline[(i+1)%state.outline.length],type:'perimeter'});
@@ -3717,7 +3775,7 @@ async function restoreRoofSolarModel(){
  function buildPlanarFaces(){
    const pieces=splitSegmentsForGraph(),nodes=[],edges=[];
    const nodeFor=p=>{
-     let bi=-1,bd=.004;
+     let bi=-1,bd=.006;
      nodes.forEach((n,i)=>{const d=dist(n,p);if(d<bd){bd=d;bi=i}});
      if(bi>=0){nodes[bi]={x:(nodes[bi].x+p.x)/2,y:(nodes[bi].y+p.y)/2};return bi;}
      nodes.push({...p});return nodes.length-1;
@@ -3744,9 +3802,15 @@ async function restoreRoofSolarModel(){
        if(u===a&&v===first.to)break;
      }
      if(cyc.length<3)continue;
-     const poly=cyc.map(i=>nodes[i]),area=polygonArea(poly),cent={x:poly.reduce((s,p)=>s+p.x,0)/poly.length,y:poly.reduce((s,p)=>s+p.y,0)/poly.length};
-     if(Math.abs(area)<.00015||!pointInPoly(cent,state.outline))continue;
-     faces.push({ids:area>0?cyc:[...cyc].reverse(),area:Math.abs(area)});
+     const poly=cyc.map(i=>nodes[i]),area=polygonArea(poly),absArea=Math.abs(area),cent={x:poly.reduce((s,p)=>s+p.x,0)/poly.length,y:poly.reduce((s,p)=>s+p.y,0)/poly.length};
+     if(!pointInPoly(cent,state.outline))continue;
+     const edgeLens=poly.map((p,i)=>dist(p,poly[(i+1)%poly.length])),perim=edgeLens.reduce((s,v)=>s+v,0),compactness=perim>0?4*Math.PI*absArea/(perim*perim):0;
+     // Reject only graph artifacts: microscopic area, ultra-short-edge slivers,
+     // or needle-like faces. Legitimate small roof planes remain allowed.
+     const physicalAreaFt2=absArea*Math.pow(metersPerNorm()*FT_PER_M,2);
+     const shortestEdgeFt=Math.min(...edgeLens)*metersPerNorm()*FT_PER_M;
+     if(absArea<.00008||physicalAreaFt2<3||((physicalAreaFt2<18||shortestEdgeFt<.65)&&compactness<.055))continue;
+     faces.push({ids:area>0?cyc:[...cyc].reverse(),area:absArea,compactness,physicalAreaFt2});
    }
    const uniq=new Map();
    faces.forEach(f=>{
@@ -3769,11 +3833,15 @@ async function restoreRoofSolarModel(){
    // Snap every structural endpoint to a real roof anchor. This includes corners,
    // perimeter edges, line endpoints, line interiors and line intersections.
    state.lines=state.lines.map((l,i)=>({...l,a:snapPoint(l.a,i),b:snapPoint(l.b,i)})).filter(l=>dist(l.a,l.b)>.004);
+   const cleanupBefore=cleanStructuralTopology();
 
    // A real roof facet cannot be created from a floating structural segment.
    // Every end of every ridge/hip/valley/transition must terminate on the roof
    // perimeter or another structural line.
-   const assist=assistCompleteRoofGraph(),invalid=assist.remaining;
+   const assist=assistCompleteRoofGraph();
+   const cleanupAfter=cleanStructuralTopology();
+   state.lines=state.lines.map((l,i)=>({...l,a:snapPoint(l.a,i),b:snapPoint(l.b,i)})).filter(l=>dist(l.a,l.b)>.004);
+   const invalid=validateStructuralLines();
    if(invalid.length){
      state.facets=[];
      if(badge)badge.textContent='Needs review';
@@ -3810,7 +3878,7 @@ async function restoreRoofSolarModel(){
    const table=$('#manual-roof-facet-table');
    if(table)table.innerHTML='<table><thead><tr><th>Facet</th><th>Pitch</th><th>Plan ft²</th><th>Sloped ft²</th></tr></thead><tbody>'+state.facets.map(f=>'<tr><td>F'+f.id+'</td><td><select data-manual-facet-pitch="'+f.id+'">'+[2,3,4,5,6,7,8,9,10,11,12,14,16,18].map(p=>'<option value="'+p+'"'+(p===f.pitch?' selected':'')+'>'+p+'/12</option>').join('')+'</select></td><td>'+Math.round(f.planM2*SQFT_PER_M2)+'</td><td>'+Math.round(f.slopedM2*SQFT_PER_M2)+'</td></tr>').join('')+'</tbody></table>';
    if(badge)badge.textContent=state.facets.length+' facets';
-   if(status)status.textContent='Roof geometry built ✓ · '+state.facets.length+' connected closed facet'+(state.facets.length===1?'':'s')+(assist.extended?' · '+assist.extended+' endpoint'+(assist.extended===1?'':'s')+' auto-connected':'')+(assist.addedBreaks?' · '+assist.addedBreaks+' elevation break'+(assist.addedBreaks===1?'':'s')+' added from DSM':'')+'. DSM is assisting topology and pitch without becoming report facets.';
+   if(status)status.textContent='Roof geometry built ✓ · '+state.facets.length+' connected closed facet'+(state.facets.length===1?'':'s')+(assist.extended?' · '+assist.extended+' endpoint'+(assist.extended===1?'':'s')+' auto-connected':'')+(assist.addedBreaks?' · '+assist.addedBreaks+' elevation break'+(assist.addedBreaks===1?'':'s')+' added from DSM':'')+((cleanupBefore+cleanupAfter)?' · '+(cleanupBefore+cleanupAfter)+' junction adjustment'+((cleanupBefore+cleanupAfter)===1?'':'s')+' cleaned':'')+'. DSM is assisting topology and pitch without becoming report facets.';
    generateManualReport(graph);
    renderManualRoof();save();
  }
@@ -3842,9 +3910,9 @@ async function restoreRoofSolarModel(){
    const svgOpen=()=>'<svg viewBox="'+minX+' '+minY+' '+viewW+' '+viewH+'" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto;max-height:760px;background:#fff;border:1px solid #dbe2ea;border-radius:12px"><rect x="'+minX+'" y="'+minY+'" width="'+viewW+'" height="'+viewH+'" fill="#fff"/>';
    const polygonSvg=(f,i,mode)=>{
      const fill=['#e8eef5','#dbe7f0','#e6e2f3','#e3efe7','#f2e8dc','#e0ebeb'][i%6],cx=f.poly.reduce((s,p)=>s+p.x,0)/f.poly.length*1000,cy=f.poly.reduce((s,p)=>s+p.y,0)/f.poly.length*1000;
-     const label=mode==='pitch'?(f.pitch+'/12'):mode==='area'?(Math.round(f.slopedM2*SQFT_PER_M2)+' ft²'):('F'+f.id);
+     const label=mode==='pitch'?(f.pitch+'/12'):mode==='area'?(Math.round(f.slopedM2*SQFT_PER_M2)+' ft²'):('F'+f.id),areaFt2=f.planM2*SQFT_PER_M2;
      return '<polygon points="'+f.poly.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="'+fill+'" stroke="#94a3b8" stroke-width="2.5" vector-effect="non-scaling-stroke"/>'+
-       '<text x="'+cx+'" y="'+cy+'" text-anchor="middle" font-size="'+(22*labelScale)+'" font-weight="700" fill="#111827" stroke="#fff" stroke-width="4" paint-order="stroke">'+label+'</text>';
+       (areaFt2>=28?'<text x="'+cx+'" y="'+cy+'" text-anchor="middle" font-size="'+(22*labelScale)+'" font-weight="700" fill="#111827" stroke="#fff" stroke-width="4" paint-order="stroke">'+label+'</text>':'');
    };
    const outlinesSvg=()=>allSectionOutlines.map((poly,i)=>'<polygon points="'+poly.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="none" stroke="'+(i?'#0891b2':'#111827')+'" stroke-width="5" vector-effect="non-scaling-stroke"/>').join('');
    const lineName=t=>t==='elevation_break'?'Transition':t.charAt(0).toUpperCase()+t.slice(1);
@@ -3854,12 +3922,12 @@ async function restoreRoofSolarModel(){
    ext.segments.forEach(seg=>{
      const ax=seg.a.x*1000,ay=seg.a.y*1000,bx=seg.b.x*1000,by=seg.b.y*1000,mx=(ax+bx)/2,my=(ay+by)/2;
      measureSvg+='<line x1="'+ax+'" y1="'+ay+'" x2="'+bx+'" y2="'+by+'" stroke="'+colors[seg.type]+'" stroke-width="4" vector-effect="non-scaling-stroke"/>'+
-       '<text x="'+mx+'" y="'+(my-6)+'" text-anchor="middle" font-size="'+(13*labelScale)+'" font-weight="700" fill="#111827" stroke="#fff" stroke-width="4" paint-order="stroke">'+Math.round(seg.lengthFt*10)/10+"'"+'</text>';
+       (seg.lengthFt>=3?'<text x="'+mx+'" y="'+(my-6)+'" text-anchor="middle" font-size="'+(13*labelScale)+'" font-weight="700" fill="#111827" stroke="#fff" stroke-width="4" paint-order="stroke">'+Math.round(seg.lengthFt*10)/10+"'"+'</text>':'');
    });
    state.lines.forEach(l=>{
      const ax=l.a.x*1000,ay=l.a.y*1000,bx=l.b.x*1000,by=l.b.y*1000,mx=(ax+bx)/2,my=(ay+by)/2,len=lineLengthFt(l);
      measureSvg+='<line x1="'+ax+'" y1="'+ay+'" x2="'+bx+'" y2="'+by+'" stroke="'+colors[l.type]+'" stroke-width="5" '+(l.type==='elevation_break'?'stroke-dasharray="14 9" ':'')+'vector-effect="non-scaling-stroke"/>'+
-       '<text x="'+mx+'" y="'+(my-7)+'" text-anchor="middle" font-size="'+(13*labelScale)+'" font-weight="700" fill="#111827" stroke="#fff" stroke-width="4" paint-order="stroke">'+Math.round(len*10)/10+"'"+'</text>';
+       (len>=3?'<text x="'+mx+'" y="'+(my-7)+'" text-anchor="middle" font-size="'+(13*labelScale)+'" font-weight="700" fill="#111827" stroke="#fff" stroke-width="4" paint-order="stroke">'+Math.round(len*10)/10+"'"+'</text>':'');
    });
    measureSvg+='</svg>';
 
