@@ -66,7 +66,9 @@
           <button id="manual-use-auto-outline" class="secondary" type="button">Use Existing Auto Outline + Ridges</button>
           <button id="manual-auto-fit-outline" class="primary" type="button">Auto Fit to Roof</button>
           <button id="manual-draw-outline" class="primary" type="button">Draw Outline</button>
-          <button id="manual-finish-outline" class="secondary" type="button">Finish Outline</button>
+          <button id="manual-add-roof-section" class="secondary" type="button">Add Roof Section</button>
+          <button id="manual-detect-layers" class="secondary" type="button">Detect Roof Elevations</button>
+          <button id="manual-finish-outline" class="secondary" type="button">Finish Outline / Section</button>
           <button id="manual-edit-outline" class="secondary" type="button">Edit Points</button>
           <button id="manual-delete-vertex" class="secondary" type="button">Delete Vertex</button>
           <button id="manual-rotate-left" class="secondary" type="button">Rotate −1°</button>
@@ -87,6 +89,7 @@
           <button id="manual-clear-outline" class="secondary" type="button">Clear Outline</button>
         </div>
         <p id="manual-roof-outline-status" class="muted">Load a property to begin.</p>
+        <div id="manual-roof-layer-summary" class="muted" style="margin-top:8px"></div>
       </div>
 
       <div id="manual-roof-lines-card" class="card" hidden style="margin-top:12px">
@@ -123,6 +126,7 @@
           <div class="actions"><button id="manual-roof-recalculate" class="secondary" type="button">Recalculate</button><button id="manual-roof-print" class="primary" type="button">Print / Save PDF</button></div>
         </div>
         <div id="manual-roof-report"></div>
+        <div id="manual-roof-materials" style="margin-top:18px"></div>
       </div>
     </section>
 
