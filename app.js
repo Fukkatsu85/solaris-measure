@@ -3210,7 +3210,12 @@ async function restoreRoofSolarModel(){
  const nearestEndpoint=p=>{
    let best=null,bd=.022;state.lines.forEach((l,i)=>['a','b'].forEach(end=>{const d=dist(p,l[end]);if(d<bd){bd=d;best={line:i,end}}}));return best;
  };
- const metersPerNorm=()=>Math.max(1,Number(state.property?.cropHalfMeters||42)*2);
+ const metersPerNorm=()=>{
+   // cropHalfMeters is an EPSG:3857 distance; convert projected map meters back
+   // to approximate local ground meters for roof length/area calculations.
+   const lat=Number(state.property?.lat||0),groundScale=Math.max(.2,Math.cos(lat*Math.PI/180));
+   return Math.max(1,Number(state.property?.cropHalfMeters||42)*2*groundScale);
+ };
  const normLengthM=(a,b)=>dist(a,b)*metersPerNorm();
  const pitchFactor=(pitch,type)=>{
    const r=Math.atan(Number(pitch||0)/12);
@@ -3275,9 +3280,17 @@ async function restoreRoofSolarModel(){
      const r=await fetch('/api/roof-report?projectId='+encodeURIComponent(projectId),{cache:'no-store'}),d=await r.json().catch(()=>({}));
      if(!r.ok||!d?.solarModel?.outline?.length)throw new Error('No existing processed outline found for this address.');
      const half=Number(state.property.cropHalfMeters||42),lat0=Number(state.property.lat),lng0=Number(state.property.lng),cos=Math.max(.2,Math.cos(lat0*Math.PI/180));
+     // The MnGeo WMS image is cropped in EPSG:3857 projected meters. Normalize
+     // saved lat/lng geometry in the exact same projection so the overlay scale
+     // matches the aerial image instead of shrinking by cos(latitude).
+     const mercator=(lat,lng)=>{
+       const R=6378137,clampedLat=Math.max(-85.05112878,Math.min(85.05112878,Number(lat)));
+       return {x:R*Number(lng)*Math.PI/180,y:R*Math.log(Math.tan(Math.PI/4+clampedLat*Math.PI/360))};
+     };
+     const center3857=mercator(lat0,lng0);
      const toNorm=p=>{
-       const east=(Number(p.lng)-lng0)*111320*cos,north=(Number(p.lat)-lat0)*111320;
-       return {x:clamp(.5+east/(half*2)),y:clamp(.5-north/(half*2))};
+       const q=mercator(Number(p.lat),Number(p.lng));
+       return {x:clamp(.5+(q.x-center3857.x)/(half*2)),y:clamp(.5-(q.y-center3857.y)/(half*2))};
      };
      const dominantAxis=(items,angleOf,weightOf)=>{
        let sx=0,sy=0,total=0;
@@ -3377,7 +3390,7 @@ async function restoreRoofSolarModel(){
  function applyOutlineScaleAbsolute(scale,recordUndo=true){applyAutoOutlineTransform(scale,state.outlineRotation,recordUndo);}
  function applyOutlineRotationAbsolute(rotation,recordUndo=true){applyAutoOutlineTransform(state.outlineScale,rotation,recordUndo);}
  function scaleOutline(factor){
-   const target=Math.max(.85,Math.min(1.30,Number(state.outlineScale||1)*factor));
+   const target=Math.max(.70,Math.min(1.80,Number(state.outlineScale||1)*factor));
    applyOutlineScaleAbsolute(target,true);
  }
  function resetAutoOutline(){
