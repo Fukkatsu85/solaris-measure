@@ -618,9 +618,13 @@ async function runPixelGeometryWorker(){
 
 function setMeasureTab(tab){
  const siding=document.querySelector('#siding-tool'),roof=document.querySelector('#roof-tool'),sb=document.querySelector('#tab-siding'),rb=document.querySelector('#tab-roof');
- const isRoof=tab==='roof';if(siding)siding.hidden=isRoof;if(roof)roof.hidden=!isRoof;
- if(sb)sb.className=isRoof?'secondary':'primary';if(rb)rb.className=isRoof?'primary':'secondary';
- localStorage.setItem('solarisMeasureTab',isRoof?'roof':'siding');window.scrollTo({top:0,behavior:'smooth'});
+ const isRoof=tab==='roof';
+ if(siding){siding.hidden=isRoof;if(isRoof)siding.setAttribute('hidden','');else siding.removeAttribute('hidden');}
+ if(roof){roof.hidden=!isRoof;if(isRoof)roof.removeAttribute('hidden');else roof.setAttribute('hidden','');}
+ if(sb){sb.className=isRoof?'secondary':'primary';sb.setAttribute('aria-selected',String(!isRoof));}
+ if(rb){rb.className=isRoof?'primary':'secondary';rb.setAttribute('aria-selected',String(isRoof));}
+ localStorage.setItem('solarisMeasureTab',isRoof?'roof':'siding');
+ if(isRoof)requestAnimationFrame(()=>roof?.scrollIntoView({behavior:'smooth',block:'start'}));
 }
 document.querySelector('#tab-siding')?.addEventListener('click',()=>setMeasureTab('siding'));
 document.querySelector('#tab-roof')?.addEventListener('click',()=>setMeasureTab('roof'));
@@ -1130,7 +1134,15 @@ document.addEventListener('change',e=>{
 
 async function openRoofGeometryWorkspace(){
  const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null');
- const project=saved||roofLocatedProperty;if(!project?.address)return;
+ const savedUsable=saved?.address&&Number.isFinite(Number(saved?.lat))&&Number.isFinite(Number(saved?.lng));
+ const liveUsable=roofLocatedProperty?.address&&Number.isFinite(Number(roofLocatedProperty?.lat))&&Number.isFinite(Number(roofLocatedProperty?.lng));
+ const project=savedUsable?saved:(liveUsable?roofLocatedProperty:null);
+ if(!project){
+   const state=document.querySelector('#roof-state');
+   if(state)state.textContent='Choose a property and click Use This Location before starting the roof measurement.';
+   document.querySelector('#roof-address')?.scrollIntoView({behavior:'smooth',block:'center'});
+   return;
+ }
  const ws=document.querySelector('#roof-geometry-workspace'),map=document.querySelector('#roof-workspace-map'),title=document.querySelector('#roof-workspace-address');
  if(title)title.textContent=project.address;
  if(ws)ws.hidden=false;
@@ -1183,6 +1195,12 @@ async function openRoofGeometryWorkspace(){
  ws?.scrollIntoView({behavior:'smooth',block:'start'});
 }
 document.querySelector('#start-roof-geometry')?.addEventListener('click',openRoofGeometryWorkspace);
+document.addEventListener('click',e=>{
+ const id=e.target?.closest?.('button')?.id;
+ if(id==='tab-roof'){e.preventDefault();setMeasureTab('roof');}
+ if(id==='tab-siding'){e.preventDefault();setMeasureTab('siding');}
+ if(id==='start-roof-geometry'){e.preventDefault();openRoofGeometryWorkspace();}
+});
 document.querySelector('#roof-geometry')?.addEventListener('click',openRoofGeometryWorkspace);
 document.querySelector('#roof-outline-tool')?.addEventListener('click',()=>{
  const s=document.querySelector('#roof-workspace-status');if(s)s.textContent='Roof Outline selected. Interactive tracing is the next tool being connected.';
