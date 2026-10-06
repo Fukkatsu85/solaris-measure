@@ -3190,7 +3190,7 @@ async function restoreRoofSolarModel(){
    return {x:clamp((e.clientX-r.left)/r.width),y:clamp((e.clientY-r.top)/r.height)};
  };
  const snapPoint=(p,excludeLine=-1)=>{
-   const threshold=.018,candidates=[];
+   const threshold=.010,candidates=[];
    state.outline.forEach((q,i)=>candidates.push({p:q,d:dist(p,q),kind:'outline',i}));
    state.lines.forEach((l,i)=>{
      if(i===excludeLine)return;
@@ -3205,10 +3205,10 @@ async function restoreRoofSolarModel(){
    return candidates[0]&&candidates[0].d<=threshold?{...candidates[0].p}:p;
  };
  const nearestLineIndex=p=>{
-   let best=-1,bd=.022;state.lines.forEach((l,i)=>{const d=pointSeg(p,l.a,l.b).distance;if(d<bd){bd=d;best=i}});return best;
+   let best=-1,bd=.012;state.lines.forEach((l,i)=>{const d=pointSeg(p,l.a,l.b).distance;if(d<bd){bd=d;best=i}});return best;
  };
  const nearestEndpoint=p=>{
-   let best=null,bd=.022;state.lines.forEach((l,i)=>['a','b'].forEach(end=>{const d=dist(p,l[end]);if(d<bd){bd=d;best={line:i,end}}}));return best;
+   let best=null,bd=.010;state.lines.forEach((l,i)=>['a','b'].forEach(end=>{const d=dist(p,l[end]);if(d<bd){bd=d;best={line:i,end}}}));return best;
  };
  const metersPerNorm=()=>{
    // cropHalfMeters is an EPSG:3857 distance; convert projected map meters back
@@ -3230,11 +3230,11 @@ async function restoreRoofSolarModel(){
    let out='';
    if(state.outline.length){
      out+='<polygon points="'+state.outline.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="rgba(255,255,255,.10)" stroke="#facc15" stroke-width="6" vector-effect="non-scaling-stroke"/>';
-     state.outline.forEach((p,i)=>out+='<circle data-outline-point="'+i+'" cx="'+(p.x*1000)+'" cy="'+(p.y*1000)+'" r="6" fill="#fff" stroke="#111" stroke-width="2.5" vector-effect="non-scaling-stroke"/>');
+     state.outline.forEach((p,i)=>out+='<circle data-outline-point="'+i+'" cx="'+(p.x*1000)+'" cy="'+(p.y*1000)+'" r="3.8" fill="#fff" stroke="#111" stroke-width="2" vector-effect="non-scaling-stroke"/>');
    }
    state.lines.forEach((l,i)=>{
      out+='<line data-manual-line="'+i+'" x1="'+(l.a.x*1000)+'" y1="'+(l.a.y*1000)+'" x2="'+(l.b.x*1000)+'" y2="'+(l.b.y*1000)+'" stroke="'+(colors[l.type]||'#111')+'" stroke-width="7" vector-effect="non-scaling-stroke"/>';
-     out+='<circle data-line-end="'+i+':a" cx="'+(l.a.x*1000)+'" cy="'+(l.a.y*1000)+'" r="5.5" fill="#fff" stroke="'+(colors[l.type]||'#111')+'" stroke-width="2.5"/>';
+     out+='<circle data-line-end="'+i+':a" cx="'+(l.a.x*1000)+'" cy="'+(l.a.y*1000)+'" r="3.8" fill="#fff" stroke="'+(colors[l.type]||'#111')+'" stroke-width="2"/>';
      out+='<circle data-line-end="'+i+':b" cx="'+(l.b.x*1000)+'" cy="'+(l.b.y*1000)+'" r="5.5" fill="#fff" stroke="'+(colors[l.type]||'#111')+'" stroke-width="2.5"/>';
    });
    if(state.pending)out+='<circle cx="'+(state.pending.x*1000)+'" cy="'+(state.pending.y*1000)+'" r="12" fill="#f59e0b" stroke="#111" stroke-width="4"/>';
@@ -3613,14 +3613,25 @@ async function restoreRoofSolarModel(){
    },0);
    const ridge=lineTotal('ridge'),hip=lineTotal('hip'),valley=lineTotal('valley'),ext=exteriorTotals(),eave=ext.eaveM*FT_PER_M,rake=ext.rakeM*FT_PER_M;
    const colors={ridge:'#16a34a',hip:'#2563eb',valley:'#dc2626'};
-   let svg='<svg viewBox="0 0 1000 1000" style="width:100%;max-height:650px;background:#fff;border:1px solid #dbe2ea;border-radius:12px"><rect width="1000" height="1000" fill="#fff"/>';
+   const reportPoints=[
+     ...state.outline,
+     ...state.lines.flatMap(l=>[l.a,l.b]),
+     ...state.facets.flatMap(f=>f.poly||[])
+   ];
+   let minX=Math.min(...reportPoints.map(p=>p.x))*1000,maxX=Math.max(...reportPoints.map(p=>p.x))*1000;
+   let minY=Math.min(...reportPoints.map(p=>p.y))*1000,maxY=Math.max(...reportPoints.map(p=>p.y))*1000;
+   const rawW=Math.max(1,maxX-minX),rawH=Math.max(1,maxY-minY),pad=Math.max(35,Math.max(rawW,rawH)*.12);
+   minX-=pad;minY-=pad;maxX+=pad;maxY+=pad;
+   const viewW=maxX-minX,viewH=maxY-minY;
+   let svg='<svg viewBox="'+minX+' '+minY+' '+viewW+' '+viewH+'" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto;max-height:720px;background:#fff;border:1px solid #dbe2ea;border-radius:12px"><rect x="'+minX+'" y="'+minY+'" width="'+viewW+'" height="'+viewH+'" fill="#fff"/>';
+   const labelScale=Math.max(.45,Math.min(1.15,Math.max(rawW,rawH)/360));
    state.facets.forEach((f,i)=>{
-     svg+='<polygon points="'+f.poly.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="'+['#e8eef5','#dbe7f0','#e6e2f3','#e3efe7','#f2e8dc','#e0ebeb'][i%6]+'" stroke="#64748b" stroke-width="3"/>';
+     svg+='<polygon points="'+f.poly.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="'+['#e8eef5','#dbe7f0','#e6e2f3','#e3efe7','#f2e8dc','#e0ebeb'][i%6]+'" stroke="#64748b" stroke-width="'+(3*labelScale)+'" vector-effect="non-scaling-stroke"/>';
      const cx=f.poly.reduce((s,p)=>s+p.x,0)/f.poly.length*1000,cy=f.poly.reduce((s,p)=>s+p.y,0)/f.poly.length*1000;
-     svg+='<text x="'+cx+'" y="'+cy+'" text-anchor="middle" font-size="26" font-weight="700">F'+f.id+'</text><text x="'+cx+'" y="'+(cy+30)+'" text-anchor="middle" font-size="18">'+f.pitch+'/12 · '+Math.round(f.slopedM2*SQFT_PER_M2)+' ft²</text>';
+     svg+='<text x="'+cx+'" y="'+cy+'" text-anchor="middle" font-size="'+(22*labelScale)+'" font-weight="700">F'+f.id+'</text><text x="'+cx+'" y="'+(cy+24*labelScale)+'" text-anchor="middle" font-size="'+(15*labelScale)+'">'+f.pitch+'/12 · '+Math.round(f.slopedM2*SQFT_PER_M2)+' ft²</text>';
    });
-   svg+='<polygon points="'+state.outline.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="none" stroke="#111" stroke-width="8"/>';
-   state.lines.forEach(l=>svg+='<line x1="'+(l.a.x*1000)+'" y1="'+(l.a.y*1000)+'" x2="'+(l.b.x*1000)+'" y2="'+(l.b.y*1000)+'" stroke="'+colors[l.type]+'" stroke-width="8"/>');
+   svg+='<polygon points="'+state.outline.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="none" stroke="#111" stroke-width="5" vector-effect="non-scaling-stroke"/>';
+   state.lines.forEach(l=>svg+='<line x1="'+(l.a.x*1000)+'" y1="'+(l.a.y*1000)+'" x2="'+(l.b.x*1000)+'" y2="'+(l.b.y*1000)+'" stroke="'+colors[l.type]+'" stroke-width="5" vector-effect="non-scaling-stroke"/>');
    svg+='</svg>';
    const rows=state.facets.map(f=>'<tr><td>F'+f.id+'</td><td>'+f.pitch+'/12</td><td>'+Math.round(f.planM2*SQFT_PER_M2)+'</td><td>'+Math.round(f.slopedM2*SQFT_PER_M2)+'</td></tr>').join('');
    const report=$('#manual-roof-report');
@@ -3741,7 +3752,7 @@ async function restoreRoofSolarModel(){
      pushUndo();state.outline.push(p);renderManualRoof();return;
    }
    if(state.mode==='delete-vertex'){
-     let bi=-1,bd=.025;state.outline.forEach((q,i)=>{const d=dist(p,q);if(d<bd){bd=d;bi=i}});
+     let bi=-1,bd=.009;state.outline.forEach((q,i)=>{const d=dist(p,q);if(d<bd){bd=d;bi=i}});
      if(bi<0)return;
      const status=$('#manual-roof-outline-status');
      if(state.outline.length<=3){
@@ -3762,7 +3773,7 @@ async function restoreRoofSolarModel(){
      renderManualRoof();return;
    }
    if(state.mode==='edit-outline'){
-     let bi=-1,bd=.025;state.outline.forEach((q,i)=>{const d=dist(p,q);if(d<bd){bd=d;bi=i}});
+     let bi=-1,bd=.009;state.outline.forEach((q,i)=>{const d=dist(p,q);if(d<bd){bd=d;bi=i}});
      if(bi>=0){pushUndo();state.drag={kind:'outline',index:bi};overlay.setPointerCapture(e.pointerId);}return;
    }
    if(state.tool==='delete'){
