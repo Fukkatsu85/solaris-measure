@@ -1,9 +1,8 @@
 async function googleJson(url, key){
   const cleanKey=String(key||"").trim().replace(/^["']|["']$/g,"");
   const g=new URL(url);
-  g.searchParams.set("X-Goog-Api-Key",cleanKey);
   g.searchParams.set("key",cleanKey);
-  const r=await fetch(g.toString(),{headers:{"X-Goog-Api-Key":cleanKey}});
+  const r=await fetch(g.toString(),{headers:{"x-goog-api-key":cleanKey}});
   const text=await r.text();
   let data={};try{data=JSON.parse(text)}catch{}
   if(!r.ok){
