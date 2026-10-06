@@ -1,5 +1,7 @@
 async function googleJson(url, key){
-  const r=await fetch(url,{headers:{"X-Goog-Api-Key":key}});
+  const g=new URL(url);
+  g.searchParams.set("X-Goog-Api-Key",key);
+  const r=await fetch(g.toString());
   const text=await r.text();
   let data={};try{data=JSON.parse(text)}catch{}
   if(!r.ok){
@@ -18,7 +20,7 @@ export async function onRequestGet({request,env}){
   const g=new URL(base+endpoint);
   if(videoId)g.searchParams.set("videoId",videoId);else g.searchParams.set("address",address);
   const out=await googleJson(g.toString(),key);
-  if(!out.ok)return Response.json({ok:false,status:out.status,error:out.error,notFound:out.status===404},{status:out.status===404?404:502});
+  if(!out.ok)return Response.json({ok:false,status:out.status,error:out.error,notFound:out.status===404},{status:out.status>=400&&out.status<600?out.status:502});
   const d=out.data||{},meta=d.metadata||d;
   return Response.json({
     ok:true,mode,state:d.state||meta.state||null,videoId:meta.videoId||d.videoId||videoId||null,
