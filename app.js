@@ -3219,21 +3219,21 @@ async function restoreRoofSolarModel(){
  const normLengthM=(a,b)=>dist(a,b)*metersPerNorm();
  const pitchFactor=(pitch,type)=>{
    const r=Math.atan(Number(pitch||0)/12);
-   if(type==='ridge')return 1;
+   if(type==='ridge'||type==='elevation_break')return 1;
    // Generic 45-degree hip/valley rise factor. User-entered topology controls plan length.
    const runSlope=Math.tan(r)/Math.SQRT2;
    return Math.sqrt(1+runSlope*runSlope);
  };
  function renderManualRoof(){
    const svg=$('#manual-roof-overlay');if(!svg)return;
-   const colors={ridge:'#16a34a',hip:'#2563eb',valley:'#dc2626'};
+   const colors={ridge:'#16a34a',hip:'#2563eb',valley:'#dc2626',elevation_break:'#f59e0b'};
    let out='';
    if(state.outline.length){
      out+='<polygon points="'+state.outline.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="rgba(255,255,255,.10)" stroke="#facc15" stroke-width="6" vector-effect="non-scaling-stroke"/>';
      state.outline.forEach((p,i)=>out+='<circle data-outline-point="'+i+'" cx="'+(p.x*1000)+'" cy="'+(p.y*1000)+'" r="3.8" fill="#fff" stroke="#111" stroke-width="2" vector-effect="non-scaling-stroke"/>');
    }
    state.lines.forEach((l,i)=>{
-     out+='<line data-manual-line="'+i+'" x1="'+(l.a.x*1000)+'" y1="'+(l.a.y*1000)+'" x2="'+(l.b.x*1000)+'" y2="'+(l.b.y*1000)+'" stroke="'+(colors[l.type]||'#111')+'" stroke-width="7" vector-effect="non-scaling-stroke"/>';
+     out+='<line data-manual-line="'+i+'" x1="'+(l.a.x*1000)+'" y1="'+(l.a.y*1000)+'" x2="'+(l.b.x*1000)+'" y2="'+(l.b.y*1000)+'" stroke="'+(colors[l.type]||'#111')+'" stroke-width="7" '+(l.type==='elevation_break'?'stroke-dasharray="14 9" ':'')+'vector-effect="non-scaling-stroke"/>';
      out+='<circle data-line-end="'+i+':a" cx="'+(l.a.x*1000)+'" cy="'+(l.a.y*1000)+'" r="3.8" fill="#fff" stroke="'+(colors[l.type]||'#111')+'" stroke-width="2"/>';
      out+='<circle data-line-end="'+i+':b" cx="'+(l.b.x*1000)+'" cy="'+(l.b.y*1000)+'" r="5.5" fill="#fff" stroke="'+(colors[l.type]||'#111')+'" stroke-width="2.5"/>';
    });
@@ -3354,19 +3354,20 @@ async function restoreRoofSolarModel(){
      pushUndo();
      state.autoOutlineBase=d.solarModel.outline.map(toNorm);
      state.outline=state.autoOutlineBase.map(p=>({...p}));
-     const detectedRidges=(d.solarModel?.model?.roofLines||[])
-       .filter(l=>l?.type==='ridge'&&l?.a&&l?.b)
+     const detectedRoofLines=(d.solarModel?.model?.roofLines||[])
+       .filter(l=>['ridge','elevation_break'].includes(l?.type)&&l?.a&&l?.b)
        .map(l=>{
          const a=toNorm(l.a),b=toNorm(l.b);
-         return {type:'ridge',a:{...a},b:{...b},autoDetected:true,autoBaseA:{...a},autoBaseB:{...b},confidence:Number(l.creaseStrength||l.traceSupport||0)};
+         return {type:l.type,a:{...a},b:{...b},autoDetected:true,autoBaseA:{...a},autoBaseB:{...b},confidence:Number(l.creaseStrength||l.traceSupport||l.elevationSeparationMeters||0)};
        });
-     state.lines=detectedRidges;
+     state.lines=detectedRoofLines;
      state.outlineScale=1;state.outlineRotation=0;state.outlineOffsetX=0;state.outlineOffsetY=0;
      if(autoRotation)applyAutoOutlineTransform(1,autoRotation,false);
      const scaleSlider=$('#manual-outline-scale'),scaleLabel=$('#manual-outline-scale-label'),rotSlider=$('#manual-outline-rotation'),rotLabel=$('#manual-outline-rotation-label');
      if(scaleSlider)scaleSlider.value='100';if(scaleLabel)scaleLabel.textContent='100%';if(rotSlider)rotSlider.value=String(autoRotation);if(rotLabel)rotLabel.textContent=(autoRotation>0?'+':'')+autoRotation.toFixed(1).replace('.0','')+'°';
      state.facets=[];state.facetPitches={};
-     const ridgeNote=detectedRidges.length?' · '+detectedRidges.length+' detected ridge'+(detectedRidges.length===1?'':'s')+' loaded as editable lines.':' · no reliable saved ridge candidate was available.';
+     const ridgeCount=detectedRoofLines.filter(l=>l.type==='ridge').length,breakCount=detectedRoofLines.filter(l=>l.type==='elevation_break').length;
+     const ridgeNote=(ridgeCount||breakCount)?' · '+ridgeCount+' ridge'+(ridgeCount===1?'':'s')+(breakCount?' + '+breakCount+' elevation break'+(breakCount===1?'':'s'):'')+' loaded as editable lines.':' · no reliable saved ridge/elevation-break candidate was available.';
      if(status)status.textContent=(autoRotation
        ?'Existing Solaris outline loaded and auto-aligned '+(autoRotation>0?'+':'')+autoRotation.toFixed(1)+'° from the saved roof-plane orientation.'
        :'Existing Solaris outline loaded with saved orientation.')+ridgeNote+' Use Move / Select to drag ridge endpoints or Delete to remove a bad ridge.';
@@ -3537,7 +3538,7 @@ async function restoreRoofSolarModel(){
      const a=nodeFor(s.a),b=nodeFor(s.b);if(a===b)return;
      const key=a<b?a+'|'+b:b+'|'+a;
      if(!map.has(key))map.set(key,{a,b,type:s.type});
-     else if(['ridge','hip','valley'].includes(s.type))map.get(key).type=s.type;
+     else if(['ridge','hip','valley','elevation_break'].includes(s.type))map.get(key).type=s.type;
    });
    edges.push(...map.values());
    const adj=Array.from({length:nodes.length},()=>[]);
@@ -3611,8 +3612,8 @@ async function restoreRoofSolarModel(){
    const lineTotal=type=>state.lines.filter(l=>l.type===type).reduce((s,l)=>{
      const pitch=defaultPitch,m=normLengthM(l.a,l.b)*pitchFactor(pitch,type);return s+m*FT_PER_M;
    },0);
-   const ridge=lineTotal('ridge'),hip=lineTotal('hip'),valley=lineTotal('valley'),ext=exteriorTotals(),eave=ext.eaveM*FT_PER_M,rake=ext.rakeM*FT_PER_M;
-   const colors={ridge:'#16a34a',hip:'#2563eb',valley:'#dc2626'};
+   const ridge=lineTotal('ridge'),hip=lineTotal('hip'),valley=lineTotal('valley'),elevationBreak=lineTotal('elevation_break'),ext=exteriorTotals(),eave=ext.eaveM*FT_PER_M,rake=ext.rakeM*FT_PER_M;
+   const colors={ridge:'#16a34a',hip:'#2563eb',valley:'#dc2626',elevation_break:'#f59e0b'};
    const reportPoints=[
      ...state.outline,
      ...state.lines.flatMap(l=>[l.a,l.b]),
@@ -3631,7 +3632,7 @@ async function restoreRoofSolarModel(){
      svg+='<text x="'+cx+'" y="'+cy+'" text-anchor="middle" font-size="'+(22*labelScale)+'" font-weight="700">F'+f.id+'</text><text x="'+cx+'" y="'+(cy+24*labelScale)+'" text-anchor="middle" font-size="'+(15*labelScale)+'">'+f.pitch+'/12 · '+Math.round(f.slopedM2*SQFT_PER_M2)+' ft²</text>';
    });
    svg+='<polygon points="'+state.outline.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="none" stroke="#111" stroke-width="5" vector-effect="non-scaling-stroke"/>';
-   state.lines.forEach(l=>svg+='<line x1="'+(l.a.x*1000)+'" y1="'+(l.a.y*1000)+'" x2="'+(l.b.x*1000)+'" y2="'+(l.b.y*1000)+'" stroke="'+colors[l.type]+'" stroke-width="5" vector-effect="non-scaling-stroke"/>');
+   state.lines.forEach(l=>svg+='<line x1="'+(l.a.x*1000)+'" y1="'+(l.a.y*1000)+'" x2="'+(l.b.x*1000)+'" y2="'+(l.b.y*1000)+'" stroke="'+colors[l.type]+'" stroke-width="5" '+(l.type==='elevation_break'?'stroke-dasharray="14 9" ':'')+'vector-effect="non-scaling-stroke"/>');
    svg+='</svg>';
    const rows=state.facets.map(f=>'<tr><td>F'+f.id+'</td><td>'+f.pitch+'/12</td><td>'+Math.round(f.planM2*SQFT_PER_M2)+'</td><td>'+Math.round(f.slopedM2*SQFT_PER_M2)+'</td></tr>').join('');
    const report=$('#manual-roof-report');
@@ -3645,7 +3646,7 @@ async function restoreRoofSolarModel(){
      '</div>'+
      '<h3 style="margin-top:18px">2D Roof Diagram</h3>'+svg+
      '<h3 style="margin-top:18px">Linear Measurements</h3><div class="table-wrap"><table><tbody>'+
-       '<tr><th>Ridge</th><td>'+ridge.toFixed(1)+' ft</td></tr><tr><th>Hip</th><td>'+hip.toFixed(1)+' ft</td></tr><tr><th>Valley</th><td>'+valley.toFixed(1)+' ft</td></tr><tr><th>Eave</th><td>'+eave.toFixed(1)+' ft</td></tr><tr><th>Rake</th><td>'+rake.toFixed(1)+' ft</td></tr>'+
+       '<tr><th>Ridge</th><td>'+ridge.toFixed(1)+' ft</td></tr><tr><th>Hip</th><td>'+hip.toFixed(1)+' ft</td></tr><tr><th>Valley</th><td>'+valley.toFixed(1)+' ft</td></tr><tr><th>Elevation break</th><td>'+elevationBreak.toFixed(1)+' ft</td></tr><tr><th>Eave</th><td>'+eave.toFixed(1)+' ft</td></tr><tr><th>Rake</th><td>'+rake.toFixed(1)+' ft</td></tr>'+
      '</tbody></table></div>'+
      '<h3 style="margin-top:18px">Facet Measurements</h3><div class="table-wrap"><table><thead><tr><th>Facet</th><th>Pitch</th><th>Plan ft²</th><th>Sloped ft²</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
      '<h3 style="margin-top:18px">Waste Options</h3><div class="table-wrap"><table><thead><tr><th>Waste</th><th>Area</th><th>Squares</th></tr></thead><tbody>'+
@@ -3782,7 +3783,7 @@ async function restoreRoofSolarModel(){
    if(state.tool==='select'){
      const ep=nearestEndpoint(p);if(ep){pushUndo();state.drag={kind:'line-end',...ep};overlay.setPointerCapture(e.pointerId);}return;
    }
-   if(['ridge','hip','valley'].includes(state.tool)){
+   if(['ridge','hip','valley','elevation_break'].includes(state.tool)){
      const q=snapPoint(p);
      if(!state.pending){state.pending=q;renderManualRoof();}
      else{
