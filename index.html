@@ -57,8 +57,14 @@
           <button id="manual-draw-outline" class="primary" type="button">Draw Outline</button>
           <button id="manual-finish-outline" class="secondary" type="button">Finish Outline</button>
           <button id="manual-edit-outline" class="secondary" type="button">Edit Points</button>
-          <button id="manual-expand-outline" class="secondary" type="button">Expand 2%</button>
-          <button id="manual-shrink-outline" class="secondary" type="button">Shrink 2%</button>
+          <button id="manual-expand-outline" class="secondary" type="button">Expand 5%</button>
+          <button id="manual-expand-outline-fine" class="secondary" type="button">Expand 1%</button>
+          <button id="manual-shrink-outline-fine" class="secondary" type="button">Shrink 1%</button>
+          <button id="manual-shrink-outline" class="secondary" type="button">Shrink 5%</button>
+          <label style="display:flex;gap:8px;align-items:center">Size
+            <input id="manual-outline-scale" type="range" min="85" max="130" step="1" value="100">
+            <span id="manual-outline-scale-label">100%</span>
+          </label>
           <button id="manual-reset-auto-outline" class="secondary" type="button">Reset Auto Outline</button>
           <button id="manual-clear-outline" class="secondary" type="button">Clear Outline</button>
         </div>
@@ -418,6 +424,6 @@
     </div>
   </main>
 
-  <script src="/app.js?v=20261006-manual-roof5"></script>
+  <script src="/app.js?v=20261006-manual-roof6"></script>
 </body>
 </html>
