@@ -836,16 +836,40 @@ function remoteViewSummary(views){
  }
  return {spread:Math.max(0,360-maxGap),strong:views.filter(v=>v.distance<=35).length};
 }
-function renderRoofRemoteSnapshots(views){
+async function renderRoofRemoteSnapshots(views){
  const wrap=document.querySelector('#roof-remote-snapshots');if(!wrap)return;
  if(!views?.length){wrap.hidden=true;wrap.innerHTML='';return}
  wrap.hidden=false;
  wrap.innerHTML=views.map((v,i)=>{
-   const src='/api/roof-online-view?pano='+encodeURIComponent(v.pano)+'&heading='+encodeURIComponent(v.heading)+'&pitch=12&fov=75';
    return '<button type="button" data-remote-view-index="'+i+'" style="all:unset;cursor:pointer;display:block;border:1px solid #29445d;border-radius:10px;overflow:hidden;background:#0d1823">'+
-     '<img src="'+src+'" alt="Online roof evidence view '+(i+1)+'" loading="lazy" style="display:block;width:100%;aspect-ratio:1/1;object-fit:cover">'+
+     '<div id="roof-remote-thumb-'+i+'" style="width:100%;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;background:#101923;color:#9fb3c8;font-size:12px;text-align:center;padding:8px">Loading online view…</div>'+
      '<div style="padding:7px 9px;font-size:12px">View '+(i+1)+' · '+v.distance.toFixed(0)+' m · '+v.heading.toFixed(0)+'°</div></button>';
  }).join('');
+
+ let failures=0,firstError='';
+ await Promise.all(views.map(async(v,i)=>{
+   const box=document.querySelector('#roof-remote-thumb-'+i);if(!box)return;
+   const src='/api/roof-online-view?pano='+encodeURIComponent(v.pano)+'&heading='+encodeURIComponent(v.heading)+'&pitch=12&fov=75';
+   try{
+     const resp=await fetch(src,{cache:'no-store'});
+     if(!resp.ok){
+       const d=await resp.json().catch(()=>({}));
+       throw new Error(d.googleBody||d.error||('HTTP '+resp.status));
+     }
+     const blob=await resp.blob();
+     if(!blob.type.startsWith('image/'))throw new Error('Online provider did not return image data.');
+     const url=URL.createObjectURL(blob);
+     box.innerHTML='<img src="'+url+'" alt="Online roof evidence view '+(i+1)+'" style="display:block;width:100%;height:100%;object-fit:cover">';
+   }catch(err){
+     failures++;if(!firstError)firstError=err?.message||String(err);
+     box.innerHTML='<div style="padding:12px"><strong>Preview unavailable</strong><br><span style="opacity:.75">Click to open interactive view</span></div>';
+   }
+ }));
+ if(failures){
+   const status=document.querySelector('#roof-remote-imagery-status');
+   if(status)status.innerHTML+='<br><strong>Snapshot preview warning:</strong> '+failures+' of '+views.length+' static preview'+(failures===1?'':'s')+' could not load. Interactive panoramas still work.'+
+     (firstError?'<br><span class="muted">'+escRoof(firstError).slice(0,240)+'</span>':'');
+ }
 }
 
 async function checkRoofRemoteImagery(){
