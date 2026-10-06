@@ -947,6 +947,59 @@ document.addEventListener('click',e=>{
  }
 });
 
+let roofAerialViewState=null;
+function roofAerialDate(d){
+ if(!d?.year)return '';
+ return [d.year,String(d.month||1).padStart(2,'0'),String(d.day||1).padStart(2,'0')].join('-');
+}
+async function checkRoofAerialView(){
+ const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null')||{};
+ const badge=document.querySelector('#roof-aerial-view-badge'),status=document.querySelector('#roof-aerial-view-status'),play=document.querySelector('#play-roof-aerial-view'),video=document.querySelector('#roof-aerial-view-video');
+ if(!saved.address){if(status)status.textContent='Confirm the property address first.';return null}
+ if(badge)badge.textContent='Checking…';if(play)play.disabled=true;if(video){video.hidden=true;video.removeAttribute('src');}
+ try{
+   const r=await fetch('/api/roof-aerial-view?mode=metadata&address='+encodeURIComponent(saved.address),{cache:'no-store'});
+   const d=await r.json().catch(()=>({}));
+   if(r.status===404||d.notFound){
+     roofAerialViewState={available:false,address:saved.address};
+     if(badge)badge.textContent='Not available';
+     if(status)status.innerHTML='<strong>No existing Aerial View found.</strong> Google does not currently have an active flyover for this address.';
+     localStorage.setItem('solarisRoofAerialView',JSON.stringify(roofAerialViewState));
+     return roofAerialViewState;
+   }
+   if(!r.ok||!d.ok)throw new Error(d.error||('HTTP '+r.status));
+   roofAerialViewState={available:d.state==='ACTIVE',state:d.state,videoId:d.videoId,captureDate:d.captureDate,duration:d.duration,address:saved.address};
+   localStorage.setItem('solarisRoofAerialView',JSON.stringify(roofAerialViewState));
+   if(badge)badge.textContent=d.state==='ACTIVE'?'Available':(d.state||'Found');
+   if(status)status.innerHTML='<strong>Aerial View '+(d.state==='ACTIVE'?'available':'found')+'.</strong> '+(d.captureDate?'Capture '+roofAerialDate(d.captureDate)+' · ':'')+(d.duration?'duration '+escRoof(d.duration)+' · ':'')+'video ID '+escRoof(d.videoId||'—')+'.';
+   if(play)play.disabled=d.state!=='ACTIVE';
+   return roofAerialViewState;
+ }catch(err){
+   roofAerialViewState=null;
+   if(badge)badge.textContent='Setup needed';
+   if(status)status.textContent='Aerial View check failed: '+(err?.message||String(err));
+   return null;
+ }
+}
+async function playRoofAerialView(){
+ const state=roofAerialViewState||JSON.parse(localStorage.getItem('solarisRoofAerialView')||'null')||await checkRoofAerialView();
+ if(!state?.available||!state?.videoId)return;
+ const status=document.querySelector('#roof-aerial-view-status'),video=document.querySelector('#roof-aerial-view-video');
+ try{
+   const r=await fetch('/api/roof-aerial-view?mode=video&videoId='+encodeURIComponent(state.videoId),{cache:'no-store'});
+   const d=await r.json().catch(()=>({}));if(!r.ok||!d.ok)throw new Error(d.error||('HTTP '+r.status));
+   const uris=d.uris||{};
+   const src=uris.MP4_HIGH||uris.MP4_MEDIUM||uris.MP4_LOW||uris.mp4High||uris.mp4Medium||uris.mp4Low||Object.values(uris).find(v=>typeof v==='string'&&/^https:/.test(v));
+   if(!src)throw new Error('No playable Aerial View URI was returned.');
+   if(video){video.src=src;video.hidden=false;video.load();}
+   if(status)status.innerHTML+='<br>Flyover loaded from a short-lived Google URI. It is not stored by Solaris.';
+ }catch(err){if(status)status.innerHTML+='<br><strong>Could not load flyover:</strong> '+escRoof(err?.message||String(err));}
+}
+document.addEventListener('click',e=>{
+ if(e.target?.id==='check-roof-aerial-view')checkRoofAerialView();
+ if(e.target?.id==='play-roof-aerial-view')playRoofAerialView();
+});
+
 async function openRoofGeometryWorkspace(){
  const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null');
  const project=saved||roofLocatedProperty;if(!project?.address)return;
@@ -2176,6 +2229,12 @@ async function generateRoofReport(){
     {id:'lidarArea',label:'Independent area cross-check',pass:!lidarQualityGood||Boolean(lidarConfirmsProduction),detail:lidarQualityGood?(lidarConfirmsProduction?'LiDAR agrees':'LiDAR disagreement '+(Number.isFinite(lidarVsProductionPct)?lidarVsProductionPct.toFixed(1)+'%':'—')):'LiDAR unavailable / not quality-screened'},
     {id:'lidarTopology',label:'Independent topology cross-check',pass:!lidarQualityGood||Boolean(lidarTopologyAgrees),detail:lidarQualityGood?(lidarTopologyAgrees?'Major geometry agrees':'Needs review'):'LiDAR unavailable / not quality-screened'}
   ];
+  const aerialQa=JSON.parse(localStorage.getItem('solarisRoofAerialView')||'null');
+  const streetQa=roofRemoteImageryState||null;
+  const remoteQaRows=[
+    '<tr><th>Street-level visual QA</th><td>'+(streetQa?.views?.length?(streetQa.views.length+' online view(s) · best '+streetQa.distance.toFixed(0)+' m · '+streetQa.quality+' coverage'):'Not checked in this session')+'</td></tr>',
+    '<tr><th>Aerial flyover QA</th><td>'+(aerialQa?.available?('Available'+(aerialQa.captureDate?' · capture '+roofAerialDate(aerialQa.captureDate):'')):(aerialQa?'Checked · unavailable':'Not checked'))+'</td></tr>'
+  ].join('');
   const failedReadiness=readinessChecks.filter(x=>!x.pass);
   const orderReady=failedReadiness.length===0;
   const finalReportStatus=orderReady?'ORDER-READY':'REVIEW REQUIRED';
@@ -2236,6 +2295,7 @@ async function generateRoofReport(){
    '<div class="roof-report-head"><div><div class="roof-report-brand">SOLARIS ROOFING</div><h1>Roof Measurement Report</h1><p>'+escRoof(d.outline.address||saved.address||'')+'</p></div><div style="text-align:right"><strong>Solaris Measure</strong><br><span>Generated '+new Date().toLocaleDateString()+'</span><br><span>Hybrid DSM + LiDAR geometry</span></div></div>'+
    '<div class="roof-report-grid"><div class="roof-report-stat"><span>Plan area</span><strong>'+Math.round(plan).toLocaleString()+' ft²</strong></div><div class="roof-report-stat"><span>Sloped roof area</span><strong>'+Math.round(sloped).toLocaleString()+' ft²</strong></div><div class="roof-report-stat"><span>Roofing squares</span><strong>'+squares.toFixed(2)+'</strong></div><div class="roof-report-stat"><span>Roof perimeter</span><strong>'+perim.toFixed(1)+' ft</strong></div><div class="roof-report-stat"><span>Facets</span><strong>'+reportFacetCount+'</strong></div><div class="roof-report-stat"><span>Average pitch</span><strong>'+avgPitch.toFixed(1)+'/12</strong></div><div class="roof-report-stat"><span>Ridge</span><strong>'+(lines.ridge?lines.ridge.toFixed(1)+' ft':'Not verified')+'</strong></div><div class="roof-report-stat"><span>Valley</span><strong>'+(lines.valley?lines.valley.toFixed(1)+' ft':'Not verified')+'</strong></div></div>'+
    '<h2>Final Report Readiness</h2><div class="analysis-state"><strong>'+finalReportStatus+'</strong><br>'+(orderReady?'All deterministic production gates passed. This report is internally consistent enough for normal ordering workflow.':'Do not use for material ordering until the review items below are resolved.')+'</div><table class="roof-report-table"><tbody>'+readinessRows+'</tbody></table>'+
+   '<h2>Remote Visual QA</h2><table class="roof-report-table"><tbody>'+remoteQaRows+'</tbody></table>'+
    '<h2>2D Roof Diagram</h2><div class="roof-diagram-wrap">'+roofDiagramSvg(d)+'</div>'+
    '<h2>Facet Measurements</h2><table class="roof-report-table"><thead><tr><th>Facet</th><th>Pitch</th><th>Slope</th><th>Plan ft²</th><th>Sloped ft²</th><th>Source / fit</th></tr></thead><tbody>'+facetRows+'</tbody></table>'+
    '<h2>Linear Measurements</h2><table class="roof-report-table"><tbody><tr><th>Roof perimeter</th><td>'+perim.toFixed(1)+' ft</td></tr><tr><th>Ridge</th><td>'+(lines.ridge?lines.ridge.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Hip</th><td>'+(lines.hip?lines.hip.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Valley</th><td>'+(lines.valley?lines.valley.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Eave</th><td>'+(lines.eave?lines.eave.toFixed(1)+' ft':'Not yet verified')+'</td></tr><tr><th>Rake</th><td>'+(lines.rake?lines.rake.toFixed(1)+' ft':'Not yet verified')+'</td></tr></tbody></table>'+
