@@ -20,7 +20,83 @@
     <nav class="measure-tabs" style="display:flex;gap:10px;margin:0 0 18px;flex-wrap:wrap">
       <button id="tab-siding" class="primary" type="button">Siding / Exterior</button>
       <button id="tab-roof" class="secondary" type="button">Roof Measurement</button>
+      <button id="tab-manual-roof" class="secondary" type="button">Manual Roof</button>
     </nav>
+
+    <section id="manual-roof-tool" class="card" hidden>
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">GUIDED ROOF REPORT</div>
+          <h3>Manual Roof</h3>
+          <p class="muted">Confirm the roof outline, draw only the ridges / hips / valleys, then Solaris snaps the graph, builds facets, applies pitch and produces the report.</p>
+        </div>
+        <span id="manual-roof-status-badge" class="status">Ready</span>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <div class="eyebrow">STEP 1 · PROPERTY</div>
+        <h3>Select address</h3>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <input id="manual-roof-address" type="text" placeholder="Enter full property address" autocomplete="street-address" style="flex:1;min-width:280px;padding:12px 14px;border-radius:10px;border:1px solid #cbd5e1;font:inherit">
+          <button id="manual-roof-load" class="primary" type="button">Load Property</button>
+        </div>
+        <p id="manual-roof-property-status" class="muted">Solaris will load the best available still aerial image for the address.</p>
+      </div>
+
+      <div id="manual-roof-editor-card" class="card" hidden style="margin-top:12px">
+        <div class="card-head">
+          <div><div class="eyebrow">STEP 2 · ROOF OUTLINE</div><h3>Confirm exterior roof shape</h3><p class="muted">Use an existing Solaris outline if available, or click around the roof perimeter. Click the first point again or press Finish Outline when complete.</p></div>
+          <span id="manual-roof-outline-badge" class="status">Not confirmed</span>
+        </div>
+        <div id="manual-roof-stage" style="position:relative;aspect-ratio:1/1;max-width:900px;margin:0 auto;background:#111;border-radius:14px;overflow:hidden;touch-action:none">
+          <img id="manual-roof-image" alt="Roof aerial still" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;user-select:none;-webkit-user-drag:none">
+          <svg id="manual-roof-overlay" viewBox="0 0 1000 1000" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;cursor:crosshair"></svg>
+        </div>
+        <div class="actions" style="margin-top:12px">
+          <button id="manual-use-auto-outline" class="secondary" type="button">Use Existing Auto Outline</button>
+          <button id="manual-draw-outline" class="primary" type="button">Draw Outline</button>
+          <button id="manual-finish-outline" class="secondary" type="button">Finish Outline</button>
+          <button id="manual-edit-outline" class="secondary" type="button">Edit Points</button>
+          <button id="manual-clear-outline" class="secondary" type="button">Clear Outline</button>
+        </div>
+        <p id="manual-roof-outline-status" class="muted">Load a property to begin.</p>
+      </div>
+
+      <div id="manual-roof-lines-card" class="card" hidden style="margin-top:12px">
+        <div class="card-head">
+          <div><div class="eyebrow">STEP 3 · INTERIOR LINES</div><h3>Draw roof topology</h3><p class="muted">Choose a line type, then click the start and end point. Solaris snaps to perimeter corners, existing endpoints and nearby intersections.</p></div>
+          <span id="manual-roof-lines-badge" class="status">0 lines</span>
+        </div>
+        <div class="actions">
+          <button type="button" class="secondary" data-manual-tool="ridge">Ridge</button>
+          <button type="button" class="secondary" data-manual-tool="hip">Hip</button>
+          <button type="button" class="secondary" data-manual-tool="valley">Valley</button>
+          <button type="button" class="secondary" data-manual-tool="select">Move / Select</button>
+          <button type="button" class="secondary" data-manual-tool="delete">Delete</button>
+          <button id="manual-roof-undo" type="button" class="secondary">Undo</button>
+          <button id="manual-roof-redo" type="button" class="secondary">Redo</button>
+          <button id="manual-roof-clear-lines" type="button" class="secondary">Clear Lines</button>
+        </div>
+        <p id="manual-roof-line-status" class="muted">Select Ridge, Hip or Valley.</p>
+      </div>
+
+      <div id="manual-roof-pitch-card" class="card" hidden style="margin-top:12px">
+        <div class="card-head"><div><div class="eyebrow">STEP 4 · PITCH</div><h3>Pitch + facets</h3><p class="muted">Start with one default pitch. After Solaris builds the closed roof facets, override individual facets when needed.</p></div><span id="manual-roof-facet-badge" class="status">Not built</span></div>
+        <div style="display:flex;gap:12px;align-items:end;flex-wrap:wrap">
+          <label>Default pitch<br><select id="manual-roof-default-pitch" style="padding:10px 12px;border-radius:8px"><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option selected>8</option><option>9</option><option>10</option><option>11</option><option>12</option><option>14</option><option>16</option><option>18</option></select> /12</label>
+          <button id="manual-roof-build" class="primary" type="button">Build Roof Geometry</button>
+        </div>
+        <div id="manual-roof-facet-table" class="table-wrap" style="margin-top:12px"></div>
+      </div>
+
+      <div id="manual-roof-report-card" class="card" hidden style="margin-top:12px">
+        <div class="card-head"><div><div class="eyebrow">STEP 5 · REPORT</div><h3>Manual roof measurement report</h3><p class="muted">Measurements are generated from the confirmed outline, snapped manual topology and assigned facet pitch.</p></div>
+          <div class="actions"><button id="manual-roof-recalculate" class="secondary" type="button">Recalculate</button><button id="manual-roof-print" class="primary" type="button">Print / Save PDF</button></div>
+        </div>
+        <div id="manual-roof-report"></div>
+      </div>
+    </section>
+
     <section id="roof-tool" class="card" hidden>
       <div class="card-head"><div><div class="eyebrow">ROOF MEASUREMENT</div><h3>Solaris Roof Measure</h3><p class="muted">Dedicated roof workflow for aerial/property imagery, roof facets, pitch, ridges, hips, valleys, rakes and eaves.</p></div><button id="new-roof-measurement" class="primary">New Roof Measurement</button></div>
       <div class="metrics">
@@ -338,6 +414,6 @@
     </div>
   </main>
 
-  <script src="/app.js?v=20261006-graph-first1"></script>
+  <script src="/app.js?v=20261006-manual-roof1"></script>
 </body>
 </html>
