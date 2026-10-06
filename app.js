@@ -3683,6 +3683,11 @@ async function restoreRoofSolarModel(){
  $('#manual-draw-outline')?.addEventListener('click',()=>{pushUndo();state.mode='draw-outline';state.outline=[];state.lines=[];state.pending=null;const s=$('#manual-roof-outline-status');if(s)s.textContent='Click around the roof perimeter in order.';renderManualRoof();});
  $('#manual-finish-outline')?.addEventListener('click',finishOutline);
  $('#manual-edit-outline')?.addEventListener('click',()=>{state.mode='edit-outline';const s=$('#manual-roof-outline-status');if(s)s.textContent='Drag the white outline points to correct the roof boundary.';});
+ $('#manual-delete-vertex')?.addEventListener('click',()=>{
+   state.mode='delete-vertex';state.pending=null;state.drag=null;
+   const s=$('#manual-roof-outline-status');if(s)s.textContent='Delete Vertex active: click a white perimeter dot to remove it. Its two neighboring outline points will reconnect automatically.';
+   renderManualRoof();
+ });
  $('#manual-rotate-left')?.addEventListener('click',()=>applyOutlineRotationAbsolute(Math.max(-20,Number(state.outlineRotation||0)-1),true));
  $('#manual-rotate-right')?.addEventListener('click',()=>applyOutlineRotationAbsolute(Math.min(20,Number(state.outlineRotation||0)+1),true));
  $('#manual-outline-rotation')?.addEventListener('input',e=>applyOutlineRotationAbsolute(Number(e.target.value),false));
@@ -3734,6 +3739,27 @@ async function restoreRoofSolarModel(){
    }
    if(state.mode==='draw-outline'){
      pushUndo();state.outline.push(p);renderManualRoof();return;
+   }
+   if(state.mode==='delete-vertex'){
+     let bi=-1,bd=.025;state.outline.forEach((q,i)=>{const d=dist(p,q);if(d<bd){bd=d;bi=i}});
+     if(bi<0)return;
+     const status=$('#manual-roof-outline-status');
+     if(state.outline.length<=3){
+       if(status)status.textContent='An outline needs at least 3 vertices, so this point cannot be deleted.';
+       return;
+     }
+     pushUndo();
+     state.outline.splice(bi,1);
+     // Once the perimeter is manually simplified it becomes user-authoritative;
+     // retain the current shape as the new base so later scale/rotation changes
+     // do not restore the deleted auto-detected vertex.
+     state.autoOutlineBase=state.outline.map(q=>({...q}));
+     state.outlineScale=1;state.outlineRotation=0;state.outlineOffsetX=0;state.outlineOffsetY=0;
+     state.facets=[];state.pending=null;
+     const scale=$('#manual-outline-scale'),scaleLabel=$('#manual-outline-scale-label'),rot=$('#manual-outline-rotation'),rotLabel=$('#manual-outline-rotation-label');
+     if(scale)scale.value='100';if(scaleLabel)scaleLabel.textContent='100%';if(rot)rot.value='0';if(rotLabel)rotLabel.textContent='0°';
+     if(status)status.textContent='Vertex removed. The previous and next perimeter vertices were automatically reconnected.';
+     renderManualRoof();return;
    }
    if(state.mode==='edit-outline'){
      let bi=-1,bd=.025;state.outline.forEach((q,i)=>{const d=dist(p,q);if(d<bd){bd=d;bi=i}});
