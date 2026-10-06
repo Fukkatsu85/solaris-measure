@@ -1092,7 +1092,21 @@ function classifySharedRoofLine(line,segA,segB,dsm){
   if(planeDecision&&planeStrength>=.42)type=planeDecision;
   else if(valleyScore>ridgeScore+.35)type="valley";
   else if(ridgeScore>valleyScore+.35)type="ridge_or_hip";
-  return {type,line:(best&&crossType===type&&planeStrength<.42)?best.line:line,creaseStrength:best?Math.abs(best.cross.value):0,planeStrength};
+
+  // If the two fitted roof planes remain vertically separated along their shared
+  // plan-view boundary, this is not a ridge/hip/valley. It is a roof step /
+  // elevation break (for example a lower addition tied into a taller main roof).
+  // Preserve that boundary so Manual Roof can treat the elevations separately.
+  const separations=[];
+  for(const t of [.2,.35,.5,.65,.8]){
+    const p=interpolateLatLng(line.a,line.b,t);
+    const za=planeHeightAt(segA,p),zb=planeHeightAt(segB,p);
+    if(Number.isFinite(za)&&Number.isFinite(zb))separations.push(Math.abs(za-zb));
+  }
+  const elevationSeparationMeters=separations.length?median(separations):0;
+  if(type==="transition"&&elevationSeparationMeters>=.55)type="elevation_break";
+
+  return {type,line:(best&&crossType===type&&planeStrength<.42)?best.line:line,creaseStrength:best?Math.abs(best.cross.value):0,planeStrength,elevationSeparationMeters};
 }
 
 function ridgeOrHipType(segA,segB,dsm){
@@ -1956,6 +1970,7 @@ function detectPlaneIntersectionFacets(mask,component,dsm,solarSegments,rawOutli
     roofLines.push({type,facetA:fa.index-1,facetB:fb.index-1,a:refined.a,b:refined.b,
       lengthMeters:metersBetween(refined.a,refined.b),length3dMeters:roofLine3dMeters(refined,ca,cb),
       creaseStrength:classified.creaseStrength||0,planeStrength:classified.planeStrength||0,
+      elevationSeparationMeters:Number(classified.elevationSeparationMeters||0),
       traceSupport,traceStrength,source:traced?"plane-dsm-trace-v5":"plane-cell-intersection"});
   }
 
