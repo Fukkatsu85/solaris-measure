@@ -3278,10 +3278,11 @@ async function restoreRoofSolarModel(){
    }
    (state.sections||[]).forEach((s,si)=>{
      if((s.outline||[]).length>=3)out+='<polygon points="'+s.outline.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="rgba(34,211,238,.08)" stroke="#06b6d4" stroke-width="5" vector-effect="non-scaling-stroke"/>';
+     (s.outline||[]).forEach((p,pi)=>out+='<circle data-section-point="'+si+':'+pi+'" cx="'+(p.x*1000)+'" cy="'+(p.y*1000)+'" r="3.8" fill="#fff" stroke="#06b6d4" stroke-width="2" vector-effect="non-scaling-stroke"/>');
    });
    if((state.sectionDraft||[]).length){
      out+='<polyline points="'+state.sectionDraft.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="none" stroke="#06b6d4" stroke-width="5" stroke-dasharray="12 8" vector-effect="non-scaling-stroke"/>';
-     state.sectionDraft.forEach(p=>out+='<circle cx="'+(p.x*1000)+'" cy="'+(p.y*1000)+'" r="3.8" fill="#fff" stroke="#06b6d4" stroke-width="2"/>');
+     state.sectionDraft.forEach((p,pi)=>out+='<circle data-section-draft-point="'+pi+'" cx="'+(p.x*1000)+'" cy="'+(p.y*1000)+'" r="3.8" fill="#fff" stroke="#06b6d4" stroke-width="2"/>');
    }
    state.lines.forEach((l,i)=>{
      out+='<line data-manual-line="'+i+'" x1="'+(l.a.x*1000)+'" y1="'+(l.a.y*1000)+'" x2="'+(l.b.x*1000)+'" y2="'+(l.b.y*1000)+'" stroke="'+(colors[l.type]||'#111')+'" stroke-width="7" '+(l.type==='elevation_break'?'stroke-dasharray="14 9" ':'')+'vector-effect="non-scaling-stroke"/>';
@@ -3894,14 +3895,7 @@ async function restoreRoofSolarModel(){
  });
  const overlay=$('#manual-roof-overlay');
  const stage=$('#manual-roof-stage');
- stage?.addEventListener('contextmenu',e=>{
-   if(!state.outline.length)return;
-   const svg=$('#manual-roof-overlay'),r=svg?.getBoundingClientRect();if(!r)return;
-   const p={x:clamp((e.clientX-r.left)/r.width),y:clamp((e.clientY-r.top)/r.height)};
-   let near=false;
-   state.outline.forEach(q=>{if(dist(p,q)<=.008)near=true;});
-   if(near)e.preventDefault();
- },true);
+
  const deleteOutlineVertexByIndex=bi=>{
    const status=$('#manual-roof-outline-status');
    if(!Number.isInteger(bi)||bi<0||bi>=state.outline.length)return false;
@@ -3916,35 +3910,62 @@ async function restoreRoofSolarModel(){
    state.facets=[];state.pending=null;
    const scale=$('#manual-outline-scale'),scaleLabel=$('#manual-outline-scale-label'),rot=$('#manual-outline-rotation'),rotLabel=$('#manual-outline-rotation-label');
    if(scale)scale.value='100';if(scaleLabel)scaleLabel.textContent='100%';if(rot)rot.value='0';if(rotLabel)rotLabel.textContent='0°';
-   if(status)status.textContent='Vertex removed. The previous and next perimeter vertices were automatically reconnected.';
+   if(status)status.textContent='Vertex removed. The neighboring perimeter vertices were reconnected.';
    renderManualRoof();
    return true;
  };
- overlay?.addEventListener('contextmenu',e=>{
-   // SVG context-menu targeting is inconsistent across browsers, especially
-   // after CSS transforms/zoom. Intercept the overlay itself and resolve the
-   // nearest perimeter vertex from click coordinates.
+ const deleteSectionVertex=(si,pi)=>{
+   const status=$('#manual-roof-outline-status'),sec=state.sections?.[si];
+   if(!sec||!Number.isInteger(pi)||pi<0||pi>=sec.outline.length)return false;
+   if(sec.outline.length<=3){
+     if(status)status.textContent='A roof section needs at least 3 vertices, so this point cannot be deleted.';
+     return false;
+   }
+   pushUndo();sec.outline.splice(pi,1);state.facets=[];
+   if(status)status.textContent='Roof-section vertex removed. Its neighboring vertices were reconnected.';
+   renderManualRoof();return true;
+ };
+ const nearestRightClickVertex=p=>{
+   let best=null,bd=.010;
+   const consider=(q,data)=>{const d=dist(p,q);if(d<bd){bd=d;best=data;}};
+   state.outline.forEach((q,i)=>consider(q,{kind:'outline',index:i}));
+   (state.sections||[]).forEach((s,si)=>(s.outline||[]).forEach((q,pi)=>consider(q,{kind:'section',section:si,index:pi})));
+   (state.sectionDraft||[]).forEach((q,i)=>consider(q,{kind:'draft',index:i}));
+   state.lines.forEach((l,i)=>{consider(l.a,{kind:'line',line:i,end:'a'});consider(l.b,{kind:'line',line:i,end:'b'});});
+   return best;
+ };
+ const handleRoofRightClick=e=>{
+   if(!stage?.contains(e.target))return;
    e.preventDefault();e.stopPropagation();
-   const p=svgPoint(e);
-   let bi=-1,bd=.008;
-   state.outline.forEach((q,i)=>{
-     const d=dist(p,q);
-     if(d<bd){bd=d;bi=i;}
-   });
-   if(bi>=0){
-     deleteOutlineVertexByIndex(bi);
-   }else{
-     const s=$('#manual-roof-outline-status');
-     if(s)s.textContent='Right-click directly on a perimeter vertex dot to delete it.';
+   const r=overlay?.getBoundingClientRect();if(!r)return false;
+   const p={x:clamp((e.clientX-r.left)/r.width),y:clamp((e.clientY-r.top)/r.height)};
+   const hit=nearestRightClickVertex(p),status=$('#manual-roof-outline-status');
+   if(!hit){
+     if(status)status.textContent='Right-click a vertex dot to delete it.';
+     return false;
+   }
+   if(hit.kind==='outline')deleteOutlineVertexByIndex(hit.index);
+   else if(hit.kind==='section')deleteSectionVertex(hit.section,hit.index);
+   else if(hit.kind==='draft'){
+     state.sectionDraft.splice(hit.index,1);
+     if(status)status.textContent='Draft roof-section vertex removed.';
+     renderManualRoof();
+   }else if(hit.kind==='line'){
+     pushUndo();state.lines.splice(hit.line,1);state.facets=[];state.pending=null;
+     if(status)status.textContent='Roof line removed.';
+     renderManualRoof();
    }
    return false;
- });
+ };
+ // Own the context menu for the entire drawing surface. Capture phase prevents
+ // Chrome/Edge's Back/Reload/Print menu from winning before SVG handlers run.
+ stage?.addEventListener('contextmenu',handleRoofRightClick,true);
  overlay?.addEventListener('pointerdown',e=>{
    // Geometry editing is left-click only. Right-click is reserved for
    // perimeter vertex deletion via the contextmenu handler below.
    if(e.button===2){e.preventDefault();return;}
    const p=svgPoint(e);
-   const clickedGeometry=!!e.target?.closest?.('[data-outline-point],[data-manual-line],[data-line-end]');
+   const clickedGeometry=!!e.target?.closest?.('[data-outline-point],[data-section-point],[data-section-draft-point],[data-manual-line],[data-line-end]');
    const wantsPan=state.viewZoom>1&&(e.button===1||e.shiftKey||(!clickedGeometry&&state.mode==='idle'&&!['ridge','hip','valley','delete','select'].includes(state.tool)));
    if(wantsPan){
      state.viewPanDrag={pointerId:e.pointerId,startX:e.clientX,startY:e.clientY,baseX:state.viewPanX,baseY:state.viewPanY};
