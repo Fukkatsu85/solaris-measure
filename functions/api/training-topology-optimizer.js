@@ -17,13 +17,39 @@ async function listModels(env){
  return keys;
 }
 function edgeTotals(topo){
- const out={ridgeFt:0,hipFt:0,valleyFt:0,eaveFt:0,rakeFt:0,perimeterFt:0};
+ const out={ridgeFt:0,hipFt:0,valleyFt:0,eaveFt:0,rakeFt:0,transitionFt:0,perimeterFt:0};
  for(const e of topo?.edges||[]){
-  const k=e.type==="ridge"?"ridgeFt":e.type==="hip"?"hipFt":e.type==="valley"?"valleyFt":e.type==="eave"?"eaveFt":e.type==="rake"?"rakeFt":e.type==="perimeter"?"perimeterFt":null;
+  const k=e.type==="ridge"?"ridgeFt":e.type==="hip"?"hipFt":e.type==="valley"?"valleyFt":e.type==="elevation_break"?"transitionFt":e.type==="eave"?"eaveFt":e.type==="rake"?"rakeFt":e.type==="perimeter"?"perimeterFt":null;
   if(k)out[k]+=Number(e.lengthMeters||0)*3.280839895;
  }
  return out;
 }
+function topoRidgeStructure(topo){
+ const verts=topo?.vertices||[],ridges=(topo?.edges||[]).filter(e=>e.type==="ridge");
+ const lines=ridges.map(e=>{
+  const a=verts[e.a]?.xy||verts[e.a],b=verts[e.b]?.xy||verts[e.b];
+  if(!a||!b)return null;
+  let ang=Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI;ang=((ang%180)+180)%180;
+  return {angle:ang,lengthFt:Number(e.lengthMeters||0)*3.280839895};
+ }).filter(Boolean);
+ const fam=[];
+ for(const l of lines){
+  let g=fam.find(x=>{const d=Math.abs(l.angle-x.angle)%180;return Math.min(d,180-d)<=15});
+  if(!g)fam.push({angle:l.angle,count:1});else g.count++;
+ }
+ return {count:lines.length,familyCount:fam.length,lengthsFt:lines.map(x=>x.lengthFt).sort((a,b)=>b-a)};
+}
+function rankedError(cur,ref){
+ if(!Array.isArray(ref)||!ref.length)return null;
+ const a=(cur||[]).slice().sort((x,y)=>y-x),b=ref.slice().map(Number).filter(Number.isFinite).sort((x,y)=>y-x),n=Math.max(a.length,b.length);
+ let sum=0;
+ for(let i=0;i<n;i++){
+  if(a[i]==null||b[i]==null){sum+=100;continue}
+  sum+=Math.abs(a[i]-b[i])/Math.max(1,Math.abs(b[i]))*100;
+ }
+ return sum/n;
+}
+
 function scoreTopology(topo,ref){
  if(!topo)return {score:0,facetErr:100,edgeErr:100};
  const facetCount=(topo.faces||[]).length;
@@ -35,9 +61,17 @@ function scoreTopology(topo,ref){
  const refTotal=pairs.reduce((s,x)=>s+Math.abs(x.ref),0);
  const absErr=pairs.reduce((s,x)=>s+Math.abs(x.cur-x.ref),0);
  const edgeErr=refTotal>0?absErr/refTotal*100:null;
+ const rs=topoRidgeStructure(topo);
+ const ridgeCountErr=ref.ridgeCount?Math.abs(rs.count-ref.ridgeCount)/ref.ridgeCount*100:null;
+ const ridgeFamilyErr=ref.ridgeFamilyCount?Math.abs(rs.familyCount-ref.ridgeFamilyCount)/ref.ridgeFamilyCount*100:null;
+ const ridgeLengthErr=rankedError(rs.lengthsFt,ref.ridgeLengthsFt);
+ const transitionErr=ref.transitionFt!=null?Math.abs(Number(e.transitionFt||0)-Number(ref.transitionFt))/Math.max(1,Math.abs(Number(ref.transitionFt)))*100:null;
  const facetScore=facetErr==null?50:Math.max(0,100-facetErr*2);
  const edgeScore=edgeErr==null?50:Math.max(0,100-edgeErr*1.5);
- return {score:facetScore*.6+edgeScore*.4,facetErr,edgeErr,facetCount,edges:e};
+ const structErrs=[ridgeCountErr,ridgeFamilyErr,ridgeLengthErr,transitionErr].filter(Number.isFinite);
+ const structureErr=structErrs.length?mean(structErrs):null;
+ const structureScore=structureErr==null?50:Math.max(0,100-structureErr*1.35);
+ return {score:facetScore*.38+edgeScore*.27+structureScore*.35,facetErr,edgeErr,structureErr,facetCount,edges:e,ridgeStructure:rs};
 }
 function effectiveScope(t){
  const explicit=String(t?.scope||"").trim();
@@ -46,7 +80,7 @@ function effectiveScope(t){
  if(/garage/.test(archetype))return "detached-garage";
  return /multi[- ]?structure|multistructure/.test(archetype)?"all-structures":"primary-building";
 }
-function refFor(t){return {facetCount:t.facetCount,ridgeFt:t.ridgeFt??null,hipFt:t.hipFt??null,ridgeHipFt:t.ridgeHipFt??null,valleyFt:t.valleyFt??null,eaveFt:t.eaveFt??null,rakeFt:t.rakeFt??null}}
+function refFor(t){return {facetCount:t.facetCount,ridgeFt:t.ridgeFt??null,hipFt:t.hipFt??null,ridgeHipFt:t.ridgeHipFt??null,valleyFt:t.valleyFt??null,eaveFt:t.eaveFt??null,rakeFt:t.rakeFt??null,transitionFt:t.transitionFt??null,ridgeCount:t.ridgeCount??null,ridgeLengthsFt:Array.isArray(t.ridgeLengthsFt)?t.ridgeLengthsFt:[],ridgeFamilyCount:t.ridgeFamilyCount??null,majorGableSystems:t.majorGableSystems??null,crossGableCount:t.crossGableCount??null,topologyPattern:t.topologyPattern||null}}
 function stableHash(s){
  let h=2166136261>>>0;
  for(const ch of String(s||"")){h^=ch.charCodeAt(0);h=Math.imul(h,16777619)>>>0}
@@ -76,7 +110,8 @@ function evalVariant(items,v){
   cases:items.length,
   score:mean(scores.map(x=>x.score)),
   facetErrorPct:mean(scores.map(x=>x.facetErr)),
-  edgeErrorPct:mean(scores.map(x=>x.edgeErr))
+  edgeErrorPct:mean(scores.map(x=>x.edgeErr)),
+  structureErrorPct:mean(scores.map(x=>x.structureErr))
  };
 }
 function variants(base){
@@ -123,8 +158,8 @@ export async function onRequestPost({env}){
    ranked.push({
     name:v.name,override:v.o,cases:items.length,
     trainCases:train.length,validationCases:validation.length,
-    score:tr.score,facetErrorPct:tr.facetErrorPct,edgeErrorPct:tr.edgeErrorPct,
-    validationScore:va.score,validationFacetErrorPct:va.facetErrorPct,validationEdgeErrorPct:va.edgeErrorPct
+    score:tr.score,facetErrorPct:tr.facetErrorPct,edgeErrorPct:tr.edgeErrorPct,structureErrorPct:tr.structureErrorPct,
+    validationScore:va.score,validationFacetErrorPct:va.facetErrorPct,validationEdgeErrorPct:va.edgeErrorPct,validationStructureErrorPct:va.structureErrorPct
    });
   }
   ranked.sort((a,b)=>(b.score||0)-(a.score||0));
