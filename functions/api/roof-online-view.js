@@ -15,8 +15,15 @@ export async function onRequestGet({request,env}){
   g.searchParams.set("fov",String(fov));
   g.searchParams.set("key",key);
   const r=await fetch(g.toString());
-  if(!r.ok)return Response.json({error:"Street View snapshot request failed",status:r.status},{status:502});
+  if(!r.ok){
+    const body=await r.text().catch(()=>"");
+    return Response.json({error:"Street View snapshot request failed",googleStatus:r.status,googleBody:body.slice(0,500)},{status:502});
+  }
   const ct=r.headers.get("content-type")||"image/jpeg";
+  if(!ct.toLowerCase().startsWith("image/")){
+    const body=await r.text().catch(()=>"");
+    return Response.json({error:"Street View did not return an image",googleStatus:r.status,contentType:ct,googleBody:body.slice(0,500)},{status:502});
+  }
   return new Response(r.body,{status:200,headers:{
     "content-type":ct,
     "cache-control":"private, max-age=0, no-store",
