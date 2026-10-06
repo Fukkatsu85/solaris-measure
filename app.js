@@ -836,6 +836,18 @@ function remoteViewSummary(views){
  }
  return {spread:Math.max(0,360-maxGap),strong:views.filter(v=>v.distance<=35).length};
 }
+function renderRoofRemoteSnapshots(views){
+ const wrap=document.querySelector('#roof-remote-snapshots');if(!wrap)return;
+ if(!views?.length){wrap.hidden=true;wrap.innerHTML='';return}
+ wrap.hidden=false;
+ wrap.innerHTML=views.map((v,i)=>{
+   const src='/api/roof-online-view?pano='+encodeURIComponent(v.pano)+'&heading='+encodeURIComponent(v.heading)+'&pitch=12&fov=75';
+   return '<button type="button" data-remote-view-index="'+i+'" style="all:unset;cursor:pointer;display:block;border:1px solid #29445d;border-radius:10px;overflow:hidden;background:#0d1823">'+
+     '<img src="'+src+'" alt="Online roof evidence view '+(i+1)+'" loading="lazy" style="display:block;width:100%;aspect-ratio:1/1;object-fit:cover">'+
+     '<div style="padding:7px 9px;font-size:12px">View '+(i+1)+' · '+v.distance.toFixed(0)+' m · '+v.heading.toFixed(0)+'°</div></button>';
+ }).join('');
+}
+
 async function checkRoofRemoteImagery(){
  const saved=JSON.parse(localStorage.getItem('solarisRoofProject')||'null');
  const badge=document.querySelector('#roof-remote-imagery-badge'),status=document.querySelector('#roof-remote-imagery-status');
@@ -851,6 +863,7 @@ async function checkRoofRemoteImagery(){
   const best=views[0],coverage=remoteViewSummary(views);
   roofRemoteViewIndex=0;
   roofRemoteImageryState={...best,views,coverage};
+  renderRoofRemoteSnapshots(views);
   const bestQuality=best.quality;
   if(badge)badge.textContent=(views.length>1?views.length+' views · ':'')+(bestQuality==='strong'?'Strong coverage':bestQuality==='moderate'?'Usable coverage':bestQuality==='weak'?'Limited coverage':'Poor coverage');
   if(status)status.innerHTML='<strong>'+views.length+' unique online panorama'+(views.length===1?'':'s')+' found.</strong> Best view '+best.distance.toFixed(0)+' m from the roof · direct bearing '+best.heading.toFixed(0)+'° · '+bestQuality+' quality.'+
@@ -904,6 +917,11 @@ document.addEventListener('click',e=>{
  if(e.target?.id==='roof-view-opposite')showRoofRemotePanorama('opposite');
  if(e.target?.id==='roof-view-prev')showRoofRemotePanorama('prev');
  if(e.target?.id==='roof-view-next')showRoofRemotePanorama('next');
+ const viewCard=e.target?.closest?.('[data-remote-view-index]');
+ if(viewCard&&roofRemoteImageryState?.views?.length){
+   roofRemoteViewIndex=Math.max(0,Math.min(roofRemoteImageryState.views.length-1,Number(viewCard.dataset.remoteViewIndex)||0));
+   showRoofRemotePanorama('current');
+ }
 });
 
 async function openRoofGeometryWorkspace(){
