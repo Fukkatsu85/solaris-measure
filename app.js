@@ -3244,15 +3244,24 @@ async function restoreRoofSolarModel(){
  async function loadProperty(){
    const address=$('#manual-roof-address')?.value?.trim(),status=$('#manual-roof-property-status'),badge=$('#manual-roof-status-badge');
    if(!address){if(status)status.textContent='Enter a property address first.';return;}
-   if(badge)badge.textContent='Loading';if(status)status.textContent='Locating property and loading aerial still…';
+   if(badge)badge.textContent='Loading';if(status)status.textContent='Locating exact property and loading aerial still…';
    try{
-     const r=await fetch('/api/mn-aerial?address='+encodeURIComponent(address),{cache:'no-store'}),d=await r.json().catch(()=>({}));
+     // Use the same Google browser geocoder as the main Roof Measurement workflow.
+     // Census address interpolation can land on the correct street but the wrong parcel.
+     await loadRoofMapsJs();
+     const geocoder=new google.maps.Geocoder();
+     const gr=await geocoder.geocode({address});
+     const hit=gr?.results?.[0],loc=hit?.geometry?.location;
+     const lat=typeof loc?.lat==='function'?loc.lat():Number(loc?.lat),lng=typeof loc?.lng==='function'?loc.lng():Number(loc?.lng);
+     if(!Number.isFinite(lat)||!Number.isFinite(lng))throw new Error('Address could not be located precisely.');
+     const formatted=hit?.formatted_address||address;
+     const r=await fetch('/api/mn-aerial?lat='+encodeURIComponent(lat)+'&lng='+encodeURIComponent(lng)+'&address='+encodeURIComponent(formatted),{cache:'no-store'}),d=await r.json().catch(()=>({}));
      if(!r.ok)throw new Error(d.error||'Could not load aerial imagery.');
-     state.property={address:d.address||address,lat:Number(d.lat),lng:Number(d.lng),imageryUrl:d.imageryUrl,cropHalfMeters:Number(d.cropHalfMeters||42),imageryLabel:d.imageryLabel||d.source||'Aerial imagery'};
+     state.property={address:formatted,lat,lng,imageryUrl:d.imageryUrl,cropHalfMeters:Number(d.cropHalfMeters||42),imageryLabel:d.imageryLabel||d.source||'Aerial imagery',locationSource:'google-browser-geocode'};
      state.outline=[];state.lines=[];state.facets=[];state.facetPitches={};state.undo=[];state.redo=[];state.pending=null;
-     const img=$('#manual-roof-image');if(img)img.src=d.imageryUrl;
+     const img=$('#manual-roof-image');if(img)img.src=d.imageryUrl+'&v='+Date.now();
      const ed=$('#manual-roof-editor-card');if(ed)ed.hidden=false;
-     if(status)status.textContent=(d.address||address)+' · '+(d.imageryLabel||'aerial still')+' · draw or load the roof outline.';
+     if(status)status.textContent=formatted+' · '+(d.imageryLabel||'aerial still')+' · exact Google geocode center · draw or load the roof outline.';
      if(badge)badge.textContent='Property loaded';
      renderManualRoof();save();
    }catch(err){if(status)status.textContent='Could not load property: '+(err?.message||err);if(badge)badge.textContent='Error';}
