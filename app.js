@@ -2158,11 +2158,20 @@ async function generateRoofReport(){
 
   // Final-report readiness gate: deterministic, source-agreement based, and
   // independent of any uploaded benchmark/reference report.
+  const productionRoofLines=Array.isArray(sm?.model?.roofLines)?sm.model.roofLines:[];
+  const detectedHipCount=productionRoofLines.filter(l=>l?.type==='hip').length;
+  const detectedValleyCount=productionRoofLines.filter(l=>l?.type==='valley').length;
+  const complexRoof=dsmFacets.length>=7;
+  const internalSupportRatio=Number(lidarLineValidation?.supportRatio);
+
   const readinessChecks=[
     {id:'area',label:'Area agreement',pass:areaConfidence!=='Review'&&(!Number.isFinite(areaSourceSpreadPct)||areaSourceSpreadPct<=15),detail:Number.isFinite(areaSourceSpreadPct)?areaSourceSpreadPct.toFixed(1)+'% source spread':areaConfidence},
     {id:'facetCoverage',label:'Facet coverage',pass:!Number.isFinite(facetCoverage)||facetCoverage>=.80,detail:Number.isFinite(facetCoverage)?Math.round(facetCoverage*100)+'%':'Not scored'},
     {id:'lineEngine',label:'Production line engine',pass:lineEngineCurrent,detail:lineEngineCurrent?'Current':'Stale'},
     {id:'ridge',label:'Ridge geometry',pass:Number(lines.ridge||0)>0,detail:Number(lines.ridge||0)>0?lines.ridge.toFixed(1)+' ft':'Not verified'},
+    {id:'hip',label:'Hip geometry',pass:detectedHipCount===0||Number(lines.hip||0)>0,detail:detectedHipCount===0?'No hip candidates detected':(Number(lines.hip||0)>0?lines.hip.toFixed(1)+' ft production · '+detectedHipCount+' candidate line(s)':'Hip candidates exist but none are production-verified')},
+    {id:'valley',label:'Valley geometry',pass:detectedValleyCount===0||Number(lines.valley||0)>0,detail:detectedValleyCount===0?'No valley candidates detected':(Number(lines.valley||0)>0?lines.valley.toFixed(1)+' ft production · '+detectedValleyCount+' candidate line(s)':'Valley candidates exist but none are production-verified')},
+    {id:'internalSupport',label:'Internal-line support',pass:!complexRoof||!lidarLineValidation||!Number.isFinite(internalSupportRatio)||internalSupportRatio>=.45,detail:!complexRoof?'Simple-roof guard':(lidarLineValidation&&Number.isFinite(internalSupportRatio)?Math.round(internalSupportRatio*100)+'% independently supported':'Independent line support unavailable')},
     {id:'exterior',label:'Exterior geometry',pass:Number(lines.eave||0)>0&&Number(lines.rake||0)>0,detail:(Number(lines.eave||0)+Number(lines.rake||0)).toFixed(1)+' ft eave+rake'},
     {id:'lidarArea',label:'Independent area cross-check',pass:!lidarQualityGood||Boolean(lidarConfirmsProduction),detail:lidarQualityGood?(lidarConfirmsProduction?'LiDAR agrees':'LiDAR disagreement '+(Number.isFinite(lidarVsProductionPct)?lidarVsProductionPct.toFixed(1)+'%':'—')):'LiDAR unavailable / not quality-screened'},
     {id:'lidarTopology',label:'Independent topology cross-check',pass:!lidarQualityGood||Boolean(lidarTopologyAgrees),detail:lidarQualityGood?(lidarTopologyAgrees?'Major geometry agrees':'Needs review'):'LiDAR unavailable / not quality-screened'}
