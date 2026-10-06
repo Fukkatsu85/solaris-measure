@@ -3280,9 +3280,8 @@ async function restoreRoofSolarModel(){
    (state.layers||[]).forEach((layer,i)=>(layer.polygons||[]).forEach(poly=>{
      if(poly.length>=3)out+='<polygon points="'+poly.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="none" stroke="'+(i%2?'rgba(14,165,233,.45)':'rgba(168,85,247,.45)')+'" stroke-width="1.5" stroke-dasharray="8 10" pointer-events="none" vector-effect="non-scaling-stroke"/>';
    }));
-   (state.roofSystems||[]).forEach((s,i)=>{
-     if((s.outline||[]).length>=3)out+='<polygon points="'+s.outline.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="none" stroke="rgba(6,182,212,.75)" stroke-width="2.5" stroke-dasharray="16 8" pointer-events="none" vector-effect="non-scaling-stroke"/>';
-   });
+   // Inferred roof-system envelopes are intentionally not drawn. They are
+   // evidence for later 3D reasoning, not user-visible roof geometry.
    if(state.outline.length){
      out+='<polygon points="'+state.outline.map(p=>(p.x*1000)+','+(p.y*1000)).join(' ')+'" fill="rgba(255,255,255,.10)" stroke="#facc15" stroke-width="6" vector-effect="non-scaling-stroke"/>';
      state.outline.forEach((p,i)=>out+='<circle data-outline-point="'+i+'" cx="'+(p.x*1000)+'" cy="'+(p.y*1000)+'" r="3.8" fill="#fff" stroke="#111" stroke-width="2" vector-effect="non-scaling-stroke"/>');
@@ -3296,6 +3295,7 @@ async function restoreRoofSolarModel(){
      state.sectionDraft.forEach((p,pi)=>out+='<circle data-section-draft-point="'+pi+'" cx="'+(p.x*1000)+'" cy="'+(p.y*1000)+'" r="3.8" fill="#fff" stroke="#06b6d4" stroke-width="2"/>');
    }
    state.lines.forEach((l,i)=>{
+     if(l.type==='elevation_break'&&!l.manual)return;
      out+='<line data-manual-line="'+i+'" x1="'+(l.a.x*1000)+'" y1="'+(l.a.y*1000)+'" x2="'+(l.b.x*1000)+'" y2="'+(l.b.y*1000)+'" stroke="'+(colors[l.type]||'#111')+'" stroke-width="7" '+(l.type==='elevation_break'?'stroke-dasharray="14 9" ':'')+'vector-effect="non-scaling-stroke"/>';
      out+='<circle data-line-end="'+i+':a" cx="'+(l.a.x*1000)+'" cy="'+(l.a.y*1000)+'" r="3.8" fill="#fff" stroke="'+(colors[l.type]||'#111')+'" stroke-width="2"/>';
      out+='<circle data-line-end="'+i+':b" cx="'+(l.b.x*1000)+'" cy="'+(l.b.y*1000)+'" r="3.8" fill="#fff" stroke="'+(colors[l.type]||'#111')+'" stroke-width="2"/>';
@@ -4119,8 +4119,10 @@ async function restoreRoofSolarModel(){
    // major ridges, then add only their interior perimeter sides to the graph.
    state.lines=state.lines.filter(l=>!l.roofSystemBoundary);
    state.roofSystems=inferMajorRoofSystems();
-   const systemBoundaries=addRoofSystemInteriorBoundaries(state.roofSystems);
-   const ridgeSystemBreaks=addCleanRidgeSystemBreaks();
+   // Roof-system envelopes are diagnostic evidence only. Do not turn them into
+   // graph edges until a true 3D section solver can prove the shared boundary.
+   const systemBoundaries=0;
+   const ridgeSystemBreaks=0;
    const ridgeElevationBreaks=0;
    const proactiveBreaks=0;
    const symmetryAdjustments=regularizeAutoRoofTopology();
@@ -4142,7 +4144,7 @@ async function restoreRoofSolarModel(){
        if(!item.bConnected&&extendDanglingEndpoint(item.index,'b'))extended++;
      });
    }
-   return {extended,addedBreaks:ridgeSystemBreaks+systemBoundaries,proactiveBreaks:0,ridgeElevationBreaks:ridgeSystemBreaks,systemBoundaries,symmetryAdjustments,remaining:validateStructuralLines()};
+   return {extended,addedBreaks:0,proactiveBreaks:0,ridgeElevationBreaks:0,systemBoundaries:0,symmetryAdjustments,remaining:validateStructuralLines()};
  };
  const validateStructuralLines=()=>{
    const invalid=[];
@@ -4294,12 +4296,7 @@ async function restoreRoofSolarModel(){
    // Manual Roof builds. They were evidence lines, not real roof topology.
    // Preserve anything the user explicitly drew and the new clean section breaks.
    const beforeLegacy=state.lines.length;
-   state.lines=state.lines.filter(l=>!(
-     l.type==='elevation_break' &&
-     !l.manual &&
-     !l.cleanSectionBreak &&
-     (l.autoAssisted||l.derivedFromFacets||l.fromRidgeJunction||l.autoDetected)
-   ));
+   state.lines=state.lines.filter(l=>!(l.type==='elevation_break' && !l.manual));
    const removedLegacyBreaks=beforeLegacy-state.lines.length;
 
    // Snap every structural endpoint to a real roof anchor. This includes corners,
@@ -4801,6 +4798,7 @@ async function restoreRoofSolarModel(){
    const saved=JSON.parse(localStorage.getItem('solarisManualRoof')||'null');
    if(saved){
      state.property=saved.property||null;state.outline=saved.outline||[];state.autoOutlineBase=saved.autoOutlineBase||[];state.outlineScale=Number(saved.outlineScale||1);state.outlineRotation=Number(saved.outlineRotation||0);state.outlineOffsetX=Number(saved.outlineOffsetX||0);state.outlineOffsetY=Number(saved.outlineOffsetY||0);state.lines=saved.lines||[];state.sections=saved.sections||[];state.layers=saved.layers||[];state.autoFacetData=(saved.autoFacetData||[]).map(f=>({...f,autoBaseOutline:(f.autoBaseOutline?.length?f.autoBaseOutline:f.outline||[]).map(p=>({...p}))}));state.autoStructuralCandidates=saved.autoStructuralCandidates||[];state.roofSystems=saved.roofSystems||[];state.facetPitches=saved.facetPitches||{};
+   state.lines=(state.lines||[]).filter(l=>!(l.type==='elevation_break'&&!l.manual));
      if($('#manual-roof-default-pitch')&&saved.defaultPitch)$('#manual-roof-default-pitch').value=String(saved.defaultPitch);
      if($('#manual-outline-scale'))$('#manual-outline-scale').value=String(Math.round((state.outlineScale||1)*100));
      if($('#manual-outline-scale-label'))$('#manual-outline-scale-label').textContent=Math.round((state.outlineScale||1)*100)+'%';
