@@ -706,7 +706,22 @@ export function buildRoofTopology(solarModel,options={}){
 
   const primitiveCandidates=projectionPrimitiveCandidates(perimeterProjections,perimeter,families,connectedInternal);
   const facetCandidates=facetEdgeCandidates(facets,F,perimeter,families,connectedInternal);
-  const candidates=[...primitiveCandidates,...facetCandidates];
+  let candidates=[...primitiveCandidates,...facetCandidates];
+  if(learned.grammar==="multi-gable-stepped"){
+    // Structural grammar priority: preserve/add ridge evidence first, then
+    // cross-gable/projection mouths, then valleys/hips, and only then generic
+    // DSM partition lines. This prevents fragmented DSM edges from winning
+    // simply because they happen to close a face earlier.
+    const grammarPriority=c=>{
+      if(c.type==="ridge")return 100+Number(c.support||0);
+      if(c.source==="perimeter-projection")return 85+Number(c.support||0);
+      if(c.type==="valley")return 70+Number(c.support||0);
+      if(c.type==="hip")return 60+Number(c.support||0);
+      if(c.type==="elevation_break")return 45+Number(c.support||0);
+      return 10+Number(c.support||0);
+    };
+    candidates=candidates.sort((a,b)=>grammarPriority(b)-grammarPriority(a)||dist(b.a,b.b)-dist(a.a,a.b));
+  }
   const augmented=addFaceImprovingCandidates(segments,connectedInternal,candidates,perimeter,learned);
   const solved=augmented.solved,split=solved.split,graph=solved.graph;
   const facesRaw=solved.faces;
@@ -747,6 +762,10 @@ export function buildRoofTopology(solarModel,options={}){
       ridgeEdges:edges.filter(e=>e.type==="ridge").length,
       hipEdges:edges.filter(e=>e.type==="hip").length,
       valleyEdges:edges.filter(e=>e.type==="valley").length,
+      elevationBreakEdges:edges.filter(e=>e.type==="elevation_break").length,
+      ridgeFamilyCount:learned.ridgeFamilies??null,
+      elevationGroupCount:learned.elevationGroups??null,
+      grammar:learned.grammar||null,
       closedFaces:faces.length,
       acceptedCandidateEdges:augmented.adds,
       perimeterProjections:perimeterProjections.length
