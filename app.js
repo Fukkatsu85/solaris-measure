@@ -3767,6 +3767,9 @@ async function restoreRoofSolarModel(){
    deleteOutlineVertexByIndex(bi);
  });
  overlay?.addEventListener('pointerdown',e=>{
+   // Geometry editing is left-click only. Right-click is reserved for
+   // perimeter vertex deletion via the contextmenu handler below.
+   if(e.button===2){e.preventDefault();return;}
    const p=svgPoint(e);
    const clickedGeometry=!!e.target?.closest?.('[data-outline-point],[data-manual-line],[data-line-end]');
    const wantsPan=state.viewZoom>1&&(e.button===1||e.shiftKey||(!clickedGeometry&&state.mode==='idle'&&!['ridge','hip','valley','delete','select'].includes(state.tool)));
