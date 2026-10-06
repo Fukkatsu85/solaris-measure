@@ -3150,17 +3150,17 @@ async function restoreRoofSolarModel(){
  const $=s=>document.querySelector(s);
  const state={
    property:null,outline:[],autoOutlineBase:[],outlineScale:1,outlineRotation:0,lines:[],tool:'ridge',pending:null,mode:'idle',
-   undo:[],redo:[],facets:[],facetPitches:{},drag:null,viewZoom:1.25,viewPanX:0,viewPanY:0,viewPanDrag:null
+   undo:[],redo:[],facets:[],facetPitches:{},drag:null,viewZoom:1.25,viewPanX:0,viewPanY:0,viewPanDrag:null,outlineOffsetX:0,outlineOffsetY:0
  };
  const save=()=>{
    try{localStorage.setItem('solarisManualRoof',JSON.stringify({
-     property:state.property,outline:state.outline,autoOutlineBase:state.autoOutlineBase,outlineScale:state.outlineScale,outlineRotation:state.outlineRotation,lines:state.lines,
+     property:state.property,outline:state.outline,autoOutlineBase:state.autoOutlineBase,outlineScale:state.outlineScale,outlineRotation:state.outlineRotation,outlineOffsetX:state.outlineOffsetX,outlineOffsetY:state.outlineOffsetY,lines:state.lines,
      facetPitches:state.facetPitches,defaultPitch:Number($('#manual-roof-default-pitch')?.value||8)
    }))}catch{}
  };
- const snapshot=()=>({outline:JSON.parse(JSON.stringify(state.outline)),lines:JSON.parse(JSON.stringify(state.lines)),facetPitches:{...state.facetPitches}});
+ const snapshot=()=>({outline:JSON.parse(JSON.stringify(state.outline)),lines:JSON.parse(JSON.stringify(state.lines)),facetPitches:{...state.facetPitches},outlineScale:state.outlineScale,outlineRotation:state.outlineRotation,outlineOffsetX:state.outlineOffsetX,outlineOffsetY:state.outlineOffsetY});
  const pushUndo=()=>{state.undo.push(snapshot());if(state.undo.length>80)state.undo.shift();state.redo=[];};
- const restore=s=>{if(!s)return;state.outline=s.outline||[];state.lines=s.lines||[];state.facetPitches=s.facetPitches||{};state.pending=null;state.facets=[];renderManualRoof();};
+ const restore=s=>{if(!s)return;state.outline=s.outline||[];state.lines=s.lines||[];state.facetPitches=s.facetPitches||{};state.outlineScale=Number(s.outlineScale??state.outlineScale??1);state.outlineRotation=Number(s.outlineRotation??state.outlineRotation??0);state.outlineOffsetX=Number(s.outlineOffsetX||0);state.outlineOffsetY=Number(s.outlineOffsetY||0);state.pending=null;state.facets=[];renderManualRoof();};
  const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
  const clamp=v=>Math.max(0,Math.min(1,v));
  const lineAngle=(a,b)=>{let x=Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI%180;if(x<0)x+=180;return x;};
@@ -3339,7 +3339,7 @@ async function restoreRoofSolarModel(){
          return {type:'ridge',a:{...a},b:{...b},autoDetected:true,autoBaseA:{...a},autoBaseB:{...b},confidence:Number(l.creaseStrength||l.traceSupport||0)};
        });
      state.lines=detectedRidges;
-     state.outlineScale=1;state.outlineRotation=0;
+     state.outlineScale=1;state.outlineRotation=0;state.outlineOffsetX=0;state.outlineOffsetY=0;
      if(autoRotation)applyAutoOutlineTransform(1,autoRotation,false);
      const scaleSlider=$('#manual-outline-scale'),scaleLabel=$('#manual-outline-scale-label'),rotSlider=$('#manual-outline-rotation'),rotLabel=$('#manual-outline-rotation-label');
      if(scaleSlider)scaleSlider.value='100';if(scaleLabel)scaleLabel.textContent='100%';if(rotSlider)rotSlider.value=String(autoRotation);if(rotLabel)rotLabel.textContent=(autoRotation>0?'+':'')+autoRotation.toFixed(1).replace('.0','')+'°';
@@ -3349,6 +3349,7 @@ async function restoreRoofSolarModel(){
        ?'Existing Solaris outline loaded and auto-aligned '+(autoRotation>0?'+':'')+autoRotation.toFixed(1)+'° from the saved roof-plane orientation.'
        :'Existing Solaris outline loaded with saved orientation.')+ridgeNote+' Use Move / Select to drag ridge endpoints or Delete to remove a bad ridge.';
      renderManualRoof();
+     await autoFitRoofOutline();
    }catch(err){if(status)status.textContent=err.message+' Use Draw Outline instead.';}
  }
  function setTool(tool){
@@ -3367,10 +3368,10 @@ async function restoreRoofSolarModel(){
    if(recordUndo)pushUndo();
    const cx=base.reduce((s,p)=>s+p.x,0)/base.length;
    const cy=base.reduce((s,p)=>s+p.y,0)/base.length;
-   const a=Number(rotation||0)*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a);
+   const a=Number(rotation||0)*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a),ox=Number(state.outlineOffsetX||0),oy=Number(state.outlineOffsetY||0);
    const tx=p=>{
      const dx=(p.x-cx)*scale,dy=(p.y-cy)*scale;
-     return {x:clamp(cx+dx*ca-dy*sa),y:clamp(cy+dx*sa+dy*ca)};
+     return {x:clamp(cx+dx*ca-dy*sa+ox),y:clamp(cy+dx*sa+dy*ca+oy)};
    };
    state.outline=base.map(tx);
    // Auto-detected ridges stay registered with the outline while the user adjusts
@@ -3387,6 +3388,86 @@ async function restoreRoofSolarModel(){
    if(status)status.textContent='Outline '+Math.round(scale*100)+'% size · '+(Number(rotation)>0?'+':'')+Number(rotation).toFixed(1)+'° rotation. Match one long roof edge first, then fine-tune points.';
    renderManualRoof();
  }
+ async function autoFitRoofOutline(){
+   const status=$('#manual-roof-outline-status'),btn=$('#manual-auto-fit-outline'),img=$('#manual-roof-image');
+   if(!state.autoOutlineBase?.length){if(status)status.textContent='Load the existing auto outline first.';return false;}
+   if(!img?.complete||!img.naturalWidth){
+     try{await new Promise((resolve,reject)=>{img.addEventListener('load',resolve,{once:true});img.addEventListener('error',reject,{once:true});setTimeout(()=>reject(new Error('Image load timed out')),8000)})}catch{if(status)status.textContent='Aerial image is not ready for Auto Fit.';return false;}
+   }
+   if(btn){btn.disabled=true;btn.textContent='Fitting…';}
+   if(status)status.textContent='Auto Fit: matching the outline to visible roof edges…';
+   await new Promise(r=>requestAnimationFrame(()=>r()));
+   try{
+     const W=360,H=360,canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;
+     const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(img,0,0,W,H);
+     const px=ctx.getImageData(0,0,W,H).data,g=new Float32Array(W*H);
+     for(let i=0;i<W*H;i++)g[i]=.299*px[i*4]+.587*px[i*4+1]+.114*px[i*4+2];
+     const grad=new Float32Array(W*H);let sum=0,sum2=0,n=0;
+     for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){
+       const i=y*W+x;
+       const gx=-g[i-W-1]-2*g[i-1]-g[i+W-1]+g[i-W+1]+2*g[i+1]+g[i+W+1];
+       const gy=-g[i-W-1]-2*g[i-W]-g[i-W+1]+g[i+W-1]+2*g[i+W]+g[i+W+1];
+       const v=Math.hypot(gx,gy);grad[i]=v;sum+=v;sum2+=v*v;n++;
+     }
+     const mean=sum/n,sd=Math.sqrt(Math.max(0,sum2/n-mean*mean)),threshold=mean+1.05*sd;
+     const dmap=new Float32Array(W*H),INF=9999,S2=Math.SQRT2;
+     for(let i=0;i<dmap.length;i++)dmap[i]=grad[i]>=threshold?0:INF;
+     for(let y=1;y<H;y++)for(let x=1;x<W;x++){
+       const i=y*W+x;dmap[i]=Math.min(dmap[i],dmap[i-1]+1,dmap[i-W]+1,dmap[i-W-1]+S2);
+       if(x<W-1)dmap[i]=Math.min(dmap[i],dmap[i-W+1]+S2);
+     }
+     for(let y=H-2;y>=0;y--)for(let x=W-2;x>=0;x--){
+       const i=y*W+x;dmap[i]=Math.min(dmap[i],dmap[i+1]+1,dmap[i+W]+1,dmap[i+W+1]+S2);
+       if(x>0)dmap[i]=Math.min(dmap[i],dmap[i+W-1]+S2);
+     }
+     const base=state.autoOutlineBase,cx=base.reduce((s,p)=>s+p.x,0)/base.length,cy=base.reduce((s,p)=>s+p.y,0)/base.length;
+     const transform=(p,scale,rotation,ox,oy)=>{
+       const a=rotation*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a),dx=(p.x-cx)*scale,dy=(p.y-cy)*scale;
+       return {x:cx+dx*ca-dy*sa+ox,y:cy+dx*sa+dy*ca+oy};
+     };
+     const samplesFor=(scale,rotation,ox,oy)=>{
+       const poly=base.map(p=>transform(p,scale,rotation,ox,oy)),pts=[];
+       for(let i=0;i<poly.length;i++){
+         const a=poly[i],b=poly[(i+1)%poly.length],steps=Math.max(3,Math.ceil(Math.hypot((b.x-a.x)*W,(b.y-a.y)*H)/7));
+         for(let k=0;k<steps;k++){const t=k/steps;pts.push({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t});}
+       }return pts;
+     };
+     const score=(scale,rotation,ox,oy)=>{
+       const pts=samplesFor(scale,rotation,ox,oy);let total=0,valid=0,out=0;
+       for(const p of pts){
+         const x=Math.round(p.x*(W-1)),y=Math.round(p.y*(H-1));
+         if(x<1||x>=W-1||y<1||y>=H-1){out++;continue;}
+         const d=Math.min(22,dmap[y*W+x]);total+=d;valid++;
+       }
+       if(valid<pts.length*.88)return 1e6;
+       // Keep the optimizer close to the geographically predicted roof so trees,
+       // driveways and neighboring structures cannot win solely on strong edges.
+       const prior=Math.hypot(ox,oy)*55+Math.abs(scale-1)*1.2;
+       return total/Math.max(1,valid)+out*2+prior;
+     };
+     let best={score:1e9,scale:state.outlineScale||1,rotation:state.outlineRotation||0,ox:state.outlineOffsetX||0,oy:state.outlineOffsetY||0};
+     const baseRot=Number(state.outlineRotation||0);
+     for(let scale=.85;scale<=1.70;scale+=.05)for(let rot=baseRot-10;rot<=baseRot+10;rot+=2)for(let ox=-.075;ox<=.075;ox+=.015)for(let oy=-.075;oy<=.075;oy+=.015){
+       const s=score(scale,rot,ox,oy);if(s<best.score)best={score:s,scale,rotation:rot,ox,oy};
+     }
+     const coarse={...best};
+     for(let scale=Math.max(.70,coarse.scale-.06);scale<=Math.min(1.80,coarse.scale+.06);scale+=.015)
+       for(let rot=coarse.rotation-2;rot<=coarse.rotation+2;rot+=.5)
+         for(let ox=coarse.ox-.018;ox<=coarse.ox+.018;ox+=.006)
+           for(let oy=coarse.oy-.018;oy<=coarse.oy+.018;oy+=.006){
+             const s=score(scale,rot,ox,oy);if(s<best.score)best={score:s,scale,rotation:rot,ox,oy};
+           }
+     pushUndo();
+     state.outlineOffsetX=best.ox;state.outlineOffsetY=best.oy;
+     applyAutoOutlineTransform(best.scale,best.rotation,false);
+     const fitPx=best.score;
+     if(status)status.textContent='Auto Fit complete · '+Math.round(best.scale*100)+'% size · '+(best.rotation>0?'+':'')+best.rotation.toFixed(1)+'° · image offset '+Math.round(best.ox*W)+', '+Math.round(best.oy*H)+' px. Review the yellow eave line; use Edit Points only for local corrections.';
+     return Number.isFinite(fitPx);
+   }catch(err){
+     if(status)status.textContent='Auto Fit could not analyze this aerial: '+(err?.message||err)+'. The geographic outline was kept.';
+     return false;
+   }finally{if(btn){btn.disabled=false;btn.textContent='Auto Fit to Roof';}}
+ }
  function applyOutlineScaleAbsolute(scale,recordUndo=true){applyAutoOutlineTransform(scale,state.outlineRotation,recordUndo);}
  function applyOutlineRotationAbsolute(rotation,recordUndo=true){applyAutoOutlineTransform(state.outlineScale,rotation,recordUndo);}
  function scaleOutline(factor){
@@ -3395,7 +3476,7 @@ async function restoreRoofSolarModel(){
  }
  function resetAutoOutline(){
    if(!state.autoOutlineBase?.length)return;
-   applyAutoOutlineTransform(1,0,true);state.pending=null;
+   state.outlineOffsetX=0;state.outlineOffsetY=0;applyAutoOutlineTransform(1,0,true);state.pending=null;
    const status=$('#manual-roof-outline-status');if(status)status.textContent='Auto outline restored to its original size and rotation.';
  }
  function clearOutline(){pushUndo();state.outline=[];state.lines=[];state.facets=[];state.pending=null;renderManualRoof();}
@@ -3575,6 +3656,7 @@ async function restoreRoofSolarModel(){
  $('#manual-roof-load')?.addEventListener('click',loadProperty);
  $('#manual-roof-address')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();loadProperty();}});
  $('#manual-use-auto-outline')?.addEventListener('click',useExistingAutoOutline);
+ $('#manual-auto-fit-outline')?.addEventListener('click',autoFitRoofOutline);
  $('#manual-draw-outline')?.addEventListener('click',()=>{pushUndo();state.mode='draw-outline';state.outline=[];state.lines=[];state.pending=null;const s=$('#manual-roof-outline-status');if(s)s.textContent='Click around the roof perimeter in order.';renderManualRoof();});
  $('#manual-finish-outline')?.addEventListener('click',finishOutline);
  $('#manual-edit-outline')?.addEventListener('click',()=>{state.mode='edit-outline';const s=$('#manual-roof-outline-status');if(s)s.textContent='Drag the white outline points to correct the roof boundary.';});
@@ -3680,7 +3762,7 @@ async function restoreRoofSolarModel(){
  try{
    const saved=JSON.parse(localStorage.getItem('solarisManualRoof')||'null');
    if(saved){
-     state.property=saved.property||null;state.outline=saved.outline||[];state.autoOutlineBase=saved.autoOutlineBase||[];state.outlineScale=Number(saved.outlineScale||1);state.outlineRotation=Number(saved.outlineRotation||0);state.lines=saved.lines||[];state.facetPitches=saved.facetPitches||{};
+     state.property=saved.property||null;state.outline=saved.outline||[];state.autoOutlineBase=saved.autoOutlineBase||[];state.outlineScale=Number(saved.outlineScale||1);state.outlineRotation=Number(saved.outlineRotation||0);state.outlineOffsetX=Number(saved.outlineOffsetX||0);state.outlineOffsetY=Number(saved.outlineOffsetY||0);state.lines=saved.lines||[];state.facetPitches=saved.facetPitches||{};
      if($('#manual-roof-default-pitch')&&saved.defaultPitch)$('#manual-roof-default-pitch').value=String(saved.defaultPitch);
      if($('#manual-outline-scale'))$('#manual-outline-scale').value=String(Math.round((state.outlineScale||1)*100));
      if($('#manual-outline-scale-label'))$('#manual-outline-scale-label').textContent=Math.round((state.outlineScale||1)*100)+'%';
