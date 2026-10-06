@@ -261,6 +261,29 @@ function projectionPrimitiveCandidates(projections,perimeter,families,existing){
   }
   return out;
 }
+function classifyFacetCandidateType(a,b,fa,fb,F){
+  const ca=fa?.center?F.toXY(fa.center):null,cb=fb?.center?F.toXY(fb.center):null;
+  if(!ca||!cb)return {type:"internal",strength:0};
+  const dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy)||1,nx=-dy/len,ny=dx/len;
+  const sideA=(ca.x-a.x)*nx+(ca.y-a.y)*ny,sideB=(cb.x-a.x)*nx+(cb.y-a.y)*ny;
+  if(sideA*sideB>=0)return {type:"internal",strength:0};
+  let ga={x:Number(fa.gradientEast||0),y:Number(fa.gradientNorth||0)};
+  let gb={x:Number(fb.gradientEast||0),y:Number(fb.gradientNorth||0)};
+  const la=Math.hypot(ga.x,ga.y),lb=Math.hypot(gb.x,gb.y);
+  if(la<.03||lb<.03)return {type:"internal",strength:0};
+  ga={x:ga.x/la,y:ga.y/la};gb={x:gb.x/lb,y:gb.y/lb};
+  const ta=ga.x*(-Math.sign(sideA)*nx)+ga.y*(-Math.sign(sideA)*ny);
+  const tb=gb.x*(-Math.sign(sideB)*nx)+gb.y*(-Math.sign(sideB)*ny);
+  const strength=Math.min(Math.abs(ta),Math.abs(tb));
+  if(ta>.10&&tb>.10)return {type:"valley",strength};
+  if(ta<-.10&&tb<-.10){
+    const dot=Math.max(-1,Math.min(1,ga.x*gb.x+ga.y*gb.y));
+    const sep=Math.acos(dot)*180/Math.PI;
+    return {type:sep>=130?"ridge":"hip",strength};
+  }
+  return {type:"internal",strength};
+}
+
 function facetEdgeCandidates(facets,F,perimeter,families,existing){
   const raw=[];
   facets.forEach((facet,fi)=>{
@@ -297,7 +320,8 @@ function facetEdgeCandidates(facets,F,perimeter,families,existing){
     a=pointSegDistance(a,clean.a,clean.b).point;
     b=pointSegDistance(b,clean.a,clean.b).point;
     const fa=facets[A.facet]||{},fb=facets[B.facet]||{};
-    const seg={a,b,type:"internal",source:"paired-facet-boundary",support:2,facets:[A.facet,B.facet],priority:(fa.smallFacet||fb.smallFacet)?2:1};
+    const cls=classifyFacetCandidateType(a,b,fa,fb,F);
+    const seg={a,b,type:cls.type,source:"paired-facet-boundary",support:2+cls.strength,classificationStrength:cls.strength,facets:[A.facet,B.facet],priority:(fa.smallFacet||fb.smallFacet)?2:1};
     if(candidateDuplicate(seg,existing)||candidateDuplicate(seg,paired))continue;
     paired.push(seg);
   }
@@ -637,8 +661,8 @@ export function buildFacetPartitionTopology(solarModel,options={}){
   const vertices=graph.nodes.map((n,i)=>({id:i,xy:{x:n.x,y:n.y},...F.toLL(n)}));
   const edges=graph.edges.map((e,i)=>({id:i+1,a:e.a,b:e.b,type:e.type||"internal",source:e.source||"unknown",lengthMeters:dist(graph.nodes[e.a],graph.nodes[e.b])}));
   return {
-    version:1.0,
-    source:"dsm-facet-partition-topology",
+    version:2.0,
+    source:"graph-first-facet-partition-topology",
     vertices,edges,faces,outline:perimeter.map(F.toLL),
     stats:{
       vertices:vertices.length,edges:edges.length,faces:faces.length,
