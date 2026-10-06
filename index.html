@@ -48,12 +48,15 @@
           <div><div class="eyebrow">STEP 2 · ROOF OUTLINE</div><h3>Confirm exterior roof shape</h3><p class="muted">Use an existing Solaris outline if available, or click around the roof perimeter. Click the first point again or press Finish Outline when complete.</p></div>
           <span id="manual-roof-outline-badge" class="status">Not confirmed</span>
         </div>
-        <div id="manual-roof-stage" style="position:relative;aspect-ratio:1/1;max-width:900px;margin:0 auto;background:#111;border-radius:14px;overflow:hidden;touch-action:none">
+        <div id="manual-roof-stage" style="position:relative;aspect-ratio:1/1;width:100%;max-width:1300px;margin:0 auto;background:#111;border-radius:14px;overflow:hidden;touch-action:none">
           <img id="manual-roof-image" alt="Roof aerial still" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;user-select:none;-webkit-user-drag:none">
           <svg id="manual-roof-overlay" viewBox="0 0 1000 1000" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;cursor:crosshair"></svg>
         </div>
         <div class="actions" style="margin-top:12px">
-          <button id="manual-use-auto-outline" class="secondary" type="button">Use Existing Auto Outline</button>
+          <button id="manual-view-900" class="secondary" type="button">View 900px</button>
+          <button id="manual-view-1200" class="secondary" type="button">View 1200px</button>
+          <button id="manual-view-full" class="secondary" type="button">Full Width</button>
+          <button id="manual-use-auto-outline" class="secondary" type="button">Use Existing Auto Outline + Ridges</button>
           <button id="manual-draw-outline" class="primary" type="button">Draw Outline</button>
           <button id="manual-finish-outline" class="secondary" type="button">Finish Outline</button>
           <button id="manual-edit-outline" class="secondary" type="button">Edit Points</button>
