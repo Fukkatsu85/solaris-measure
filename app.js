@@ -3295,7 +3295,7 @@ async function restoreRoofSolarModel(){
      state.sectionDraft.forEach((p,pi)=>out+='<circle data-section-draft-point="'+pi+'" cx="'+(p.x*1000)+'" cy="'+(p.y*1000)+'" r="3.8" fill="#fff" stroke="#06b6d4" stroke-width="2"/>');
    }
    state.lines.forEach((l,i)=>{
-     if(l.type==='elevation_break'&&!l.manual)return;
+     if(l.type==='elevation_break'&&!l.manual&&!l.autoCompletionFromManual)return;
      out+='<line data-manual-line="'+i+'" x1="'+(l.a.x*1000)+'" y1="'+(l.a.y*1000)+'" x2="'+(l.b.x*1000)+'" y2="'+(l.b.y*1000)+'" stroke="'+(colors[l.type]||'#111')+'" stroke-width="7" '+(l.type==='elevation_break'?'stroke-dasharray="14 9" ':'')+'vector-effect="non-scaling-stroke"/>';
      out+='<circle data-line-end="'+i+':a" cx="'+(l.a.x*1000)+'" cy="'+(l.a.y*1000)+'" r="3.8" fill="#fff" stroke="'+(colors[l.type]||'#111')+'" stroke-width="2"/>';
      out+='<circle data-line-end="'+i+':b" cx="'+(l.b.x*1000)+'" cy="'+(l.b.y*1000)+'" r="3.8" fill="#fff" stroke="'+(colors[l.type]||'#111')+'" stroke-width="2"/>';
@@ -4209,6 +4209,72 @@ async function restoreRoofSolarModel(){
    }
    return added;
  };
+ const completeDanglingPairsWithElevationBreaks=()=>{
+   // User-drawn topology is authoritative. When two remaining open endpoints
+   // face each other, the missing geometry is usually the section/elevation
+   // boundary between the roof systems. Bridge those endpoints instead of
+   // forcing the user to manually close an otherwise obvious roof graph.
+   let added=0;
+   for(let pass=0;pass<3;pass++){
+     const invalid=validateStructuralLines();
+     const loose=[];
+     invalid.forEach(item=>{
+       const l=state.lines[item.index];
+       if(!l)return;
+       if(!item.aConnected)loose.push({line:item.index,end:'a',p:{...l.a}});
+       if(!item.bConnected)loose.push({line:item.index,end:'b',p:{...l.b}});
+     });
+     if(loose.length<2)break;
+
+     const pairs=[];
+     for(let i=0;i<loose.length;i++)for(let j=i+1;j<loose.length;j++){
+       const A=loose[i],B=loose[j];if(A.line===B.line)continue;
+       const d=dist(A.p,B.p);if(d<.006||d>.22)continue;
+       const mid={x:(A.p.x+B.p.x)/2,y:(A.p.y+B.p.y)/2};
+       if(!pointInPoly(mid,state.outline))continue;
+
+       // Prefer pairs whose open endpoints are mutually facing and whose
+       // connector follows one of the architectural roof axes.
+       const la=state.lines[A.line],lb=state.lines[B.line];
+       const oa=la[A.end==='a'?'b':'a'],ob=lb[B.end==='a'?'b':'a'];
+       const va={x:A.p.x-oa.x,y:A.p.y-oa.y},vb={x:B.p.x-ob.x,y:B.p.y-ob.y};
+       const ca={x:B.p.x-A.p.x,y:B.p.y-A.p.y},cl=Math.hypot(ca.x,ca.y)||1;
+       const dotA=(va.x*ca.x+va.y*ca.y)/(Math.hypot(va.x,va.y)*cl||1);
+       const dotB=(vb.x*(-ca.x)+vb.y*(-ca.y))/(Math.hypot(vb.x,vb.y)*cl||1);
+       const axes=dominantRoofAxes(),ang=lineAngle(A.p,B.p),axisErr=Math.min(...axes.map(x=>angleDiff(ang,x)),...axes.map(x=>angleDiff(ang,(x+90)%180)));
+       const facingPenalty=(dotA<-.15?1:0)+(dotB<-.15?1:0);
+       const score=d+axisErr*.0015+facingPenalty*.04;
+       pairs.push({A,B,d,score,axisErr});
+     }
+     if(!pairs.length)break;
+     pairs.sort((a,b)=>a.score-b.score);
+
+     let connected=false;
+     for(const pair of pairs){
+       let a={...pair.A.p},b={...pair.B.p};
+       // Do not distort the user's endpoints. If the bridge is nearly aligned
+       // with a roof axis, keep it exact; otherwise still connect the two
+       // authoritative endpoints rather than inventing another intersection.
+       const candidate={
+         type:'elevation_break',a,b,
+         autoAssisted:true,autoCompletionFromManual:true,
+         source:'dangling-user-topology-completion'
+       };
+       if(state.lines.some(l=>l.type==='elevation_break'&&lineNearlySame(l,candidate,.025)))continue;
+
+       state.lines.push(candidate);
+       const after=validateStructuralLines();
+       const beforeLoose=loose.length;
+       const afterLoose=after.reduce((n,x)=>n+(!x.aConnected?1:0)+(!x.bConnected?1:0),0);
+       if(afterLoose<beforeLoose){
+         added++;connected=true;break;
+       }
+       state.lines.pop();
+     }
+     if(!connected)break;
+   }
+   return added;
+ };
  const assistCompleteRoofGraph=()=>{
    // Elevation topology is section-first. Build clean roof-system envelopes from
    // major ridges, then add only their interior perimeter sides to the graph.
@@ -4240,7 +4306,21 @@ async function restoreRoofSolarModel(){
        if(!item.bConnected&&extendDanglingEndpoint(item.index,'b'))extended++;
      });
    }
-   return {extended,addedBreaks:0,elevatedEaves,proactiveBreaks:0,ridgeElevationBreaks:0,systemBoundaries:0,symmetryAdjustments,remaining:validateStructuralLines()};
+
+   // If extension alone cannot close the user-defined skeleton, bridge the
+   // remaining compatible open endpoints as a real elevation boundary.
+   addedBreaks=completeDanglingPairsWithElevationBreaks();
+
+   // One final snap/extension pass after the new break is present.
+   for(let pass=0;pass<2;pass++){
+     const invalid=validateStructuralLines();
+     if(!invalid.length)break;
+     invalid.forEach(item=>{
+       if(!item.aConnected&&extendDanglingEndpoint(item.index,'a'))extended++;
+       if(!item.bConnected&&extendDanglingEndpoint(item.index,'b'))extended++;
+     });
+   }
+   return {extended,addedBreaks,elevatedEaves,proactiveBreaks:0,ridgeElevationBreaks:addedBreaks,systemBoundaries:0,symmetryAdjustments,remaining:validateStructuralLines()};
  };
  const validateStructuralLines=()=>{
    const invalid=[];
@@ -4411,7 +4491,7 @@ async function restoreRoofSolarModel(){
      state.facets=[];
      if(badge)badge.textContent='Needs review';
      const nums=invalid.map(x=>x.index+1).join(', ');
-     if(status)status.textContent='Solaris auto-connected '+assist.extended+' endpoint'+(assist.extended===1?'':'s')+(assist.addedBreaks?' and added '+assist.addedBreaks+' DSM elevation break'+(assist.addedBreaks===1?'':'s'):'')+', but roof line'+(invalid.length===1?' ':'s ')+nums+' still '+(invalid.length===1?'needs':'need')+' a physical connection. Adjust those lines and rebuild.';
+     if(status)status.textContent='Solaris used your roof lines as the topology skeleton, auto-connected '+assist.extended+' endpoint'+(assist.extended===1?'':'s')+(assist.addedBreaks?' and added '+assist.addedBreaks+' elevation break'+(assist.addedBreaks===1?'':'s'):'')+', but roof line'+(invalid.length===1?' ':'s ')+nums+' still '+(invalid.length===1?'needs':'need')+' a physical connection that cannot be inferred safely.';
      renderManualRoof();save();return;
    }
 
@@ -4445,7 +4525,7 @@ async function restoreRoofSolarModel(){
    if(badge)badge.textContent=state.facets.length+' facets';
    if(status){
      const fit=manualReferenceFit(),fitNote=fit&&Number.isFinite(fit.score)?' · Reference fit '+fit.score.toFixed(0)+'/100'+(Number.isFinite(fit.facetErr)?' · facet err '+fit.facetErr.toFixed(0)+'%':'')+(Number.isFinite(fit.areaErr)?' · area err '+fit.areaErr.toFixed(1)+'%':''):'';
-     status.textContent='Roof geometry built ✓ · '+state.facets.length+' connected closed facet'+(state.facets.length===1?'':'s')+(removedLegacyBreaks?' · removed '+removedLegacyBreaks+' legacy DSM break fragment'+(removedLegacyBreaks===1?'':'s'):'')+(assist.extended?' · '+assist.extended+' endpoint'+(assist.extended===1?'':'s')+' auto-connected':'')+(state.roofSystems.length?' · '+state.roofSystems.length+' major roof system'+(state.roofSystems.length===1?'':'s')+' reconstructed from ridges':'')+(assist.elevatedEaves?' · '+assist.elevatedEaves+' elevated eave'+(assist.elevatedEaves===1?'':'s')+' inferred from height-separated roof systems':'')+(assist.symmetryAdjustments?' · '+assist.symmetryAdjustments+' auto line'+(assist.symmetryAdjustments===1?'':'s')+' symmetry-corrected':'')+((cleanupBefore+cleanupAfter)?' · '+(cleanupBefore+cleanupAfter)+' junction adjustment'+((cleanupBefore+cleanupAfter)===1?'':'s')+' cleaned':'')+fitNote+'.';
+     status.textContent='Roof geometry built ✓ · '+state.facets.length+' connected closed facet'+(state.facets.length===1?'':'s')+(removedLegacyBreaks?' · removed '+removedLegacyBreaks+' legacy DSM break fragment'+(removedLegacyBreaks===1?'':'s'):'')+(assist.extended?' · '+assist.extended+' endpoint'+(assist.extended===1?'':'s')+' auto-connected':'')+(state.roofSystems.length?' · '+state.roofSystems.length+' major roof system'+(state.roofSystems.length===1?'':'s')+' reconstructed from ridges':'')+(assist.elevatedEaves?' · '+assist.elevatedEaves+' elevated eave'+(assist.elevatedEaves===1?'':'s')+' inferred from height-separated roof systems':'')+(assist.addedBreaks?' · '+assist.addedBreaks+' missing elevation break'+(assist.addedBreaks===1?'':'s')+' completed from your topology':'')+(assist.symmetryAdjustments?' · '+assist.symmetryAdjustments+' auto line'+(assist.symmetryAdjustments===1?'':'s')+' symmetry-corrected':'')+((cleanupBefore+cleanupAfter)?' · '+(cleanupBefore+cleanupAfter)+' junction adjustment'+((cleanupBefore+cleanupAfter)===1?'':'s')+' cleaned':'')+fitNote+'.';
    }
    generateManualReport(graph);
    renderManualRoof();save();
